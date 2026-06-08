@@ -1,0 +1,11 @@
+{
+  "name": "incept",
+  "private": true,
+  "packageManager": "pnpm@10.18.1",
+  "scripts": {
+    "dev:web": "pnpm --filter @incept/web dev",
+    "build:web": "pnpm --filter @incept/web build",
+    "lint:web": "pnpm --filter @incept/web lint"
+  }
+}
+

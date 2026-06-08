@@ -1,0 +1,30 @@
+# =============================================================================
+# InterSight API -- Cloud Run Dockerfile
+# Build context: repo root  (docker build -f Dockerfile.api .)
+# =============================================================================
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY apps/api/requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Copy application source
+COPY apps/api/app/ ./app/
+
+# SQL query files are loaded at runtime by supply_smb_live.py
+COPY sql/ ./sql/
+
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
+# Tells _project_root() exactly where to look -- no directory traversal needed
+ENV INTERSIGHT_PROJECT_ROOT=/app
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

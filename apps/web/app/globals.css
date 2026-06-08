@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Unified design token system ──────────────────────────────────────────────
+   Single source of truth for both InterSight and Incept.
+   Based on Incept's design language (clean white workspace, #fafbfc sidebar).
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* Structure */
+  --background:              #ffffff;   /* main workspace / page content */
+  --secondary:               #fafbfc;   /* sidebar background */
+  --muted:                   #f6f8fb;   /* subtle fills, hover states */
+  --card:                    #ffffff;
+  --popover:                 #ffffff;
+
+  /* Text */
+  --foreground:              #101318;
+  --card-foreground:         #101318;
+  --popover-foreground:      #101318;
+  --secondary-foreground:    #101318;
+  --primary-foreground:      #ffffff;
+  --muted-foreground:        #5f6673;
+  --accent-foreground:       #ffffff;
+  --destructive-foreground:  #ffffff;
+
+  /* Brand */
+  --primary:                 #171a20;
+  --accent:                  #356fec;   /* Incept blue */
+  --soft-accent:             #f2f6ff;
+  --ai-accent:               #2bacff;
+  --ai-accent-soft:          #eef9ff;
+
+  /* Borders */
+  --border:                  #e6e8ec;
+  --border-soft:             #f0f2f5;
+  --border-strong:           #d7dbe2;
+  --input:                   #e6e8ec;
+  --ring:                    #356fec;
+
+  /* Semantic states */
+  --destructive:             #d04444;
+  --success:                 #2d8a64;
+  --success-soft:            #effaf5;
+  --warning:                 #d89216;
+  --warning-soft:            #fff7e8;
+  --danger-soft:             #fff1f1;
+
+  /* Misc */
+  --radius:                  0.875rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: var(--foreground);
+  background-color: var(--muted);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #C7D4EE; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #1F2230; }
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+table {
+  border-collapse: collapse;
+}
+

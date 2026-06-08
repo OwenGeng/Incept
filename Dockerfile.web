@@ -1,0 +1,68 @@
+# =============================================================================
+# Incept Web — Cloud Run Dockerfile
+# Build context: repo root  (docker build -f Dockerfile.web .)
+# =============================================================================
+
+# ── Stage 1: install deps ─────────────────────────────────────────────────────
+FROM node:20-alpine AS deps
+WORKDIR /app
+
+# pnpm version is pinned in root package.json → packageManager field
+RUN corepack enable
+
+# Monorepo manifests — copy first for layer cache
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json ./apps/web/
+
+# Install only what the web app needs
+RUN pnpm install --frozen-lockfile --filter @incept/web...
+
+# ── Stage 2: build ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+RUN corepack enable
+
+# Carry over installed modules
+COPY --from=deps /app/node_modules          ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+
+# Copy source (after node_modules for better caching)
+COPY package.json pnpm-workspace.yaml ./
+COPY apps/web ./apps/web
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+# next build runs from the web package dir
+WORKDIR /app/apps/web
+RUN pnpm build
+
+# ── Stage 3: minimal runtime ──────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Non-root user
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser  --system --uid 1001 nextjs
+
+# In a monorepo, Next.js standalone output mirrors the workspace directory layout:
+#   .next/standalone/
+#     apps/web/server.js   <-- actual entry point
+#     node_modules/        <-- bundled deps
+# So we copy the whole standalone tree and run apps/web/server.js, NOT server.js.
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static     ./apps/web/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public           ./apps/web/public
+
+USER nextjs
+
+# Cloud Run injects PORT; Next.js standalone reads it automatically
+ENV PORT=8080
+ENV HOSTNAME=0.0.0.0
+EXPOSE 8080
+
+CMD ["node", "apps/web/server.js"]

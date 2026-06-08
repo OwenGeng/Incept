@@ -1,0 +1,52 @@
+# ── Build outputs ─────────────────────────────────────────────────────────────
+.next
+dist
+build
+*.tsbuildinfo
+
+# ── Dependencies ───────────────────────────────────────────────────────────────
+node_modules
+.pnpm-store
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__
+.pytest_cache
+.venv
+venv
+*.pyc
+*.pyo
+*.egg-info
+
+# ── Environment & secrets — NEVER commit ──────────────────────────────────────
+.env
+.env.local
+.env.*.local
+apps/web/.env.local
+apps/api/.env
+.env.deploy
+setup-secrets.sh
+
+# ── Deploy temp files ─────────────────────────────────────────────────────────
+.api-url.tmp
+*.bak
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+*.err.log
+
+# ── Runtime data & generated files ───────────────────────────────────────────
+# SQLite databases (may contain real user/session data)
+*.db
+# Generated ad creatives (produced at runtime by the API)
+apps/incept-api/static/generated/
+apps/incept-api/static/uploads/
+apps/api/static/generated/
+apps/api/static/uploads/
+# Regression test image outputs
+apps/incept-api/regression_*/
+
+# ── Editor & tool generated ───────────────────────────────────────────────────
+.claude/
+.codegraph/
+.DS_Store
+Thumbs.db

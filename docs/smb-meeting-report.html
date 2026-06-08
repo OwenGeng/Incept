@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supply SMB Cross-Sell — Weekly Brief</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#04033A;--blue:#040078;--lb:#0280FB;--mag:#C368F9;--teal:#16D2FF;--mint:#60E2B7;--g100:#F3F3F3;--g200:#C4C3CE;--g300:#9494AA;--g400:#5A5A7D;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Montserrat',Arial,sans-serif;background:var(--g100);color:var(--navy);font-size:14px;line-height:1.6}
+.edit-bar{background:var(--navy);color:white;padding:10px 32px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:200}
+.edit-bar label{display:flex;align-items:center;gap:8px;cursor:pointer}
+.edit-bar input[type=checkbox]{accent-color:var(--teal);width:15px;height:15px;cursor:pointer}
+.edit-bar .hint{color:var(--g200);font-weight:400;font-size:11px}
+.edit-bar .save-btn{background:var(--lb);color:white;border:none;border-radius:6px;padding:6px 16px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Montserrat',Arial,sans-serif;display:none}
+body.edit-on .save-btn{display:inline-block}
+.edit-bar .raw-link{margin-left:auto;color:var(--teal);font-size:11px;font-weight:700;text-decoration:none;background:rgba(22,210,255,.15);border:1px solid rgba(22,210,255,.3);padding:5px 12px;border-radius:20px}
+.edit-bar .raw-link:hover{background:rgba(22,210,255,.25)}
+body.edit-on{outline:3px solid var(--lb);outline-offset:-3px}
+body.edit-on *{cursor:text}
+.header{background:linear-gradient(135deg,#04033A 0%,#040078 60%,#1a0a6e 100%);color:white;padding:40px 48px 36px}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--teal);margin-bottom:10px}
+.header h1{font-size:30px;font-weight:800;margin-bottom:8px}
+.header h1 span{color:var(--teal)}
+.header .sub{color:var(--g200);font-size:13px}
+.header .date{color:rgba(255,255,255,.4);font-size:11px;margin-top:12px;font-weight:500}
+.body{max-width:1020px;margin:0 auto;padding:28px 28px 48px}
+.message{background:linear-gradient(135deg,#04033A,#040078);color:white;border-radius:14px;padding:26px 30px;margin-bottom:24px}
+.message .ml{font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--teal);margin-bottom:10px}
+.message .mt{font-size:15px;font-weight:400;line-height:1.8;color:rgba(255,255,255,.9)}
+.message .mt strong{color:var(--teal)}
+.logic-box{background:white;border-radius:14px;padding:24px 28px;margin-bottom:24px;box-shadow:0 2px 10px rgba(4,0,120,.06)}
+.section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--lb);margin-bottom:12px}
+.logic-box .summary{font-size:14px;color:var(--navy);margin-bottom:16px;line-height:1.7}
+.logic-box .summary strong{color:var(--lb)}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.step{background:var(--g100);border-radius:10px;padding:13px 14px;border-left:3px solid}
+.step.s1{border-color:var(--g300)}.step.s2{border-color:var(--lb)}.step.s3{border-color:var(--mag)}.step.s4{border-color:var(--teal)}
+.step .sn{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--g300);margin-bottom:4px}
+.step.s2 .sn{color:var(--lb)}.step.s3 .sn{color:var(--mag)}.step.s4 .sn{color:#12A8CC}
+.step .st{font-size:12px;font-weight:700;color:var(--navy);margin-bottom:3px}
+.step .sd{font-size:11px;color:var(--g400);line-height:1.5}
+.tiers{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.tcard{background:white;border-radius:14px;padding:20px;box-shadow:0 2px 10px rgba(4,0,120,.06);border-top:4px solid}
+.tcard.t1{border-color:var(--lb)}.tcard.t2{border-color:var(--mag)}.tcard.t3{border-color:var(--teal)}.tcard.t4{border-color:var(--g300)}
+.tcard .tn{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
+.t1 .tn{color:var(--lb)}.t2 .tn{color:var(--mag)}.t3 .tn{color:#12A8CC}.t4 .tn{color:var(--g300)}
+.tcard .tv{font-size:34px;font-weight:800;line-height:1}
+.t1 .tv{color:var(--lb)}.t2 .tv{color:var(--mag)}.t3 .tv{color:#12A8CC}.t4 .tv{color:var(--g300)}
+.tcard .ts{font-size:11px;color:var(--g300);margin-top:4px}
+.tcard .tc{font-size:11px;color:var(--g400);margin-top:8px;line-height:1.5;font-style:italic}
+.highlights{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+.hcard{background:white;border-radius:14px;padding:20px;box-shadow:0 2px 10px rgba(4,0,120,.06);text-align:center}
+.hcard .hv{font-size:32px;font-weight:800;color:var(--lb);line-height:1}
+.hcard .hl{font-size:11px;color:var(--g300);margin-top:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px}
+.hcard .hd{font-size:12px;color:var(--navy);margin-top:8px;line-height:1.5}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px}
+.card{background:white;border-radius:14px;padding:20px;box-shadow:0 2px 10px rgba(4,0,120,.06)}
+.card h3{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--g400);margin-bottom:14px}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.bar-lbl{font-size:12px;font-weight:500;width:140px;flex-shrink:0}
+.bar-track{flex:1;background:var(--g100);border-radius:3px;height:17px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px;display:flex;align-items:center;padding-left:6px;font-size:10px;font-weight:700;color:white}
+.bar-n{font-size:11px;color:var(--g300);width:34px;text-align:right;font-weight:600}
+.co-wrap{margin-bottom:24px}
+.co-section{background:white;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(4,0,120,.06);margin-bottom:12px}
+.co-head{padding:16px 20px 10px;border-bottom:1px solid var(--g100)}
+.co-head h3{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:var(--navy);margin-bottom:3px}
+.co-head .co-sub{font-size:11px;color:var(--g300)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{background:var(--navy);color:white;padding:10px 12px;font-size:10px;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;text-align:left}
+tbody tr:nth-child(even){background:var(--g100)}
+tbody tr:hover{background:#edf4ff}
+tbody td{padding:10px 12px;border-bottom:1px solid var(--g100);vertical-align:middle}
+.pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+.p1p{background:#edf4ff;color:var(--lb)}.p2p{background:#faf0ff;color:var(--mag)}
+.genre-pill{background:var(--g100);color:var(--g400)}
+.mc-val{font-weight:700;color:var(--lb)}
+.bundle-cell{font-family:monospace;font-size:10px;color:var(--g400);display:block;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bundle-app{font-size:11px;color:var(--navy);font-weight:500;display:block;margin-bottom:2px}
+.gaming-box{background:white;border-radius:14px;padding:24px 28px;margin-bottom:24px;box-shadow:0 2px 10px rgba(4,0,120,.06)}
+.gaming-box .gb-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--mag);margin-bottom:12px}
+.gaming-box .gb-text{font-size:13px;color:var(--navy);line-height:1.75;margin-bottom:16px}
+.gaming-box .gb-text strong{color:var(--mag)}
+.threshold-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.thr-card{background:var(--g100);border-radius:10px;padding:14px 16px;border-left:3px solid var(--g300);text-align:center}
+.thr-card.active{border-color:var(--mag);background:#faf0ff}
+.thr-card .tv{font-size:22px;font-weight:800;color:var(--g300)}
+.thr-card.active .tv{color:var(--mag)}
+.thr-card .tl{font-size:11px;color:var(--g300);margin-top:3px;font-weight:600}
+.thr-card .ts{font-size:10px;color:var(--g300);margin-top:2px}
+.footer{background:var(--navy);color:var(--g300);text-align:center;padding:16px;font-size:11px;font-weight:500}
+</style>
+</head>
+<body contenteditable="false">
+
+<div class="edit-bar">
+  <label><input type="checkbox" id="editToggle"> ✏ Enable editing</label>
+  <span class="hint">Check to edit any text directly in your browser</span>
+  <button class="save-btn" onclick="saveHTML()">⬇ Download</button>
+  <a class="raw-link" href="https://docs.google.com/spreadsheets/d/1HdI1IxlqndKNKftGWFRM7d3qeaPGUOMWXeBBsiSBJss/edit?usp=sharing" target="_blank">📊 Raw Data ↗</a>
+</div>
+
+<div class="header">
+  <div class="eyebrow">Moloco NBS · Weekly Brief</div>
+  <h1>Supply SMB <span>Cross-Sell</span> Project</h1>
+  <div class="sub">Chinese app developers Moloco already buys from — but has no official SDK deal with yet</div>
+  <div class="date">Data: May 2026 &nbsp;·&nbsp; Generated: June 2026 &nbsp;·&nbsp; Internal &amp; Confidential</div>
+</div>
+
+<div class="body">
+
+  <div class="message">
+    <div class="ml">The Opportunity</div>
+    <div class="mt">
+      We identified <strong>86 companies</strong> (119 apps) where Moloco's DSP already has a <strong>Moloco media cost</strong> relationship — buying their ad inventory every month through open exchanges — but they don't have an official Moloco SDK deal yet.
+      The average company generates <strong>$1,917/month in Moloco media cost</strong> without knowing it.
+    </div>
+  </div>
+
+  <div class="logic-box">
+    <div class="section-label">How We Selected These Companies</div>
+    <div class="summary">Starting from <strong>all Chinese app developers</strong> tracked by Sensor Tower, we applied 4 filters to find the highest-value targets with the lowest sales friction:</div>
+    <div class="steps">
+      <div class="step s1">
+        <div class="sn">Step 1 · Universe</div>
+        <div class="st">Chinese-origin developers</div>
+        <div class="sd">Company HQ in mainland China · at least 20K overseas monthly downloads · primary download market is not China</div>
+      </div>
+      <div class="step s2">
+        <div class="sn">Step 2 · No Moloco yet</div>
+        <div class="st">Zero existing relationship</div>
+        <div class="sd">No Moloco SDK installed · no active UA campaigns · no advertiser history with Moloco</div>
+      </div>
+      <div class="step s3">
+        <div class="sn">Step 3 · Moloco already buys</div>
+        <div class="st">Moloco media cost confirmed</div>
+        <div class="sd">Moloco's DSP already has Moloco media cost on their ad inventory via open exchange (Google ADX, InMobi, Vungle…)</div>
+      </div>
+      <div class="step s4">
+        <div class="sn">Step 4 · Prioritize</div>
+        <div class="st">P1 / P2 ranking</div>
+        <div class="sd">P1: Moloco media cost $2K+/mo · downloads ≥ 100K · growing. &nbsp;P2: Moloco media cost $500+/mo · downloads ≥ 50K · stable</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tiers">
+    <div class="tcard t1">
+      <div class="tn">P1 — Top Priority</div>
+      <div class="tv">10</div>
+      <div class="ts">companies · 15 apps</div>
+      <div class="tc">Moloco media cost $2K+/mo · Downloads ≥ 100K · Growing. NBS + Agency direct contact.</div>
+    </div>
+    <div class="tcard t2">
+      <div class="tn">P2 — Strong</div>
+      <div class="tv">76</div>
+      <div class="ts">companies · 109 apps</div>
+      <div class="tc">Moloco media cost $500+/mo · Downloads ≥ 50K. NBS + Agency coordinate.</div>
+    </div>
+    <div class="tcard t3">
+      <div class="tn">P3 — Visible</div>
+      <div class="tv">622</div>
+      <div class="ts">companies</div>
+      <div class="tc">Moloco media cost &gt; $0. Smaller spend. Agency batch outreach.</div>
+    </div>
+    <div class="tcard t4">
+      <div class="tn">P4 — Cold</div>
+      <div class="tv">232</div>
+      <div class="ts">companies</div>
+      <div class="tc">No Moloco media cost signal. Long-term pipeline.</div>
+    </div>
+  </div>
+
+  <div class="highlights">
+    <div class="hcard">
+      <div class="hv">86</div>
+      <div class="hl">Active Follow-up Companies</div>
+      <div class="hd">P1 + P2 combined. All confirmed mainland China HQ. All already in Moloco's supply ecosystem.</div>
+    </div>
+    <div class="hcard">
+      <div class="hv">$1,917</div>
+      <div class="hl">Median Moloco Media Cost / Month</div>
+      <div class="hd">Moloco DSP already pays these companies monthly via open exchange — they just don't know it yet.</div>
+    </div>
+    <div class="hcard">
+      <div class="hv">100%</div>
+      <div class="hl">Already Have Exchange SDKs</div>
+      <div class="hd">All P1+P2 apps already integrated Google ADX, Vungle, InMobi etc. Adding Moloco SDK is familiar, not new.</div>
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card">
+      <h3>What type of apps are they? (P1+P2)</h3>
+      <div class="bar-row"><div class="bar-lbl">Software / Tools</div><div class="bar-track"><div class="bar-fill" style="width:64%;background:var(--lb)">68 apps</div></div><div class="bar-n">64%</div></div>
+      <div class="bar-row"><div class="bar-lbl">Health &amp; Wellness</div><div class="bar-track"><div class="bar-fill" style="width:17%;background:var(--mag)">18</div></div><div class="bar-n">17%</div></div>
+      <div class="bar-row"><div class="bar-lbl">Media &amp; Entertainment</div><div class="bar-track"><div class="bar-fill" style="width:8%;background:var(--teal)">9</div></div><div class="bar-n">8%</div></div>
+      <div class="bar-row"><div class="bar-lbl">Games (Puzzle / Sim)</div><div class="bar-track"><div class="bar-fill" style="width:11%;background:var(--mint)">13</div></div><div class="bar-n">11%</div></div>
+      <div class="bar-row"><div class="bar-lbl">Other</div><div class="bar-track"><div class="bar-fill" style="width:5%;background:var(--g200)">11</div></div><div class="bar-n">10%</div></div>
+      <p style="font-size:11px;color:var(--g300);margin-top:12px;line-height:1.5">Mostly utility apps (PDF readers, scanners, video players) with high ad inventory, often under-monetised.</p>
+    </div>
+    <div class="card">
+      <h3>How big are they? Monthly overseas downloads</h3>
+      <div class="bar-row"><div class="bar-lbl">20K – 50K</div><div class="bar-track"><div class="bar-fill" style="width:22%;background:var(--g300)">26 apps</div></div><div class="bar-n">22%</div></div>
+      <div class="bar-row"><div class="bar-lbl">50K – 100K</div><div class="bar-track"><div class="bar-fill" style="width:29%;background:var(--lb)">34 apps</div></div><div class="bar-n">29%</div></div>
+      <div class="bar-row"><div class="bar-lbl">100K – 500K</div><div class="bar-track"><div class="bar-fill" style="width:31%;background:var(--mag)">37 apps</div></div><div class="bar-n">31%</div></div>
+      <div class="bar-row"><div class="bar-lbl">500K+</div><div class="bar-track"><div class="bar-fill" style="width:18%;background:var(--teal)">22</div></div><div class="bar-n">18%</div></div>
+      <p style="font-size:11px;color:var(--g300);margin-top:12px;line-height:1.5">Median: 200K/month. 22 apps exceed 500K — significant scale with untapped SDK revenue potential.</p>
+    </div>
+  </div>
+
+  <!-- Company tables -->
+  <div class="co-wrap">
+
+    <div class="co-section">
+      <div class="co-head">
+        <h3>Non-Gaming — Top 7 Companies &nbsp;<span style="font-weight:400;color:var(--g300);font-size:11px">(89% of P1+P2 · 106 apps)</span></h3>
+        <div class="co-sub">Ranked by Moloco media cost/month · Top Bundle = highest media cost app per company</div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Priority</th><th>Company</th><th>Genre</th><th>Top Bundle</th><th>Media Cost/mo</th><th>Apps</th><th>Monetization</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Guangzhou Hongshi</b></td>
+            <td><span class="pill genre-pill">Home &amp; Garden Services</span></td>
+            <td><span class="bundle-app">V380 Pro</span><span class="bundle-cell" title="1388988209">1388988209</span></td>
+            <td class="mc-val">$97,224</td><td>2</td><td>Hybrid, IAP</td>
+          </tr>
+          <tr>
+            <td><span class="pill p1p">P1</span></td><td><b>QR Code Scanner.</b></td>
+            <td><span class="pill genre-pill">Health &amp; Wellness</span> <span class="pill genre-pill">Software</span></td>
+            <td><span class="bundle-app">PDF Reader - PDF Viewer</span><span class="bundle-cell" title="pdf.pdfreader.viewer.editor.free">pdf.pdfreader.viewer…</span></td>
+            <td class="mc-val">$89,127</td><td>9</td><td>Hybrid, IAA</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Abishkking</b></td>
+            <td><span class="pill genre-pill">Health &amp; Wellness</span></td>
+            <td><span class="bundle-app">Period Tracker Calendar</span><span class="bundle-cell" title="896501514">896501514</span></td>
+            <td class="mc-val">$83,921</td><td>7</td><td>Hybrid, IAP</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Lark Player</b></td>
+            <td><span class="pill genre-pill">Software</span></td>
+            <td><span class="bundle-app">Lark Player: Music &amp; MP3</span><span class="bundle-cell" title="com.dywx.larkplayer">com.dywx.larkplayer</span></td>
+            <td class="mc-val">$77,128</td><td>1</td><td>Hybrid</td>
+          </tr>
+          <tr>
+            <td><span class="pill p1p">P1</span></td><td><b>BALABOOM PTE LTD</b></td>
+            <td><span class="pill genre-pill">Media &amp; Entertainment</span></td>
+            <td><span class="bundle-app">BiliBili - HD Anime, Videos</span><span class="bundle-cell" title="1548857482">1548857482</span></td>
+            <td class="mc-val">$46,320</td><td>1</td><td>Hybrid</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Happeny Technology</b></td>
+            <td><span class="pill genre-pill">Software</span></td>
+            <td><span class="bundle-app">Widgetable: Besties &amp; Couples</span><span class="bundle-cell" title="1641107226">1641107226</span></td>
+            <td class="mc-val">$33,202</td><td>1</td><td>Hybrid</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Zhejiang JAIFY</b></td>
+            <td><span class="pill genre-pill">Home &amp; Garden Services</span></td>
+            <td><span class="bundle-app">iCSee</span><span class="bundle-cell" title="1130153523">1130153523</span></td>
+            <td class="mc-val">$30,309</td><td>1</td><td>Hybrid</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="co-section">
+      <div class="co-head">
+        <h3>Gaming — Top 7 Companies &nbsp;<span style="font-weight:400;color:var(--g300);font-size:11px">(11% of P1+P2 · 13 apps · 12 companies total)</span></h3>
+        <div class="co-sub">Gaming apps have lower Moloco media cost — gaming supply flows through Unity / AppLovin (see explanation below)</div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Priority</th><th>Company</th><th>Genre</th><th>Top Bundle</th><th>Media Cost/mo</th><th>Apps</th><th>Monetization</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Play2Ever Games</b></td>
+            <td><span class="pill genre-pill">Puzzle</span></td>
+            <td><span class="bundle-app">Color Block Run - Puzzle</span><span class="bundle-cell" title="6749222433">6749222433</span></td>
+            <td class="mc-val">$24,901</td><td>1</td><td>Hybrid</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>KIKO FUN INTERACTIVE</b></td>
+            <td><span class="pill genre-pill">Simulation</span></td>
+            <td><span class="bundle-app">Family Go! - Lifetime Sim</span><span class="bundle-cell" title="com.familygo.simgame">com.familygo.simgame</span></td>
+            <td class="mc-val">$13,214</td><td>1</td><td>Hybrid-IAP</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Harvest Star Game</b></td>
+            <td><span class="pill genre-pill">Strategy</span></td>
+            <td><span class="bundle-app">Forest Cabin: Survive</span><span class="bundle-cell" title="com.qxgame.gmerge">com.qxgame.gmerge</span></td>
+            <td class="mc-val">$4,971</td><td>1</td><td>Hybrid-IAP</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>PUZZLEJOY</b></td>
+            <td><span class="pill genre-pill">Puzzle</span></td>
+            <td><span class="bundle-app">Fruit Diary - Merge &amp; Match 3</span><span class="bundle-cell" title="com.bigcool.puzzle.fruitgenies">com.bigcool.puzzle…</span></td>
+            <td class="mc-val">$4,962</td><td>1</td><td>Hybrid-IAA</td>
+          </tr>
+          <tr>
+            <td><span class="pill p1p">P1</span></td><td><b>Bubble Pop Puzzle Studio</b></td>
+            <td><span class="pill genre-pill">Puzzle</span></td>
+            <td><span class="bundle-app">Pop Designer - Bubble Shooter</span><span class="bundle-cell" title="cc.bubble.adventure">cc.bubble.adventure</span></td>
+            <td class="mc-val">$3,333</td><td>1</td><td>Hybrid-IAA</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Adaric Music</b></td>
+            <td><span class="pill genre-pill">Puzzle</span></td>
+            <td><span class="bundle-app">Block Puzzle Challenge</span><span class="bundle-cell" title="block.puzzle.challenge.gem.stack">block.puzzle.challen…</span></td>
+            <td class="mc-val">$2,888</td><td>2</td><td>Hybrid-IAA</td>
+          </tr>
+          <tr>
+            <td><span class="pill p2p">P2</span></td><td><b>Sixcube</b></td>
+            <td><span class="pill genre-pill">Arcade</span></td>
+            <td><span class="bundle-app">Bus Arrival</span><span class="bundle-cell" title="com.games.bus.arrival">com.games.bus.arrival</span></td>
+            <td class="mc-val">$1,209</td><td>1</td><td>Hybrid-IAA</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Gaming explanation -->
+  <div class="gaming-box">
+    <div class="gb-title">⚠ Why Are There Fewer Gaming Companies in P1+P2?</div>
+    <div class="gb-text">
+      Gaming is not absent from the pipeline — <strong>90% of the 617 gaming apps in our universe have Moloco media cost visibility</strong>. The issue is that gaming apps generate lower Moloco media cost than non-gaming apps, because gaming supply primarily flows through <strong>Unity Ads, AppLovin MAX, and IronSource</strong> rather than Google ADX (which is where non-gaming utility apps are most active).
+      <br><br>
+      In P3 (gaming apps with supply visible but below P2 threshold), the Moloco media cost distribution is:
+      <strong>p25 = $24/mo · p50 = $120/mo · p75 = $391/mo</strong> — our current P2 threshold of $500 filters out 75% of gaming apps.
+    </div>
+    <div style="font-size:12px;font-weight:600;color:var(--navy);margin-bottom:10px">If we lower the P2 Moloco media cost threshold specifically for gaming:</div>
+    <div class="threshold-grid">
+      <div class="thr-card active">
+        <div class="tv">13</div>
+        <div class="tl">Current: mc &gt; $500</div>
+        <div class="ts">Gaming companies in P1+P2 today</div>
+      </div>
+      <div class="thr-card">
+        <div class="tv">32</div>
+        <div class="tl">If mc &gt; $200</div>
+        <div class="ts">+19 gaming companies added</div>
+      </div>
+      <div class="thr-card">
+        <div class="tv">40</div>
+        <div class="tl">If mc &gt; $100</div>
+        <div class="ts">+27 gaming companies added</div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--g300);margin-top:12px;line-height:1.5">Recommendation: set a separate, lower Moloco media cost threshold for Gaming apps. This is a configuration change that can be applied without changing the overall methodology.</p>
+  </div>
+
+  <!-- Methodology -->
+  <div style="background:var(--navy);color:white;border-radius:14px;padding:28px 30px;margin-bottom:8px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--teal);margin-bottom:14px">Methodology — How This Data Is Calculated</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px">
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--teal);margin-bottom:8px">Data Sources</div>
+        <ul style="font-size:12px;color:rgba(255,255,255,.75);line-height:2;list-style:none;padding:0">
+          <li>📊 <b style="color:white">dim1_app_v3</b> — app &amp; company metadata, ST signals</li>
+          <li>📊 <b style="color:white">fact_app_basis_v3</b> — monthly downloads by country</li>
+          <li>📊 <b style="color:white">supply_demand_overlap</b> — Moloco media cost, supply visibility</li>
+          <li>📊 <b style="color:white">fact_dsp_core</b> — UA spend exclusion</li>
+          <li>📊 <b style="color:white">fact_dsp_publisher</b> — publisher exchange SDK signals</li>
+          <li>📊 <b style="color:white">download_revenue_v3</b> — top DL/revenue country</li>
+          <li>📊 <b style="color:white">hq_country_triage</b> — GTM-validated HQ country</li>
+        </ul>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--teal);margin-bottom:8px">Inclusion Thresholds</div>
+        <ul style="font-size:12px;color:rgba(255,255,255,.75);line-height:2;list-style:none;padding:0">
+          <li>✓ Monthly downloads <b style="color:white">≥ 20,000</b> (latest full month, global)</li>
+          <li>✓ Primary download market <b style="color:white">≠ China / HK / TW</b></li>
+          <li>✓ Company HQ in <b style="color:white">CHN / HKG / TWN / SGP</b> or GTM-verified</li>
+          <li>✓ Monetization: IAA, IAP, or Hybrid signal present</li>
+        </ul>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--teal);margin-top:14px;margin-bottom:8px">Exclusion Criteria</div>
+        <ul style="font-size:12px;color:rgba(255,255,255,.75);line-height:2;list-style:none;padding:0">
+          <li>✗ App already has Moloco SDK installed</li>
+          <li>✗ Company has any Moloco UA spend (90d)</li>
+        </ul>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--teal);margin-bottom:8px">P1 / P2 Criteria &amp; Key Fields</div>
+        <ul style="font-size:12px;color:rgba(255,255,255,.75);line-height:1.9;list-style:none;padding:0">
+          <li><b style="color:white">P1:</b> CHN + media cost &gt;$2K + dl ≥100K + MoM &gt;10%</li>
+          <li><b style="color:white">P2:</b> CHN + media cost &gt;$500 + dl ≥50K + MoM &gt;-10%</li>
+          <li><b style="color:white">P3:</b> media cost &gt;$0 (incl. all SGP companies)</li>
+          <li><b style="color:white">P4:</b> no Moloco media cost signal</li>
+        </ul>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--teal);margin-top:14px;margin-bottom:8px">Monetization Validation</div>
+        <p style="font-size:12px;color:rgba(255,255,255,.75);line-height:1.7">
+          Sensor Tower's <code style="background:rgba(255,255,255,.1);padding:1px 5px;border-radius:3px">has_ads</code> flag is sometimes inaccurate.
+          We override: if <b style="color:white">Moloco media cost &gt; $0</b>, the app is confirmed to have IAA inventory →
+          <code style="background:rgba(255,255,255,.1);padding:1px 5px;border-radius:3px">IAP → Hybrid-IAP</code>,
+          <code style="background:rgba(255,255,255,.1);padding:1px 5px;border-radius:3px">Free → IAA</code>.
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  Supply SMB Cross-Sell Project &nbsp;·&nbsp; Moloco NBS &nbsp;·&nbsp; Data: May 2026 &nbsp;·&nbsp; Internal &amp; Confidential
+</div>
+
+<script>
+var toggle = document.getElementById('editToggle');
+toggle.addEventListener('change', function() {
+  document.body.contentEditable = this.checked ? 'true' : 'false';
+  document.body.classList.toggle('edit-on', this.checked);
+});
+function saveHTML() {
+  document.body.contentEditable = 'false';
+  document.body.classList.remove('edit-on');
+  toggle.checked = false;
+  var html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
+  a.download = 'smb-meeting-report-edited.html';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+</script>
+</body></html>

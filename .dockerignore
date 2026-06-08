@@ -1,0 +1,23 @@
+# Ignore everything that shouldn't go into Docker build context
+.git/
+.github/
+.claude/
+.codegraph/
+docs/
+appscript/
+sensortower-mcp/
+# sql/ is NOT excluded -- the API container needs it at runtime
+
+# Never bake local secrets into image
+.env
+.env.*
+.env.deploy
+*.log
+
+# Already-compiled artifacts — Docker builds fresh
+node_modules/
+apps/web/node_modules/
+apps/web/.next/
+apps/api/__pycache__/
+apps/api/.venv/
+apps/api/venv/
