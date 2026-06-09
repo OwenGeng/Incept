@@ -67,6 +67,32 @@ function normalizeKeys<T>(value: T): T {
   return value;
 }
 
+/**
+ * Fetch a Cloud Run identity token from the GCP metadata server.
+ * Only works when running inside Cloud Run / GCE. Returns null in local dev.
+ *
+ * The token allows the web service (incept-web) to call incept-api even when
+ * the API Cloud Run service is NOT set to allUsers — the IAM layer verifies
+ * the identity token before forwarding the request to the application.
+ */
+async function getCloudRunIdentityToken(audience: string): Promise<string | null> {
+  // K_SERVICE is only set inside Cloud Run
+  if (!process.env.K_SERVICE) return null;
+  try {
+    const metaUrl =
+      `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity` +
+      `?audience=${encodeURIComponent(audience)}`;
+    const res = await fetch(metaUrl, {
+      headers: { "Metadata-Flavor": "Google" },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.text()).trim();
+  } catch {
+    return null;
+  }
+}
+
 async function fetchFromApi<T>(
   path: string,
   user?: SessionUser,
@@ -79,6 +105,10 @@ async function fetchFromApi<T>(
     throw new Error(`Missing API configuration for ${path}`);
   }
 
+  // Fetch Cloud Run identity token so incept-api can stay private (no allUsers invoker).
+  // Falls back to null in local dev — the API allows unauthenticated calls there.
+  const identityToken = await getCloudRunIdentityToken(baseUrl);
+
   const method = options?.method ?? "GET";
   const response = await fetch(`${baseUrl}${path}`, {
     method,
@@ -89,6 +119,7 @@ async function fetchFromApi<T>(
       "X-User-Role": user?.role ?? "",
       "X-Allowed-Projects": user?.allowedProjects?.join(",") ?? "",
       "X-Allowed-Routing": user?.allowedRouting ?? "",
+      ...(identityToken ? { "Authorization": `Bearer ${identityToken}` } : {}),
       ...(options?.body ? { "Content-Type": "application/json" } : {}),
     },
     ...(options?.body ? { body: JSON.stringify(options.body) } : {}),

@@ -92,7 +92,7 @@ def get_current_user(
     settings = get_settings()
 
     # ── 1. Internal API key (Next.js proxy) ───────────────────────────────────
-    expected_key = os.getenv("INTERSIGHT_INTERNAL_API_KEY", "")
+    expected_key = os.getenv("INCEPT_INTERNAL_API_KEY", "") or os.getenv("INTERSIGHT_INTERNAL_API_KEY", "")
     if expected_key and x_internal_api_key == expected_key:
         email = (x_user_email or "").lower()
         if email:
