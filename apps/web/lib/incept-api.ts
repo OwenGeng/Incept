@@ -41,32 +41,46 @@ export async function createImageGenerationJob(
   });
 
   if (!response.ok) {
-    throw new Error(`Image generation request failed: ${response.status}`);
+    const detail = await response.text().catch(() => "");
+    let msg = `Image generation failed (${response.status})`;
+    try {
+      const parsed = JSON.parse(detail) as { detail?: string | unknown[] };
+      if (typeof parsed.detail === "string") msg = parsed.detail;
+      else if (Array.isArray(parsed.detail) && parsed.detail.length > 0)
+        msg = JSON.stringify(parsed.detail[0]);
+    } catch { if (detail) msg += `: ${detail.slice(0, 200)}`; }
+    throw new Error(msg);
   }
 
   return response.json() as Promise<ImageGenerationResponse>;
 }
 
-export async function splitContactSheet(
-  assetId: string
-): Promise<{ asset_ids: string[]; count: number }> {
-  if (!API_BASE_URL) {
-    throw new Error("NEXT_PUBLIC_API_BASE_URL is required.");
-  }
-  const response = await fetch(
-    `${API_BASE_URL}/assets/${encodeURIComponent(assetId)}/split-contact-sheet`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  );
+function sanitizeDownloadFilename(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned || "incept_asset";
+}
+
+export async function downloadAssetFile(
+  asset: Pick<AssetSummary, "url" | "title" | "type" | "width" | "height">
+): Promise<void> {
+  const response = await fetch(asset.url);
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`splitContactSheet failed: ${response.status}${detail ? ` ${detail}` : ""}`);
+    throw new Error(`Asset download failed (${response.status})`);
   }
-  return response.json() as Promise<{ asset_ids: string[]; count: number }>;
+
+  const blob = await response.blob();
+  const fallbackExt = asset.type === "gif" ? "gif" : "png";
+  const sizeSuffix =
+    asset.width && asset.height ? `_${asset.width}x${asset.height}` : "";
+  const filename = `${sanitizeDownloadFilename(asset.title)}${sizeSuffix}.${fallbackExt}`;
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -119,10 +133,6 @@ interface ApiJob {
   thread_id?: string | null;
   source_asset_id?: string | null;
   message?: string;
-  clarification_question?: string | null;
-  clarification_reason?: string | null;
-  clarification_options?: Array<{ id: string; label: string; note?: string }> | null;
-  clarification_manifest?: Record<string, unknown> | null;
 }
 
 interface ApiThread {
@@ -193,15 +203,11 @@ export async function listJobs(): Promise<JobSummary[]> {
     toolId: job.tool_id,
     status: job.status,
     progress: job.progress,
-    eta: job.status === "completed" ? "Completed" : job.status === "needs_clarification" ? "Needs clarification" : "Running",
+    eta: job.status === "completed" ? "Completed" : job.status === "failed" ? "Failed" : "Running",
     lineageKey: job.lineage_key,
     threadId: job.thread_id ?? undefined,
     sourceAssetId: job.source_asset_id ?? undefined,
     message: job.message ?? undefined,
-    clarificationQuestion: job.clarification_question ?? undefined,
-    clarificationReason: job.clarification_reason ?? undefined,
-    clarificationOptions: job.clarification_options ?? undefined,
-    clarificationManifest: job.clarification_manifest ?? undefined,
   }));
 }
 
@@ -320,10 +326,6 @@ export async function getJob(jobId: string): Promise<JobSummary | null> {
       threadId: job.thread_id ?? undefined,
       sourceAssetId: job.source_asset_id ?? undefined,
       message: job.message ?? undefined,
-      clarificationQuestion: job.clarification_question ?? undefined,
-      clarificationReason: job.clarification_reason ?? undefined,
-      clarificationOptions: job.clarification_options ?? undefined,
-      clarificationManifest: job.clarification_manifest ?? undefined,
     };
   } catch {
     return null;
@@ -401,7 +403,6 @@ export async function outpaintImage(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-  clarificationNote?: string;
 }): Promise<import("@incept/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/outpaint`, {
@@ -417,7 +418,6 @@ export async function outpaintImage(params: {
       session_id: params.sessionId ?? null,
       thread_id: params.threadId ?? null,
       output_sizes: params.outputSizes ?? [],
-      clarification_note: params.clarificationNote ?? null,
     }),
   });
   if (!res.ok) throw new Error(`outpaint failed: ${res.status}`);
@@ -433,7 +433,6 @@ export async function removeBackground(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-  clarificationNote?: string;
 }): Promise<import("@incept/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/remove-background`, {
@@ -447,7 +446,6 @@ export async function removeBackground(params: {
       session_id: params.sessionId ?? null,
       thread_id: params.threadId ?? null,
       output_sizes: params.outputSizes ?? [],
-      clarification_note: params.clarificationNote ?? null,
     }),
   });
   if (!res.ok) throw new Error(`removeBackground failed: ${res.status}`);
@@ -464,7 +462,6 @@ export async function addTextToImage(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-  clarificationNote?: string;
 }): Promise<import("@incept/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/add-text`, {
@@ -479,7 +476,6 @@ export async function addTextToImage(params: {
       session_id: params.sessionId ?? null,
       thread_id: params.threadId ?? null,
       output_sizes: params.outputSizes ?? [],
-      clarification_note: params.clarificationNote ?? null,
     }),
   });
   if (!res.ok) throw new Error(`addText failed: ${res.status}`);
@@ -519,7 +515,6 @@ export async function editImage(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-  clarificationNote?: string;
 }): Promise<import("@incept/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/image-edit`, {
@@ -537,10 +532,85 @@ export async function editImage(params: {
       session_id:      params.sessionId ?? null,
       thread_id:       params.threadId ?? null,
       output_sizes:    params.outputSizes ?? [],
-      clarification_note: params.clarificationNote ?? null,
     }),
   });
   if (!res.ok) throw new Error(`editImage failed: ${res.status}`);
+  return res.json();
+}
+
+export async function cleanKakaoImage(params: {
+  workspaceId: string;
+  assetId: string;
+  threadId?: string;
+}): Promise<import("@incept/shared").ImageGenerationResponse> {
+  if (!API_BASE_URL) throw new Error("API not configured");
+  const res = await fetch(`${API_BASE_URL}/workflows/kakao-clean`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: params.workspaceId,
+      asset_id: params.assetId,
+      thread_id: params.threadId ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`kakaoClean failed: ${res.status}${detail ? ` ${detail}` : ""}`);
+  }
+  return res.json();
+}
+
+export async function generateGifFromAsset(params: {
+  workspaceId: string;
+  assetId: string;
+  threadId?: string;
+}): Promise<import("@incept/shared").ImageGenerationResponse> {
+  if (!API_BASE_URL) throw new Error("API not configured");
+  const res = await fetch(`${API_BASE_URL}/workflows/generate-gif`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: params.workspaceId,
+      asset_id: params.assetId,
+      thread_id: params.threadId ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`generateGif failed: ${res.status}${detail ? ` ${detail}` : ""}`);
+  }
+  return res.json();
+}
+
+export async function createKakaoBizboardJob(params: {
+  workspaceId: string;
+  cleanedAssetId: string;
+  composedAssetId: string;
+  mainCopy: string;
+  appDownloadCopy: string;
+  dspName: string;
+  gacha: boolean;
+  threadId?: string;
+}): Promise<import("@incept/shared").ImageGenerationResponse> {
+  if (!API_BASE_URL) throw new Error("API not configured");
+  const res = await fetch(`${API_BASE_URL}/workflows/kakao-bizboard`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workspace_id: params.workspaceId,
+      cleaned_asset_id: params.cleanedAssetId,
+      composed_asset_id: params.composedAssetId,
+      main_copy: params.mainCopy,
+      app_download_copy: params.appDownloadCopy,
+      dsp_name: params.dspName,
+      gacha: params.gacha,
+      thread_id: params.threadId ?? null,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`kakaoBizboard failed: ${res.status}${detail ? ` ${detail}` : ""}`);
+  }
   return res.json();
 }
 

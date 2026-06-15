@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 export function FeedbackButton() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -20,11 +21,21 @@ export function FeedbackButton() {
     return () => document.removeEventListener("mousedown", handle);
   }, [open]);
 
-  function handleSubmit() {
-    if (!text.trim()) return;
-    // TODO: POST /api/feedback
+  async function handleSubmit() {
+    if (!text.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text.trim() }),
+      });
+    } catch {
+      // silent
+    }
     setDone(true);
     setText("");
+    setSubmitting(false);
     setTimeout(() => {
       setDone(false);
       setOpen(false);
@@ -55,9 +66,9 @@ export function FeedbackButton() {
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.metaKey) handleSubmit();
+                    if (e.key === "Enter" && e.metaKey) void handleSubmit();
                   }}
-                  placeholder="Type your feedback here..."
+                  placeholder="Type your feedback here…"
                   rows={4}
                   className="w-full resize-none rounded-xl border border-border bg-background p-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-accent"
                 />
@@ -66,8 +77,8 @@ export function FeedbackButton() {
                 <p className="max-w-[170px] text-xs leading-4 text-muted-foreground">
                   We don&apos;t respond to submissions, but we read all of them carefully
                 </p>
-                <Button size="sm" onClick={handleSubmit} disabled={!text.trim()}>
-                  Submit
+                <Button size="sm" onClick={() => void handleSubmit()} disabled={!text.trim() || submitting}>
+                  {submitting ? "Sending…" : "Submit"}
                 </Button>
               </div>
             </>
@@ -81,7 +92,7 @@ export function FeedbackButton() {
 export function DocsButton() {
   return (
     <a
-      href="#"
+      href="/docs"
       className="rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
     >
       Docs

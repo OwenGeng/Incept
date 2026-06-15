@@ -62,13 +62,17 @@ export function EDonut({ rows, height = 200 }: EDonutProps) {
             "box-shadow:0 4px 16px rgba(31,34,48,.10);border-radius:12px;padding:8px 12px;",
         },
         legend: {
+          type: "scroll",
           orient: "vertical",
-          right: "4%",
-          top: "center",
+          right: "2%",
+          top: 8,
+          bottom: 8,
           icon: "circle",
           itemWidth: 8,
           itemHeight: 8,
-          itemGap: 10,
+          itemGap: 8,
+          pageIconSize: 10,
+          pageTextStyle: { fontSize: 10 },
           formatter: (name: string) => {
             const row = rows.find((r) => r.label === name);
             return `{nm|${name}}  {vl|${row?.value ?? ""}}`;

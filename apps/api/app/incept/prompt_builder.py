@@ -152,121 +152,6 @@ def _direct_family_instruction(target_size: str, family: str) -> str:
     )
 
 
-def build_contact_sheet_generation_prompt(
-    user_request: str,
-    target_sizes: list[str],
-    style_hint: str | None = None,
-    preserve_elements: list[str] | None = None,
-    panel_layout: dict | None = None,
-    has_reference: bool = False,
-    sheet_family: str | None = None,
-    sheet_title: str | None = None,
-) -> str:
-    """Build a fixed-template contact-sheet prompt for backend splitting."""
-    from app.incept.contact_sheet import CONTACT_SHEET_SIZE, compute_panel_layout
-
-    sizes = [size.strip() for size in target_sizes if size.strip()]
-    title = sheet_title or "Contact Sheet"
-    if panel_layout is None:
-        panel_layout = compute_panel_layout(sizes)
-
-    style_line = f"Art style and brand identity: {style_hint}" if style_hint else ""
-    preserve_line = (
-        f"Must preserve in every panel: {', '.join(preserve_elements)}."
-        if preserve_elements
-        else "Preserve source logo, CTA button, headline/text block, main character/product, background setting, brand colors, and visual style in every panel."
-    )
-    if has_reference:
-        reference_section = f"""
-Use the attached image reference(s) as the source creative, not as images to place side-by-side.
-
-REFERENCE ADAPTATION RULES (apply to EVERY panel):
-- Preserve the source creative's main game or product identity, logo text, CTA text, major subject matter, color palette, and illustration style.
-- Keep the same brand and advertising message unless the user's request explicitly changes it.
-- Recompose the source creative inside each panel for that panel's shape. Do NOT invent an unrelated ad.
-- Never include the original reference as a thumbnail, inset, comparison, or layout preview.
-
-{build_no_ocr_reference_resize_guardrail("each panel")}
-""".strip()
-    else:
-        reference_section = (
-            "Create original ad artwork for each panel based on the brief below. "
-            "Keep visual identity, color palette, and brand elements consistent across all panels."
-        )
-
-    panel_lines: list[str] = []
-    strip_sizes: list[str] = []
-    for idx, size in enumerate(sizes):
-        box = panel_layout.get(size)
-        category = _size_category(size)
-        if category == "strip":
-            strip_sizes.append(size)
-        if box:
-            x1, y1, x2, y2 = box
-            box_w, box_h = x2 - x1, y2 - y1
-            shape_hint = (
-                f" — ultra-wide horizontal strip, {box_w}px wide × {box_h}px tall"
-                if category == "strip"
-                else f" — {box_w}×{box_h}px on canvas"
-            )
-            panel_lines.append(
-                f"- Panel {idx + 1} ({size}, {category}){shape_hint}: "
-                f"exact black-bordered rectangle from ({x1},{y1}) to ({x2},{y2}). "
-                f"This rectangle is FIXED — do not move, resize, or swap it."
-            )
-        else:
-            panel_lines.append(
-                f"- Panel {idx + 1} ({size}): one black-bordered rectangle with the correct aspect ratio."
-            )
-    panel_plan = "\n".join(panel_lines)
-    strip_hierarchy = ", ".join(strip_sizes) if strip_sizes else "banners"
-
-    return f"""
-{user_request}
-
-{reference_section}
-
-{preserve_line}
-{style_line}
-
-OUTPUT: one single {CONTACT_SHEET_SIZE} landscape contact sheet containing exactly {len(sizes)} ad panels on a plain pure white background.
-SHEET TYPE: {title}
-
-PANEL PLAN:
-{panel_plan}
-
-CONTACT SHEET STRUCTURE - critical for backend extraction:
-- Each panel must be a separate rectangle with a thin solid black border.
-- Leave generous pure white gutters between panels.
-- Do not overlap panels.
-- Do not rotate panels.
-- CRITICAL: Do NOT write any text, numbers, dimension labels (such as "320x50", "728x90", "1200x628"), size annotations, pixel counts, captions, watermarks, rulers, or UI chrome anywhere in the image — not inside panels, not in gutters, not at panel corners. The output must contain ONLY ad artwork and white background. Any dimension text will corrupt the deliverable.
-- The inside of each black border must contain only the finished ad artwork for that panel.
-- Render only the requested panels above. Do not add extra panels, duplicate panels, or alternate versions.
-- Respect the exact rectangle positions and proportions above.
-- Treat the listed rectangles as a fixed reusable template. Keep every requested size in its designated position every time.
-- Do not swap the positions of two requested sizes.
-- Do not visually enlarge a smaller requested size to make it compete with a larger one.
-- All requested sizes must live on this single sheet only.
-
-PANEL ART RULES:
-- Each panel is a complete ad layout, not a crop of the original reference.
-- Re-layout content to fit each panel's shape: scale, reposition, simplify spacing.
-- Narrow or strip panels ({strip_hierarchy}): left-to-right, logo left, hero center, CTA right.
-- Square, portrait, and medium-wide hero panels: logo near top, hero scene central, CTA in lower third.
-- Exactly one logo and one CTA per panel. No duplicates, no partial cuts.
-- Logo and CTA fully inside the panel with safe internal padding.
-- Consistent art style, brand colors, and visual identity across all panels.
-
-SELF-CHECK:
-- Exactly {len(sizes)} black-bordered panels present and filled.
-- No artwork bleeds outside its panel border.
-- Zero dimension labels, size text, or annotations anywhere (not "320x50", not "728x90", not any size string).
-- Logo and CTA fully visible in every panel.
-- Every requested size stays inside its assigned rectangle and keeps the assigned fixed sheet position.
-""".strip()
-
-
 def build_edit_prompt(
     user_change_request: str,
     target_size: str,
@@ -323,201 +208,195 @@ def build_multi_size_prompt(
     }
 
 
-# ── Resize task prompts ───────────────────────────────────────────────────────
-# Resize = "take this exact source image and adapt it to a different ad size".
-# The non-negotiable rule: background, colors, art style, and visual identity
-# must remain PIXEL-PERFECT IDENTICAL.  Only the layout adapts.
+def build_theme_create_style_modify_prompt(
+    *,
+    style_name: str,
+    style_details: str,
+) -> str:
+    return f"""You are an expert AI image modifier. Your task is to transform the artistic style of [Image 1] while strictly preserving its original structural layout, camera perspective, and object composition.
 
-_RESIZE_ABSOLUTE_GUARDRAIL = """
-RESIZE TASK — ABSOLUTE CONSTRAINTS (non-negotiable):
-- The background scene, color palette, lighting, atmosphere, and art style must remain IDENTICAL to the source image.
-- Characters, logo design, CTA button style, and brand identity must NOT change.
-- Do NOT invent new visual elements. Do NOT redesign anything.
-- Do NOT change the mood, colors, texture, or visual identity in any way.
-- The ONLY permitted change is adapting the layout/composition to fit the target size and its mandatory element positions.
-- If background space is insufficient for the new aspect ratio, extend it naturally by continuing existing edge textures and colors — never fill with solid color or invent new scenery.
-- Do NOT shrink, distort, or warp any element.
-""".strip()
+Instructions:
+1. Analyze the composition, object placement, and geometry of [Image 1]. Do not move, remove, or add new core subjects.
+2. Completely overhaul the aesthetic of [Image 1] into the following style: "{style_name}".
+3. Specific stylistic details to apply: {style_details}.
+4. Modify the lighting, textures, color palette, and atmospheric effects to match this style perfectly (e.g., if the style requires metallic textures or neon lights, map them directly onto the existing objects in [Image 1]).
+5. Ensure the final output looks cohesive, as if the original scene was natively created in the new style.
 
-_RESIZE_BANNER_LAYOUT = """
-MANDATORY LAYOUT for this ultra-wide banner — left-to-right, no exceptions:
-┌──────────┬─────────────────────────┬────────────────┐
-│  LOGO    │    HERO SCENE / KEY     │    CTA BUTTON  │
-│  (LEFT)  │    VISUAL (CENTER)      │    (RIGHT)     │
-└──────────┴─────────────────────────┴────────────────┘
-
-- LEFT (≈12-18% of width): Brand logo — exact original design, fully visible, not cropped.
-- CENTER (≈60-70% of width): Compact excerpt of the hero scene, main character, or product from the source image.
-- RIGHT (≈16-22% of width): CTA button — same wording and visual style as in the source (e.g. "PLAY NOW").
-- All three elements must be on ONE horizontal line — no vertical stacking.
-- Simplify the hero scene aggressively to fit — keep only the most recognizable element.
-- No element may be partially cropped at any edge.
-""".strip()
-
-_RESIZE_WIDE_LANDSCAPE_LAYOUT = """
-LAYOUT for wide landscape ({size}):
-- This format has room for the full creative scene — preserve the main composition of the source as closely as possible.
-- Logo: top-left or top-center area, same size and design as source.
-- CTA: lower-center or lower-right, same visual style as source.
-- Hero / character / scene: occupies the dominant canvas area.
-- If the aspect ratio differs slightly, extend the background edges naturally (continue existing sky, ground, or environment textures from the edges of the source image).
-- Aim for minimal relayout — keep the original spatial arrangement of elements.
-""".strip()
-
-_RESIZE_PORTRAIT_LAYOUT = """
-MANDATORY LAYOUT for portrait ({size}) — top-to-bottom, no exceptions:
-┌────────────────────────┐
-│   LOGO  (TOP CENTER)   │  ← centered horizontally, ~18-25% canvas height
-├────────────────────────┤
-│   HERO SCENE / CHAR    │  ← 50-60% of canvas height, centered
-│   (MIDDLE)             │
-├────────────────────────┤
-│   CTA (BOTTOM CENTER)  │  ← centered horizontally, ~12-16% canvas height
-└────────────────────────┘
-
-- Stack all elements VERTICALLY — no horizontal side-by-side arrangement.
-- Logo at top with clear padding from the top edge.
-- Main character or hero visual centered in the middle area.
-- CTA button at the bottom with safe padding, fully inside canvas, not cropped.
-- Background fills naturally behind the character from the source image.
-""".strip()
-
-_RESIZE_SQUARE_LAYOUT = """
-LAYOUT for compact square/near-square ({size}):
-┌────────────────────────┐
-│   LOGO  (TOP ~20%)     │  ← near top, centered or upper-corner
-├────────────────────────┤
-│   HERO SCENE           │  ← dominant, 55-65% of canvas height
-│   (MIDDLE)             │
-├────────────────────────┤
-│   CTA  (BOTTOM ~15%)   │  ← near bottom, centered, safe padding
-└────────────────────────┘
-
-- Logo and CTA must BOTH be fully visible and readable.
-- Hero content is the visual focus — logo/CTA should not dominate.
-- Background fills naturally from source image.
-""".strip()
-
-_RESIZE_ENDCARD_PORTRAIT_LAYOUT = """
-MANDATORY LAYOUT for endcard portrait ({size}) — top-to-bottom:
-┌────────────────────────┐
-│   LOGO  (TOP CENTER)   │
-├────────────────────────┤
-│   HERO SCENE / CHAR    │
-│   (MIDDLE)             │
-├────────────────────────┤
-│  [App Store] [G Play]  │  ← side by side, centered, equal size
-├────────────────────────┤
-│   CTA (BOTTOM CENTER)  │
-└────────────────────────┘
-
-- Apple App Store badge on the LEFT, Google Play badge on the RIGHT — same row, same size.
-- Both badges fully visible, not cropped.
-- CTA button below the badges at the bottom.
-""".strip()
-
-_RESIZE_ENDCARD_LANDSCAPE_LAYOUT = """
-MANDATORY LAYOUT for endcard landscape (640x360) — left-to-right:
-┌──────────┬─────────────────────┬────────────────┐
-│  LOGO    │  [AppStore][GPlay]  │    CTA BUTTON  │
-│  (LEFT)  │  side by side center│    (RIGHT)     │
-└──────────┴─────────────────────┴────────────────┘
-
-- Logo on the LEFT.
-- App Store and Google Play badges centered side by side.
-- CTA button on the RIGHT.
-- Background and art style identical to source.
-""".strip()
-
-_RESIZE_ENDCARD_SQUARE_LAYOUT = _RESIZE_ENDCARD_PORTRAIT_LAYOUT  # same template
+Negative Constraint: Do not alter the baseline composition, pose of people, or layout of the scene."""
 
 
-def _get_resize_layout(target_size: str, is_endcard: bool = False) -> str:
-    """Return the mandatory layout instruction for a given target size."""
-    from app.incept.layout_prompt_rules import layout_family_for_size
+def build_theme_create_style_transfer_prompt() -> str:
+    return """You are tasked with a high-fidelity image style transfer. You are provided with two images: [Image 1] (the content anchor) and [Image 2] (the style reference).
 
-    if is_endcard:
-        if target_size == "640x360":
-            return _RESIZE_ENDCARD_LANDSCAPE_LAYOUT.replace("{size}", target_size)
-        return _RESIZE_ENDCARD_PORTRAIT_LAYOUT.replace("{size}", target_size)
+Instructions:
+1. The output image must inherit 100% of the content, layout, object positions, and composition from [Image 1].
+2. Completely ignore the actual objects or subjects inside [Image 2]. Instead, extract ONLY its artistic DNA, including its unique color palette, brushstrokes, lighting style, textures, gradients, and overall visual mood.
+3. Render the scene from [Image 1] using the exact artistic execution extracted from [Image 2].
+4. The final result must look like the specific environment/objects of [Image 1] were created by the artist or medium of [Image 2].
 
-    family = layout_family_for_size(target_size)
+Negative Constraint: Do not blend the subjects of [Image 2] into [Image 1]. Keep the geometry of [Image 1] pristine."""
 
-    if family == "narrow_banner":
-        return _RESIZE_BANNER_LAYOUT
 
-    if family == "wide_landscape":
-        return _RESIZE_WIDE_LANDSCAPE_LAYOUT.replace("{size}", target_size)
+def build_theme_create_asset_text_replace_prompt(
+    *,
+    logo_position: str,
+    element_position: str,
+    old_text: str,
+    new_text: str,
+    font_style: str,
+) -> str:
+    return f"""You are executing a precise UI/UX asset and text replacement task on [Image 1]. You are provided with asset images: [Image 2] (New Logo) and [Image 3] (New Button/Element).
 
-    if family == "portrait":
-        return _RESIZE_PORTRAIT_LAYOUT.replace("{size}", target_size)
+Perform the following localized modifications seamlessly, keeping all other untouched areas of [Image 1] identical:
 
-    # compact_square (300x250, 720x720)
-    return _RESIZE_SQUARE_LAYOUT.replace("{size}", target_size)
+1. **Logo Replacement:**
+   - Locate the existing logo situated at the {logo_position} of [Image 1].
+   - Replace it entirely with the new logo provided in [Image 2].
+   - Utilize the alpha channel (transparency) of [Image 2] for a clean overlay. Scale and blend it naturally to match the local lighting and perspective.
+
+2. **Element/Button Replacement:**
+   - Locate the interactive element/button at the {element_position} of [Image 1].
+   - Replace its visual asset with [Image 3], preserving the original button's interactive boundary and alignment.
+
+3. **Text Content Update:**
+   - Locate the text that reads "{old_text}" in [Image 1].
+   - Rewrite and precisely render this text to read exactly: "{new_text}".
+   - The typography should use a {font_style} font, with colors and sizes that harmoniously match the surrounding design.
+
+Ensure no artifacts, blurry edges, or misalignment occur at the boundaries of the replaced elements."""
+
+
+_RESIZE_MICRO_BANNER_SIZES = {"320x50"}
+_RESIZE_LARGE_BANNER_SIZES = {"1200x222", "640x100"}
+_RESIZE_ULTRA_NARROW_LEADERBOARD_SIZES = {"728x90"}
+_RESIZE_LANDSCAPE_SIZES = {"1200x628", "1200x600", "640x360"}
+_RESIZE_PORTRAIT_SQUARE_SIZES = {"720x720", "300x250", "480x480", "320x480", "360x640"}
+
+_GEMINI_MICRO_BANNER_RESIZE_TEMPLATE = """You are an expert production designer specializing in high-performance responsive micro-banners. Adapt the provided input image into an ultra-thin, wide banner format with the exact resolution of {target_size} (e.g., 320x50).
+
+CRITICAL RESPONSIVE MICRO-LAYOUT CONSTRAINTS:
+1. PRESERVE ALL ASSETS: Every original text element, logo, and the CTA/Text block must be preserved with 100% pixel-perfect fidelity. Do not alter fonts, colors, or content.
+2. AGGRESSIVE VISUAL SCALE: Scale up all main assets (Logo, CTA, Hero element) so they dominate the vertical space, occupying at least 80% of the banner's height.
+3. ADAPTIVE INWARD LAYOUT: Re-arrange the assets into three columns:
+   - Move/Place the brand LOGO to the FAR LEFT, with a small left padding.
+   - Move/Place the main HERO CHARACTER/IMAGE into the center.
+   - Move/Place the preserved CTA / Main text block on the CENTER-RIGHT, not on the far right edge.
+4. SAFE MARGIN MANDATE: You MUST implement a strict safety margin on the FAR RIGHT EDGE. The entire right text block, including all disclaimers, must be shifted INWARD (to the left) by approximately 10% of the canvas width. This ensures zero cropping of text."""
+
+_GEMINI_LARGE_BANNER_RESIZE_TEMPLATE = """You are an expert senior production designer. Adapt the provided input image into a large, wide banner format with the exact resolution of {target_size} (e.g., 1200x222). This version must strictly eliminate the duplicate branding bug seen in image_13.png.
+
+CRITICAL LARGE BANNER LAYOUT & SINGLE-LOGO CONSTRAINTS:
+
+1. ABSOLUTE SINGLE LOGO MANDATE (ANTI-DUPLICATION):
+   - You are strictly FORBIDDEN from rendering more than ONE instance of the brand LOGO on the entire banner. Double logos or cloned text headers (as seen in image_13.png) are a critical failure.
+   - The ONLY permitted logo must be the one placed in the designated Far-Left zone.
+   - If any part of the original logo, title text, or brand badge appears a second time in the background battlefield scene, you must completely erase, paint over, and content-aware fill it using the native background textures (ambient smoke, ancient roofs, or sky).
+
+2. ADAPTIVE THREE-COLUMN LAYOUT:
+   - FAR LEFT Column: Render the single, complete brand LOGO stack cleanly. You may use a native framing panel, color block, or border accent derived directly from the source image style to isolate this logo section professionally.
+   - CENTER Column: Display the central Hero character. Ensure he is naturally integrated into the cinematic scene without hard rectangular borders.
+   - CENTER-RIGHT Column: Render the entire CTA / Main text block (including header tags and subtitles) using identical fonts and colors.
+
+3. SAFE MARGIN MANDATE:
+   - Shift the entire right-hand CTA/text column inward to the left, leaving a strict 10% empty safety margin on the far right edge of the canvas. Every character, descriptor, and disclaimer line must be whole, legible, and completely safe from cropping."""
+
+_GEMINI_OVERSAMPLED_LEADERBOARD_RESIZE_TEMPLATE = """You are a precision technical production artist and layout designer. Your only task is to generate a 2-row vertical split-screen layout sheet containing TWO completely separate, independent 728x90 cinematic web banners stacked vertically inside a single 728x180 canvas.
+
+The image must be perfectly divided into a Top Row (Y-axis 0px to 90px) and a Bottom Row (Y-axis 90px to 180px). Each row must act as an independent standalone 728x90 banner asset with zero asset leakage between them.
+
+CRITICAL DUAL-ROW INDEPENDENT LAYOUT CONSTRAINTS:
+
+1. TOP ROW BANNER COMPOSITION (Y-AXIS 0px - 90px):
+   - Inside this exact top half, render a complete, self-contained 728x90 banner layout.
+   - Left Logo Panel (NATIVE COLOR INHERITANCE): Identify the primary brand logo or title graphic from the source image. Render this complete logo asset inside a clean vertical panel on the leftmost edge of this row. CRITICAL COLOR RULE: The background color and texture of this panel MUST 100% inherit and replicate the exact original background color, style, and theme surrounding the logo in the source image (whether it is dark, bright, yellow, blue, or textured). Do not alter, invert, or invent a new background color for this panel. Keep the native branding color scheme perfectly intact.
+   - Center Main Subject: Identify the primary central character, figure, or focal subject from the source image. Shrink it heavily until it occupies a maximum of 40% of this row's vertical height (roughly 35 pixels tall). Ensure its entire top boundary (hair/hat/helmet), full face, and eyes are 100% visible and perfectly centered vertically within this top row.
+   - Right CTA Text: Identify the call-to-action (CTA) text block, promotional text, and subtext lines from the right side of the source image. Render this complete multi-layer text stack strictly within the rightmost 25% zone of this row. Scale it down to fit neatly within the 90px row height without any clipping. Maintain a strict 10% empty safety margin from the extreme right edge.
+
+2. BOTTOM ROW BANNER COMPOSITION (Y-AXIS 90px - 180px):
+   - Inside this exact bottom half, render a duplicate, independent 728x90 banner layout following the exact same structural layout rules as the Top Row.
+   - Left Logo Panel (NATIVE COLOR INHERITANCE): Re-render the complete compressed brand logo inside the leftmost edge panel of this bottom row. The background color and texture MUST be an exact duplicate of the top row's panel, faithfully inheriting the native color scheme of the source image's logo area.
+   - Center Main Subject: Re-render the primary central subject, shrunken down to 40% of this row's height, with the entire head, face, and eyes 100% visible and centered vertically within Y=90px to Y=180px.
+   - Right CTA Text: Re-render the complete compressed multi-layer right-side text stack strictly within the rightmost 25% zone of this bottom row, with a 10% empty safety margin from the extreme right edge.
+
+3. PERFECT COMPONENT FLOW & SEPARATION:
+   - For BOTH rows independently, the left logo panel, the 40% miniature central subject, and the right CTA text must form three separate horizontal islands.
+   - The remaining gaps inside each row must be seamlessly filled with connecting environment textures, smoke, or backgrounds from the source image.
+   - Ensure the transition line at Y=90px is clean and straight, acting as a perfect boundary between the Top Row banner and the Bottom Row banner."""
+
+_GEMINI_LANDSCAPE_RESIZE_TEMPLATE = """You are an expert production designer. Adapt the provided input image into a Landscape format with the exact resolution of {target_size}.
+
+CRITICAL VISUAL CONSTRAINTS:
+1. PERFECT PRESERVATION: Maintain all visual elements, including logos, CTA, text, and main subjects, exactly as they appear in the original image. No modifications allowed.
+2. COMPOSITION: Keep the original relative positioning of all elements. Do not rearrange or swap their positions.
+3. CANVAS FILL: Intelligently expand or crop the background to fit the new aspect ratio. Ensure the final output is sharp, with zero distortion, stretching, or squashing of the main elements."""
+
+_GEMINI_PORTRAIT_SQUARE_RESIZE_TEMPLATE = """You are an expert production designer. Re-layout and adapt the provided input image into a Portrait/Square format with the exact resolution of {target_size}.
+
+CRITICAL VISUAL CONSTRAINTS:
+1. NO RE-IMAGINING: Do not alter the design, colors, typography, or content of the original image assets. Every single element must look identical to the source.
+2. VERTICAL LAYOUT:
+   - Move/Place the brand LOGO at the TOP.
+   - Move/Place the CTA (Call to Action) / Main text at the BOTTOM.
+   - Both elements must be perfectly centered horizontally.
+3. BACKGROUND ADAPTATION: Adjust the background to fit the new vertical canvas seamlessly. Ensure the central subject matter remains uncompromised, un-stretched, and undistorted."""
+
+_GEMINI_RESIZE_NEGATIVE_PROMPT = (
+    "rearranged characters, missing text, low resolution, warped logo, "
+    "unreadable disclaimers, text touching the right edge, single element filling "
+    "entire canvas, overcrowded layout, double logos, duplicated branding, "
+    "cloned text, two logos."
+)
+
+
+def _get_resize_template(target_size: str) -> str:
+    if target_size in _RESIZE_MICRO_BANNER_SIZES:
+        return _GEMINI_MICRO_BANNER_RESIZE_TEMPLATE
+    if target_size in _RESIZE_LARGE_BANNER_SIZES:
+        return _GEMINI_LARGE_BANNER_RESIZE_TEMPLATE
+    if target_size in _RESIZE_ULTRA_NARROW_LEADERBOARD_SIZES:
+        return _GEMINI_OVERSAMPLED_LEADERBOARD_RESIZE_TEMPLATE
+    if target_size in _RESIZE_LANDSCAPE_SIZES:
+        return _GEMINI_LANDSCAPE_RESIZE_TEMPLATE
+    if target_size in _RESIZE_PORTRAIT_SQUARE_SIZES:
+        return _GEMINI_PORTRAIT_SQUARE_RESIZE_TEMPLATE
+    return _GEMINI_LANDSCAPE_RESIZE_TEMPLATE
 
 
 def build_resize_prompt(
     target_size: str,
     user_note: str = "",
-    is_endcard: bool = False,
     preserve_elements: list[str] | None = None,
+    negative_prompt_override: str | None = None,
 ) -> str:
-    """
-    Build the complete prompt for a single-size Resize task.
+    template = _get_resize_template(target_size)
+    prompt = template.format(target_size=target_size)
 
-    Resize = take source image exactly as-is, adapt only layout/composition
-    to the target size.  Background and style are NEVER changed.
+    extras: list[str] = []
+    if preserve_elements:
+        extras.append(
+            f"Additional elements to preserve exactly from the original image: {', '.join(preserve_elements)}."
+        )
+    if user_note.strip():
+        extras.append(f"Additional user instruction: {user_note.strip()}")
+    negative_prompt = (negative_prompt_override or "").strip() or _GEMINI_RESIZE_NEGATIVE_PROMPT
+    extras.append(f"Negative Prompt: {negative_prompt}")
 
-    Args:
-        target_size:       e.g. "728x90", "320x480".
-        user_note:         Optional extra instruction from the user (kept minimal).
-        is_endcard:        True for endcard sizes (adds app store badge instructions).
-        preserve_elements: Additional brand elements to call out explicitly.
-    """
-    layout = _get_resize_layout(target_size, is_endcard=is_endcard)
-    preserve_line = (
-        f"Additional elements to preserve from the source: {', '.join(preserve_elements)}."
-        if preserve_elements else ""
-    )
-    note_line = f"User instruction: {user_note}" if user_note.strip() else ""
+    if extras:
+        prompt = f"{prompt}\n\n" + "\n".join(extras)
 
-    return f"""
-{_RESIZE_ABSOLUTE_GUARDRAIL}
-
-TARGET SIZE: {target_size}
-
-{layout}
-
-{preserve_line}
-{note_line}
-
-FINAL SELF-CHECK:
-- Background and art style are pixel-perfect identical to the source image.
-- Logo is fully visible and not cropped.
-- CTA is fully visible and not cropped.
-- No element is stretched or distorted.
-- Output is exactly {target_size} in composition (the model will produce it at the appropriate resolution).
-""".strip()
+    return prompt.strip()
 
 
 def build_resize_prompts_for_sizes(
     target_sizes: list[str],
     user_note: str = "",
-    endcard_sizes: frozenset[str] | None = None,
     preserve_elements: list[str] | None = None,
 ) -> dict[str, str]:
-    """
-    Build a dict of {size → resize_prompt} for all requested sizes.
-    endcard_sizes: set of sizes that should use the endcard layout template.
-    """
-    from app.incept.gif_generator import GIF_ALLOWED_SIZES  # endcard check
-
-    _endcard = endcard_sizes or frozenset({"360x640", "480x480", "640x360"})
+    """Build a dict of {size -> resize_prompt} for all requested sizes."""
     return {
         size: build_resize_prompt(
             target_size=size,
             user_note=user_note,
-            is_endcard=(size in _endcard),
             preserve_elements=preserve_elements,
         )
         for size in target_sizes

@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
   // ── Create spreadsheet ──────────────────────────────────────────────────────
   const created = await sheets.spreadsheets.create({
     requestBody: {
-      properties: { title: title ?? "Incept Export" },
+      properties: { title: title ?? "Linglong Export" },
       sheets: tables.map((t, i) => ({
         properties: {
           sheetId: i,

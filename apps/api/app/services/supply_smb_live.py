@@ -40,8 +40,8 @@ CHART_PALETTE = ["#3a86ff", "#8338ec", "#ff006e", "#fb5607", "#ffbe0b"]
 
 def _project_root() -> Path:
     import os
-    # Explicit override — set INTERSIGHT_PROJECT_ROOT in Cloud Run env vars
-    env_root = os.environ.get("INTERSIGHT_PROJECT_ROOT")
+    # Explicit override — set INCEPT_PROJECT_ROOT in Cloud Run env vars
+    env_root = os.environ.get("INCEPT_PROJECT_ROOT")
     if env_root:
         return Path(env_root)
     # Auto-detect: walk up until we find a directory containing sql/
@@ -55,6 +55,7 @@ def _project_root() -> Path:
 PROJECT_ROOT = _project_root()
 LIST_456_SQL = PROJECT_ROOT / "sql" / "list4_5_6_cold_prospects.sql"
 LIST1_SQL = PROJECT_ROOT / "sql" / "list1_cold_prospect.sql"
+LIST1_COMPANY_SQL = PROJECT_ROOT / "sql" / "list1_company.sql"
 LIST2_SQL = PROJECT_ROOT / "sql" / "list2_expansion.sql"
 LIST3_SQL = PROJECT_ROOT / "sql" / "list3_supply_partner_upsdk.sql"
 
@@ -105,6 +106,7 @@ DATASET_META: dict[str, dict[str, Any]] = {
         "methodology": [
             "App-level output from sql/list1_cold_prospect.sql.",
             "Company must already have Moloco SDK inventory but zero UA spend across all SDK apps.",
+            "Companies with any is_moloco_advertiser_app=true app are excluded.",
             "Rows are limited to untapped bundles with sdk_media_cost_usd_30d above 10,000.",
         ],
         "company_key": "canonical_company",
@@ -112,11 +114,14 @@ DATASET_META: dict[str, dict[str, Any]] = {
             ("company_name", "company_name", "text"),
             ("final_hq_country", "final_hq_country", "text"),
             ("team_routing", "team_routing", "text"),
+            ("website", "website", "text"),
             ("untapped_apps", "untapped_apps", "number"),
             ("total_sdk_apps", "total_sdk_apps", "number"),
             ("company_sdk_media_cost_usd_30d", "company_sdk_media_cost_usd_30d", "currency"),
             ("company_monetization_types", "company_monetization_types", "text"),
             ("company_eligibility_statuses", "company_eligibility_statuses", "text"),
+            ("company_mmps", "company_mmps", "text"),
+            ("sdk_growth_managers", "sdk_growth_managers", "text"),
         ],
         "app_columns": [
             ("canonical_company", "company_name", "text"),
@@ -126,10 +131,45 @@ DATASET_META: dict[str, dict[str, Any]] = {
             ("genre", "genre", "text"),
             ("monetization_type", "monetization_type", "badge"),
             ("sdk_media_cost_usd_30d", "sdk_media_cost_usd_30d", "currency"),
+            ("sdk_media_cost_rank", "sdk_media_cost_rank", "number"),
             ("total_downloads_30d", "total_downloads_30d", "number"),
-            ("top_dl_country", "top_dl_country", "text"),
+            ("top_sdk_impression_country", "top_sdk_impression_country", "text"),
+            ("active_ua_networks", "active_ua_networks", "text"),
             ("eligibility_status", "eligibility_status", "badge"),
+            ("ineligibility_reasons", "ineligibility_reasons", "text"),
+            ("success_threshold_status", "success_threshold_status", "text"),
+            ("mmp", "mmp", "text"),
+            ("sdl_sdk_growth_managers", "sdl_sdk_growth_managers", "text"),
+            ("final_hq_country", "final_hq_country", "text"),
+            ("team_routing", "team_routing", "text"),
+            ("website", "website", "text"),
         ],
+    },
+    "list-1-company": {
+        "sql_path": LIST1_COMPANY_SQL,
+        "title": "List 1 Companies",
+        "subtitle": "Company-level view of List 1 Cold Prospect. One row per company.",
+        "methodology": [
+            "Company-level output from sql/list1_company.sql.",
+            "One row per company. All SDK apps have zero Moloco UA spend.",
+            "Companies with any is_moloco_advertiser_app=true app are excluded.",
+        ],
+        "company_key": "company_name",
+        "company_columns": [
+            ("company_name", "company_name", "text"),
+            ("final_hq_country", "final_hq_country", "text"),
+            ("team_routing", "team_routing", "text"),
+            ("website", "website", "text"),
+            ("total_sdk_apps", "total_sdk_apps", "number"),
+            ("untapped_apps", "untapped_apps", "number"),
+            ("total_sdk_media_cost_usd_30d", "total_sdk_media_cost_usd_30d", "currency"),
+            ("monetization_types", "monetization_types", "text"),
+            ("eligibility_statuses", "eligibility_statuses", "text"),
+            ("mmps", "mmps", "text"),
+            ("sdk_growth_managers", "sdk_growth_managers", "text"),
+            ("tracking_publisher_name", "tracking_publisher_name", "text"),
+        ],
+        "app_columns": [],
     },
     "list-2": {
         "sql_path": LIST2_SQL,
@@ -392,6 +432,13 @@ class SupplySmbLiveService:
                 Counter((app.get("sdl_eligibility_status") or "Undecided") for app in apps),
                 CHART_PALETTE,
             ),
+            self._distribution_module(
+                "OS Distribution",
+                "iOS vs Android split across the active app pool.",
+                Counter((str(app.get("os") or "Unknown")).capitalize() for app in apps),
+                CHART_PALETTE,
+                chart_type="pie",
+            ),
         ]
 
         methodology = [
@@ -478,7 +525,7 @@ class SupplySmbLiveService:
         if routing_filter:
             companies = [c for c in companies if (c.get("team_routing") or "") == routing_filter]
         meta = DATASET_META[dataset_key]
-        modules = self._build_custom_analysis_modules(rows, companies)
+        modules = self._build_custom_analysis_modules(dataset_key, rows, companies)
         methodology = [
             MethodologySection(
                 title="Data Sources",
@@ -595,6 +642,9 @@ class SupplySmbLiveService:
                         ),
                         "company_monetization_types": first.get("company_monetization_types") or company["monetization_type"],
                         "company_eligibility_statuses": first.get("company_eligibility_statuses") or "Unknown",
+                        "company_mmps": first.get("company_mmps") or "",
+                        "sdk_growth_managers": first.get("sdk_growth_managers") or "",
+                        "website": first.get("website") or "",
                     }
                 )
             elif dataset_key == "list-2":
@@ -677,7 +727,13 @@ class SupplySmbLiveService:
             rows=[
                 TableRow(
                     key=self._row_key_from_values(row, [column[0] for column in columns], index),
-                    cells={column[0]: row.get(column[0]) for column in columns},
+                    cells={
+                        column[0]: (
+                            v.isoformat() if hasattr(v, "isoformat") else v
+                        )
+                        for column in columns
+                        for v in [row.get(column[0])]
+                    },
                 )
                 for index, row in enumerate(rows)
             ],
@@ -690,10 +746,11 @@ class SupplySmbLiveService:
 
     def _build_custom_analysis_modules(
         self,
+        dataset_key: str,
         apps: list[dict[str, Any]],
         companies: list[dict[str, Any]],
     ) -> list[AnalysisModule]:
-        return [
+        modules = [
             self._distribution_module(
                 "Geography Distribution",
                 "Verified HQ distribution across the filtered company set.",
@@ -734,7 +791,43 @@ class SupplySmbLiveService:
                 Counter(str(app.get("eligibility_status") or "Unknown") for app in apps),
                 CHART_PALETTE,
             ),
+            self._distribution_module(
+                "OS Distribution",
+                "iOS vs Android split across the app queue.",
+                Counter(str(app.get("os") or "Unknown").capitalize() for app in apps),
+                CHART_PALETTE,
+                chart_type="pie",
+            ),
         ]
+
+        if dataset_key == "list-1":
+            # Top SDK impression country
+            modules.append(self._distribution_module(
+                "Top SDK Impression Country",
+                "Countries where Moloco sees the most SDK impression volume for these apps.",
+                Counter(str(app.get("top_sdk_impression_country") or "Unknown") for app in apps),
+                CHART_PALETTE,
+                limit=8,
+            ))
+
+            # SDK growth manager distribution (comma-separated field, split and count individually)
+            mgr_counter: Counter[str] = Counter()
+            for app in apps:
+                raw = str(app.get("sdl_sdk_growth_managers") or "").strip()
+                if not raw:
+                    mgr_counter["Unassigned"] += 1
+                else:
+                    for mgr in (m.strip() for m in raw.split(",") if m.strip()):
+                        mgr_counter[mgr] += 1
+            if mgr_counter:
+                modules.append(self._distribution_module(
+                    "SDK Growth Manager Coverage",
+                    "Number of apps each SDK Growth Manager is covering in this queue.",
+                    mgr_counter,
+                    CHART_PALETTE,
+                ))
+
+        return modules
 
     def _row_key_from_values(self, row: dict[str, Any], keys: list[str], index: int) -> str:
         values = [str(row.get(key) or "") for key in keys[:3]]
@@ -820,10 +913,10 @@ class SupplySmbLiveService:
         apps: list[dict[str, Any]],
     ) -> list[PriorityCard]:
         tier_meta = {
-            "P1": ("Prime", "NBS direct", "High media cost, strong scale, still growing."),
-            "P2": ("Strong", "NBS + agency", "High-intent accounts ready for coordinated follow-up."),
-            "P3": ("Visible", "Agency batch", "Moloco-visible or validated but lower urgency accounts."),
-            "P4": ("Cold", "Monitor", "Longer-horizon prospects without strong near-term supply proof."),
+            "P1": ("Prime / UA Ready", "NBS direct", "IAA/Hybrid: high supply signal + scale. IAP: 100K+ DL + on competitor UA networks + T1 market."),
+            "P2": ("Strong / T1 Scale", "NBS + agency", "IAA/Hybrid: supply visible + strong downloads. IAP: 50K+ DL with T1 market presence."),
+            "P3": ("Visible / Growing", "Agency batch", "IAA/Hybrid: Moloco-visible. IAP: 20K+ monthly downloads."),
+            "P4": ("Cold", "Monitor", "No near-term supply signal (IAA/Hybrid) or insufficient download scale (IAP)."),
         }
 
         cards: list[PriorityCard] = []
@@ -1306,3 +1399,121 @@ class SupplySmbLiveService:
     def _cache_set(self, key: str, payload: Any) -> None:
         with _cache_lock:
             _cache[key] = (payload, time.monotonic())
+
+    # ── Bundle enrichment ──────────────────────────────────────────────────────
+
+    def enrich_bundles(self, csv_bytes: bytes, bundle_id_column: str = "bundle_id") -> list[dict[str, Any]]:
+        """Parse a CSV upload, look up each bundle_id in BQ, return original rows
+        plus Moloco diagnosis columns appended on the right."""
+        import csv
+        import io
+
+        text = csv_bytes.decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+        if not rows:
+            return []
+
+        # Auto-detect bundle_id column
+        headers = list(rows[0].keys())
+        if bundle_id_column not in headers:
+            for candidate in ["bundle_id", "Bundle ID", "app_id", "package_name", "bundleId", "BundleID"]:
+                if candidate in headers:
+                    bundle_id_column = candidate
+                    break
+            else:
+                raise ValueError(f"Column '{bundle_id_column}' not found. Available columns: {headers}")
+
+        # Normalise iOS bundle_ids: "1234567890.0" → "1234567890"
+        def _clean(bid: str) -> str:
+            bid = bid.strip()
+            if bid.endswith(".0") and bid[:-2].isdigit():
+                bid = bid[:-2]
+            return bid
+
+        bundle_ids = [_clean(str(r.get(bundle_id_column, ""))) for r in rows]
+        unique_ids = [b for b in dict.fromkeys(bundle_ids) if b]
+        if not unique_ids:
+            return [dict(r) | {"moloco_diagnosis": "⚠ NO_BUNDLE_ID"} for r in rows]
+
+        ids_sql = ", ".join(f"'{b}'" for b in unique_ids)
+        sql = f"""
+        WITH
+        target AS (
+          SELECT bundle_id FROM UNNEST([{ids_sql}]) AS bundle_id
+        ),
+        sdk_check AS (
+          SELECT DISTINCT req.app_bundle AS bundle_id
+          FROM `ads-bpd-guard-china.gtm.fact_supply_with_tracking_publisher`
+          WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+            AND exchange LIKE 'MOLOCO_SDK%'
+            AND req.app_bundle IN (SELECT bundle_id FROM target)
+        ),
+        ua_check AS (
+          SELECT
+            product.app_market_bundle AS bundle_id,
+            ROUND(SUM(gross_spend_usd), 0) AS ua_spend_90d
+          FROM `ads-bpd-guard-china.athena.fact_dsp_core`
+          WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+            AND gross_spend_usd > 0
+            AND product.app_market_bundle IN (SELECT bundle_id FROM target)
+          GROUP BY 1
+        ),
+        meta AS (
+          SELECT
+            app_market_bundle,
+            MAX(sensortower.product.app_name)   AS st_app_name,
+            MAX(sensortower.company.name)        AS st_company,
+            MAX(sensortower.company.hq_country)  AS st_hq_country,
+            MAX(CAST(sensortower.product.has_ads AS STRING)) AS has_ads,
+            MAX(CAST(sensortower.product.has_iap AS STRING)) AS has_iap,
+            MAX(CASE
+              WHEN NOT sensortower.product.has_ads AND NOT sensortower.product.has_iap THEN 'Free'
+              WHEN NOT sensortower.product.has_ads AND sensortower.product.has_iap     THEN 'IAP'
+              WHEN sensortower.product.has_ads AND NOT sensortower.product.has_iap     THEN 'IAA'
+              ELSE 'Hybrid'
+            END) AS st_monetization
+          FROM `ads-bpd-guard-china.athena.dim1_app_v3`
+          WHERE app_market_bundle IN (SELECT bundle_id FROM target)
+          GROUP BY 1
+        )
+        SELECT
+          t.bundle_id,
+          m.st_app_name,
+          m.st_company,
+          m.st_hq_country,
+          m.st_monetization,
+          sdk.bundle_id IS NOT NULL              AS has_moloco_sdk,
+          COALESCE(ua.ua_spend_90d, 0)           AS moloco_ua_spend_90d,
+          CASE
+            WHEN sdk.bundle_id IS NOT NULL             THEN '① HAS_SDK'
+            WHEN COALESCE(ua.ua_spend_90d, 0) > 0     THEN '② HAS_UA'
+            WHEN m.app_market_bundle IS NULL           THEN '④ NOT_IN_ST'
+            WHEN m.st_monetization = 'Free'            THEN '⑤ FREE'
+            WHEN m.has_ads = 'false' AND m.has_iap = 'true' THEN '③ PURE_IAP'
+            ELSE                                            '✅ PROSPECT'
+          END AS moloco_diagnosis
+        FROM target t
+        LEFT JOIN sdk_check sdk ON t.bundle_id = sdk.bundle_id
+        LEFT JOIN ua_check  ua  ON t.bundle_id = ua.bundle_id
+        LEFT JOIN meta      m   ON t.bundle_id = m.app_market_bundle
+        """
+
+        enrichment_map: dict[str, dict[str, Any]] = {
+            r["bundle_id"]: r for r in self.bigquery.query(sql)
+        }
+
+        result = []
+        for row, bid in zip(rows, bundle_ids):
+            e = enrichment_map.get(bid, {})
+            merged = dict(row)
+            merged["moloco_diagnosis"]    = e.get("moloco_diagnosis", "④ NOT_IN_ST")
+            merged["moloco_has_sdk"]      = str(e.get("has_moloco_sdk", False)).lower()
+            merged["moloco_ua_spend_90d"] = str(int(e.get("moloco_ua_spend_90d", 0)))
+            merged["st_app_name"]         = e.get("st_app_name") or ""
+            merged["st_company"]          = e.get("st_company") or ""
+            merged["st_hq_country"]       = e.get("st_hq_country") or ""
+            merged["st_monetization"]     = e.get("st_monetization") or ""
+            result.append(merged)
+
+        return result

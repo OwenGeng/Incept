@@ -9,23 +9,22 @@ from uuid import uuid4
 from app.incept.bigquery_store import persist_generation
 from app.incept.config import get_settings
 from app.incept.db import delete_asset as db_delete_asset, init_db, load_assets, load_jobs, upsert_asset, upsert_job
-from app.incept.guardrails import (
-    ClarificationRequired,
-    build_anchor_hints_from_manifest,
-    build_preservation_manifest,
-    clarification_options_for_manifest,
-    clarification_for_size,
-    ensure_manifest_clarity,
-    prompt_preserve_elements,
-    prompt_remove_elements,
-    validate_output_asset,
+from app.incept.models import Asset, AssetRole, AddTextRequest, CreativeThread, GenerateGifRequest, GenerationJob, GenerationMode, GenerationRequest, ImageEditRequest, JobStatus, KakaoBizboardComposeRequest, OutpaintRequest, RemoveBGRequest, UsageEvent, User, Workspace
+from app.incept.prompt_builder import (
+    build_generation_prompt,
+    build_reference_generation_prompt,
+    build_resize_prompt,
+    build_theme_create_asset_text_replace_prompt,
+    build_theme_create_style_modify_prompt,
+    build_theme_create_style_transfer_prompt,
 )
-from app.incept.models import Asset, AssetRole, AddTextRequest, CreativeThread, GenerationJob, GenerationMode, GenerationRequest, ImageEditRequest, JobStatus, OutpaintRequest, RemoveBGRequest, UsageEvent, User, Workspace
-from app.incept.orchestrator import detect_layout_anchors, orchestrate
-from app.incept.prompt_builder import build_contact_sheet_generation_prompt, build_generation_prompt, build_reference_generation_prompt
 from app.incept import thread_store
 
 logger = logging.getLogger(__name__)
+
+KAKAO_CLEAN_PROMPT = "\n".join([
+    "Please remove the text and UI elements from this image and fill the background naturally.",
+])
 
 STATIC_DIR = Path(__file__).parent.parent.parent / "static" / "generated"
 UPLOAD_DIR = Path(__file__).parent.parent.parent / "static" / "uploads"
@@ -90,10 +89,6 @@ def _bootstrap() -> None:
                 output_asset_ids=__import__("json").loads(row["output_asset_ids"] or "[]"),
                 thread_id=row.get("thread_id"),
                 source_asset_id=row.get("source_asset_id"),
-                clarification_question=row.get("clarification_question"),
-                clarification_reason=row.get("clarification_reason"),
-                clarification_options=__import__("json").loads(row.get("clarification_options_json") or "[]"),
-                clarification_manifest=__import__("json").loads(row["clarification_manifest_json"]) if row.get("clarification_manifest_json") else None,
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
             )
@@ -150,82 +145,6 @@ def _parse_size(size: str) -> tuple[int | None, int | None]:
         return int(width), int(height)
     except ValueError:
         return None, None
-
-
-def _build_anchor_hints(context_assets: list[Asset]) -> list[str]:
-    hints = ["cta button", "headline text block"]
-    if any(asset.asset_role == AssetRole.client_logo for asset in context_assets):
-        hints.append("brand logo")
-    if any(asset.asset_role == AssetRole.client_character for asset in context_assets):
-        hints.append("main character face")
-    if any(asset.asset_role == AssetRole.client_product for asset in context_assets):
-        hints.append("main product packshot")
-    return hints
-
-
-def _select_multi_size_renderer_source_asset(
-    request: GenerationRequest,
-    context_assets: list[Asset],
-) -> Asset | None:
-    ordered_ids: list[str] = []
-    if request.source_asset_id:
-        ordered_ids.append(request.source_asset_id)
-    ordered_ids.extend(request.source_asset_ids)
-    ordered_ids.extend(request.reference_asset_ids)
-    for asset_id in ordered_ids:
-        asset = _get_asset(asset_id)
-        if asset and asset.asset_role != AssetRole.client_logo:
-            return asset
-
-    priority_roles = [
-        AssetRole.reference_ad,
-        AssetRole.upload,
-        AssetRole.client_background,
-        AssetRole.client_product,
-        AssetRole.client_character,
-        AssetRole.generated,
-    ]
-    for role in priority_roles:
-        for asset in context_assets:
-            if asset.asset_role == role:
-                return asset
-    for asset in context_assets:
-        if asset.asset_role != AssetRole.client_logo:
-            return asset
-    return None
-
-
-def _apply_clarification_failure(
-    job: GenerationJob,
-    question: str,
-    *,
-    manifest: dict | None = None,
-    reason: str | None = None,
-) -> None:
-    job.status = JobStatus.needs_clarification
-    job.progress = 0
-    job.message = f"Clarification needed: {question}"
-    job.clarification_question = question
-    job.clarification_reason = reason or (manifest or {}).get("clarification_reason")
-    job.clarification_manifest = manifest
-    job.clarification_options = clarification_options_for_manifest(
-        manifest or {},
-        reason=job.clarification_reason,
-    )
-    job.updated_at = datetime.utcnow()
-    upsert_job(job)
-    if job.thread_id:
-        thread_store.add_assistant_message(
-            job.thread_id,
-            text=job.message,
-            asset_ids=[],
-            job_id=job.job_id,
-        )
-        thread_store.touch_thread(
-            job.thread_id,
-            latest_job_id=job.job_id,
-            title="Clarification needed",
-        )
 
 
 def _mark_generation_progress(
@@ -285,32 +204,11 @@ async def _export_master_images_to_assets(
     requested_sizes: list[str] | None,
     source_asset: Asset | None,
     context_assets: list[Asset] | None = None,
-    logo_overlay_bytes: bytes | None = None,
-    api_key: str | None = None,
     created_at: datetime | None = None,
-    manifest: dict | None = None,
-    use_smart_resize: bool = False,
 ) -> list[Asset]:
-    from app.incept.composite import adapt_image_to_size, composite_logo, resize_to_exact
+    from app.incept.composite import resize_to_exact
 
     target_sizes = _effective_output_sizes(requested_sizes, source_asset)
-    active_manifest = manifest or build_preservation_manifest(
-        task_type="export",
-        prompt=label,
-        target_sizes=target_sizes,
-        context_assets=context_assets or [],
-        directive=None,
-    )
-    detected_anchors_by_variant: list[list[dict]] = []
-    if use_smart_resize:
-        ensure_manifest_clarity(active_manifest)
-        anchor_hints = build_anchor_hints_from_manifest(active_manifest, context_assets or []) or _build_anchor_hints(context_assets or [])
-        for raw in raw_outputs:
-            try:
-                detected = await detect_layout_anchors(raw, api_key, hints=anchor_hints)
-            except Exception:
-                detected = []
-            detected_anchors_by_variant.append(detected)
 
     created_assets: list[Asset] = []
     now = created_at or datetime.utcnow()
@@ -318,117 +216,20 @@ async def _export_master_images_to_assets(
     for size in target_sizes:
         width, height = _parse_size(size)
         for idx, raw in enumerate(raw_outputs):
-            anchors = detected_anchors_by_variant[idx] if idx < len(detected_anchors_by_variant) else []
             output_bytes = raw
-            analysis: dict | None = {
-                "anchors": anchors,
-                "adaptation": {"mode": "original" if use_smart_resize else "direct_output"},
-                "guardrail_manifest": active_manifest if use_smart_resize else None,
-            }
+            analysis: dict | None = {"adaptation": {"mode": "direct_output"}}
 
             if width and height:
-                if not use_smart_resize:
-                    try:
-                        current_w, current_h = _read_image_size(raw)
-                        if current_w == width and current_h == height:
-                            output_bytes = raw
-                            analysis = {
-                                "adaptation": {"mode": "direct_output", "smart_resize": False},
-                            }
-                        else:
-                            output_bytes = resize_to_exact(raw, width, height)
-                            analysis = {
-                                "adaptation": {"mode": "simple_resize", "smart_resize": False},
-                            }
-                    except Exception:
-                        analysis = {
-                            "adaptation": {"mode": "fallback_original", "smart_resize": False},
-                        }
-                else:
-                    clarification = clarification_for_size(
-                        active_manifest,
-                        target_size=size,
-                        source_anchors=anchors,
-                    )
-                    if clarification:
-                        raise ClarificationRequired(
-                            clarification,
-                            reason="size_priority_conflict",
-                            manifest=active_manifest,
-                        )
-                    try:
-                        resized, adaptation_report = adapt_image_to_size(
-                            raw,
-                            width,
-                            height,
-                            anchors=anchors,
-                        )
-                        overlay_applied = False
-                        if logo_overlay_bytes and not any(anchor.get("type") == "logo" for anchor in anchors):
-                            resized = composite_logo(resized, logo_overlay_bytes)
-                            overlay_applied = True
-                        validation = await validate_output_asset(
-                            output_bytes=resized,
-                            target_size=size,
-                            manifest=active_manifest,
-                            source_anchors=anchors,
-                            detect_fn=detect_layout_anchors,
-                            api_key=api_key,
-                            overlay_applied=overlay_applied,
-                        )
-                        if validation["status"] == "hard_fail":
-                            resized, adaptation_report = adapt_image_to_size(
-                                raw,
-                                width,
-                                height,
-                                anchors=anchors,
-                                force_safe_mode=True,
-                            )
-                            if logo_overlay_bytes and "logo" in set(active_manifest.get("must_preserve_types", [])):
-                                resized = composite_logo(resized, logo_overlay_bytes)
-                                overlay_applied = True
-                            validation = await validate_output_asset(
-                                output_bytes=resized,
-                                target_size=size,
-                                manifest=active_manifest,
-                                source_anchors=anchors,
-                                detect_fn=detect_layout_anchors,
-                                api_key=api_key,
-                                overlay_applied=overlay_applied,
-                            )
-                        if validation["status"] == "hard_fail":
-                            raise ClarificationRequired(
-                                f"I couldn't preserve all required elements for {size}. "
-                                "Please confirm which elements should take priority.",
-                                reason="completeness_validation_failed",
-                                manifest=active_manifest,
-                            )
-                        output_bytes = resized
-                        analysis = {
-                            "anchors": anchors,
-                            "adaptation": {
-                                **adaptation_report,
-                                "logo_overlay_applied": overlay_applied,
-                            },
-                            "guardrail_manifest": active_manifest,
-                            "validation": validation,
-                        }
-                    except ClarificationRequired:
-                        raise
-                    except Exception:
-                        analysis = {
-                            "anchors": anchors,
-                            "adaptation": {"mode": "fallback_original"},
-                            "guardrail_manifest": active_manifest,
-                            "validation": {
-                                "status": "soft_fail",
-                                "reasons": ["adaptation_exception_fallback_original"],
-                            },
-                        }
-                        # fallback: use actual image dimensions rather than intended ones
-                        fb_w, fb_h = _read_image_size(output_bytes)
-                        if fb_w and fb_h:
-                            width, height = fb_w, fb_h
+                try:
+                    current_w, current_h = _read_image_size(raw)
+                    if current_w == width and current_h == height:
+                        output_bytes = raw
+                        analysis = {"adaptation": {"mode": "direct_output"}}
+                    else:
+                        output_bytes = resize_to_exact(raw, width, height)
+                        analysis = {"adaptation": {"mode": "simple_resize"}}
+                except Exception:
+                    analysis = {"adaptation": {"mode": "fallback_original"}}
 
             # If dimensions are still missing, read from the final output bytes
             if not width or not height:
@@ -465,10 +266,10 @@ async def _export_master_images_to_assets(
     return created_assets
 
 
-async def _export_renderer_outputs_to_assets(
+async def _export_oversampled_728x180_resize_assets(
     *,
     job: GenerationJob,
-    rendered_outputs,
+    raw_outputs: list[bytes],
     workspace_id: str,
     created_by: str,
     provider: str,
@@ -476,28 +277,24 @@ async def _export_renderer_outputs_to_assets(
     label: str,
     theme: str | None,
     source_asset: Asset | None,
-    variants: int = 1,
     created_at: datetime | None = None,
 ) -> list[Asset]:
-    now = created_at or datetime.utcnow()
+    from app.incept.composite import split_728x180_into_two_728x90
+
     created_assets: list[Asset] = []
-    total_variants = max(1, variants)
-    for variant_idx in range(total_variants):
-        for rendered in rendered_outputs:
-            size = rendered.target_size
-            width, height = _parse_size(size)
-            if not width or not height:
-                width, height = _read_image_size(rendered.image_bytes)
-            asset_id = f"{job.lineage_key}_{size}_{variant_idx + 1}_img"
-            preview_url = _save_image_file(asset_id, base64.b64encode(rendered.image_bytes).decode())
-            analysis = {
-                **(rendered.analysis or {}),
-                "renderer_variant_index": variant_idx + 1,
-                "renderer_variant_count": total_variants,
-            }
+    now = created_at or datetime.utcnow()
+
+    for idx, raw in enumerate(raw_outputs):
+        top_bytes, bottom_bytes = split_728x180_into_two_728x90(raw)
+        for crop_index, (crop_label, output_bytes) in enumerate(
+            (("top", top_bytes), ("bottom", bottom_bytes)),
+            start=1,
+        ):
+            asset_id = f"{job.lineage_key}_728x90_from_728x180_{idx + 1}_{crop_index}_img"
+            preview_url = _save_image_file(asset_id, base64.b64encode(output_bytes).decode())
             asset = Asset(
                 id=asset_id,
-                title=f"{label} {size} v{variant_idx + 1}",
+                title=f"{label} 728x90 from 728x180 {crop_label} v{idx + 1}",
                 type="image",
                 gcs_uri=f"gs://incept-assets/generated/{workspace_id}/{job.job_id}/{asset_id}.png",
                 preview_url=preview_url,
@@ -508,11 +305,18 @@ async def _export_renderer_outputs_to_assets(
                 prompt_hash="",
                 created_by=created_by,
                 created_at=now,
-                width=width,
-                height=height,
+                width=728,
+                height=90,
                 theme=theme,
                 asset_role=AssetRole.generated,
-                analysis=analysis,
+                analysis={
+                    "adaptation": {
+                        "mode": "oversampled_split",
+                        "source_size": "728x180",
+                        "delivered_size": "728x90",
+                        "crop_position": crop_label,
+                    }
+                },
                 thread_id=job.thread_id,
                 parent_asset_id=source_asset.id if source_asset else None,
                 root_asset_id=_inherit_root_asset_id(source_asset, asset_id),
@@ -520,99 +324,8 @@ async def _export_renderer_outputs_to_assets(
             ASSETS[asset_id] = asset
             upsert_asset(asset)
             created_assets.append(asset)
+
     return created_assets
-
-
-async def split_saved_contact_sheet_asset(asset_id: str) -> list[Asset]:
-    """Split a saved contact-sheet preview into extracted exact-size assets."""
-    from app.incept.contact_sheet import split_contact_sheet
-
-    preview_asset = ASSETS.get(asset_id)
-    if not preview_asset:
-        raise KeyError(f"Asset {asset_id} not found")
-
-    role = (preview_asset.analysis or {}).get("contact_sheet_role")
-    if role != "sheet":
-        raise ValueError("Asset is not a splittable contact-sheet preview")
-
-    source_url = (preview_asset.analysis or {}).get("contact_sheet_source_url")
-    if isinstance(source_url, str) and source_url.startswith("/static/generated/"):
-        source_path = STATIC_DIR / source_url[len("/static/generated/"):]
-        source_bytes = source_path.read_bytes() if source_path.exists() else None
-    else:
-        source_bytes = _load_asset_bytes(preview_asset)
-    if not source_bytes:
-        raise RuntimeError("Could not load contact sheet source bytes")
-
-    split_meta = (preview_asset.analysis or {}).get("contact_sheet_split") or {}
-    requested_sizes = split_meta.get("requested_sizes") if isinstance(split_meta, dict) else None
-    if not isinstance(requested_sizes, list) or not requested_sizes:
-        raise RuntimeError("Missing requested sizes for contact sheet split")
-
-    raw_layout = split_meta.get("panel_layout") if isinstance(split_meta, dict) else None
-    panel_layout = None
-    if isinstance(raw_layout, dict):
-        panel_layout = {}
-        for size, box in raw_layout.items():
-            if isinstance(size, str) and isinstance(box, list) and len(box) == 4:
-                panel_layout[size] = tuple(int(v) for v in box)
-
-    split_panels, split_report = split_contact_sheet(
-        source_bytes,
-        requested_sizes,
-        panel_layout=panel_layout,
-    )
-    if split_report.get("status") != "passed":
-        raise RuntimeError(
-            f"Contact sheet split failed: {split_report.get('reason', 'unknown_error')}"
-        )
-
-    job = JOBS.get(preview_asset.job_id or "")
-    if not job:
-        raise RuntimeError("Could not resolve original generation job for this contact sheet")
-
-    extracted_assets: list[Asset] = []
-    created_at = datetime.utcnow()
-    for size in requested_sizes:
-        panel = split_panels.get(size)
-        if not panel:
-            continue
-        created = await _export_master_images_to_assets(
-            job=job,
-            raw_outputs=[panel.image_bytes],
-            workspace_id=preview_asset.workspace_id,
-            created_by=preview_asset.created_by,
-            provider=preview_asset.provider,
-            model=preview_asset.model,
-            label=preview_asset.theme or "Generated",
-            theme=preview_asset.theme,
-            requested_sizes=[size],
-            source_asset=preview_asset,
-            context_assets=[],
-            logo_overlay_bytes=None,
-            api_key=None,
-            created_at=created_at,
-            manifest=None,
-            use_smart_resize=False,
-        )
-        for asset in created:
-            asset.analysis = {
-                **(asset.analysis or {}),
-                "contact_sheet_role": "extracted",
-                "contact_sheet_split": split_report,
-                "contact_sheet_preview_asset_id": preview_asset.id,
-                "contact_sheet_source_url": source_url if isinstance(source_url, str) else None,
-            }
-            upsert_asset(asset)
-        extracted_assets.extend(created)
-
-    preview_asset.analysis = {
-        **(preview_asset.analysis or {}),
-        "contact_sheet_split_status": "split_completed",
-        "contact_sheet_extracted_asset_ids": [asset.id for asset in extracted_assets],
-    }
-    upsert_asset(preview_asset)
-    return extracted_assets
 
 
 def _thread_title_from_prompt(prompt: str, fallback: str = "New thread") -> str:
@@ -804,17 +517,6 @@ def _single_size_prompt_text(prompt: str, target_size: str, requested_sizes: lis
 
 
 def _estimate_provider_generations(request: GenerationRequest) -> int:
-    settings = get_settings()
-    if (
-        settings.contact_sheet_split_enabled
-        and request.provider == "openai"
-        and request.output_format == "image"
-        and request.variants == 1
-        and len(request.output_sizes) >= 2
-        and (request.reference_asset_ids or request.source_asset_ids or request.client_asset_ids)
-        and not request.preserve_layout
-    ):
-        return 1
     aspect_buckets = {_aspect_bucket(size) for size in request.output_sizes}
     return request.variants * max(1, len(aspect_buckets))
 
@@ -1035,32 +737,38 @@ async def _generate_images_gemini(
         location=settings.gcp_location,
     )
 
-    def _sync() -> list[str]:
-        results: list[str] = []
-        for _ in range(min(variants, 4)):
-            try:
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt[:4000],
-                    config=genai_types.GenerateContentConfig(
-                        response_modalities=["IMAGE"],
-                    ),
-                )
-                for candidate in (response.candidates or []):
-                    for part in (candidate.content.parts if candidate.content else []):
-                        inline = getattr(part, "inline_data", None)
-                        if inline:
-                            raw = inline.data
-                            if isinstance(raw, bytes):
-                                results.append(base64.b64encode(raw).decode())
-                            elif isinstance(raw, str):
-                                results.append(raw)  # already base64
-            except Exception:
-                logger.exception("Gemini image generation failed for one variant")
-        return results
+    import concurrent.futures as _cf
 
+    def _call_once() -> str | None:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt[:4000],
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            for candidate in (response.candidates or []):
+                for part in (candidate.content.parts if candidate.content else []):
+                    inline = getattr(part, "inline_data", None)
+                    if inline:
+                        raw = inline.data
+                        if isinstance(raw, bytes):
+                            return base64.b64encode(raw).decode()
+                        if isinstance(raw, str):
+                            return raw
+        except Exception:
+            logger.exception("Gemini image generation failed for one variant")
+        return None
+
+    n = min(variants, 4)
     loop = _asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _sync)
+    with _cf.ThreadPoolExecutor(max_workers=n) as pool:
+        raw = await _asyncio.gather(*[loop.run_in_executor(pool, _call_once) for _ in range(n)])
+    results = [r for r in raw if r is not None]
+    if not results:
+        raise RuntimeError(f"All {n} Gemini image generation variant(s) failed — check model/location config")
+    return results
 
 
 async def _generate_images_gemini_from_references(
@@ -1090,49 +798,137 @@ async def _generate_images_gemini_from_references(
         location=settings.gcp_location,
     )
 
-    def _sync() -> list[str]:
-        results: list[str] = []
+    import concurrent.futures as _cf
 
-        # Build multimodal content: prompt text + reference image(s)
-        parts: list[genai_types.Part] = [genai_types.Part(text=prompt[:4000])]
-        for img_bytes in reference_images[:4]:
-            try:
-                png = _normalize_reference_image_for_openai(img_bytes)
-                parts.append(genai_types.Part.from_bytes(data=png, mime_type="image/png"))
-            except Exception:
-                logger.warning("Skipping unreadable reference image for Gemini edit")
+    # Build multimodal content: prompt text + reference image(s) — shared across all variant calls
+    parts: list[genai_types.Part] = [genai_types.Part(text=prompt[:4000])]
+    for img_bytes in reference_images[:4]:
+        try:
+            png = _normalize_reference_image_for_openai(img_bytes)
+            parts.append(genai_types.Part.from_bytes(data=png, mime_type="image/png"))
+        except Exception:
+            logger.warning("Skipping unreadable reference image for Gemini edit")
 
-        if len(parts) < 2:
-            logger.warning("No valid reference images; falling back to text-only Gemini generation")
-            return []
+    if len(parts) < 2:
+        logger.warning("No valid reference images; falling back to text-only Gemini generation")
+        return await _generate_images_gemini(prompt, model, variants)
 
-        contents = [genai_types.Content(role="user", parts=parts)]
+    contents = [genai_types.Content(role="user", parts=parts)]
 
-        for _ in range(min(variants, 4)):
-            try:
-                response = client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=genai_types.GenerateContentConfig(
-                        response_modalities=["IMAGE"],
-                    ),
-                )
-                for candidate in (response.candidates or []):
-                    for part in (candidate.content.parts if candidate.content else []):
-                        inline = getattr(part, "inline_data", None)
-                        if inline:
-                            raw = inline.data
-                            if isinstance(raw, bytes):
-                                results.append(base64.b64encode(raw).decode())
-                            elif isinstance(raw, str):
-                                results.append(raw)
-            except Exception:
-                logger.exception("Gemini image edit failed for one variant")
+    def _call_once() -> tuple[str | None, str | None]:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            text_parts: list[str] = []
+            for candidate in (response.candidates or []):
+                for part in (candidate.content.parts if candidate.content else []):
+                    inline = getattr(part, "inline_data", None)
+                    if inline:
+                        raw = inline.data
+                        if isinstance(raw, bytes):
+                            return base64.b64encode(raw).decode(), None
+                        if isinstance(raw, str):
+                            return raw, None
+                    text_value = getattr(part, "text", None)
+                    if isinstance(text_value, str) and text_value.strip():
+                        text_parts.append(text_value.strip())
+        except Exception:
+            logger.exception("Gemini image edit failed for one variant")
+            return None, None
+        return None, " ".join(text_parts)[:500] if text_parts else None
 
-        return results
+    n = min(variants, 4)
+    loop = _asyncio.get_event_loop()
+    with _cf.ThreadPoolExecutor(max_workers=n) as pool:
+        raw = await _asyncio.gather(*[loop.run_in_executor(pool, _call_once) for _ in range(n)])
+    images = [image for image, _ in raw if image is not None]
+    if images:
+        return images
+
+    text_responses = [text for _, text in raw if text]
+    if text_responses:
+        raise RuntimeError(
+            f"Gemini returned no image data. Model text response: {text_responses[0]}"
+        )
+    return []
+
+
+async def _generate_kakao_clean_image(
+    *,
+    prompt: str,
+    source_image: bytes,
+    model: str,
+) -> list[str]:
+    """Dedicated Gemini image-clean call for Kakao assets.
+
+    This path is intentionally narrower than the generic reference-edit helper:
+    one input image, one output image, image-only response requested.
+    """
+    import asyncio as _asyncio
+    from google import genai
+    from google.genai import types as genai_types
+
+    settings = get_settings()
+    client = genai.Client(
+        vertexai=True,
+        project=settings.gcp_project_id,
+        location=settings.gcp_location,
+    )
+
+    normalized = _normalize_reference_image_for_openai(source_image)
+    parts = [
+        genai_types.Part(text=prompt[:4000]),
+        genai_types.Part.from_bytes(data=normalized, mime_type="image/png"),
+    ]
+    contents = [genai_types.Content(role="user", parts=parts)]
+
+    def _extract_image_or_text(response) -> tuple[str | None, str | None]:
+        text_parts: list[str] = []
+        for candidate in (response.candidates or []):
+            content = getattr(candidate, "content", None)
+            parts = getattr(content, "parts", None) or []
+            for part in parts:
+                inline = getattr(part, "inline_data", None)
+                if inline:
+                    raw = inline.data
+                    if isinstance(raw, bytes):
+                        return base64.b64encode(raw).decode(), None
+                    if isinstance(raw, str):
+                        return raw, None
+                text_value = getattr(part, "text", None)
+                if isinstance(text_value, str) and text_value.strip():
+                    text_parts.append(text_value.strip())
+            finish_reason = getattr(candidate, "finish_reason", None)
+            if finish_reason and not text_parts:
+                text_parts.append(f"finish_reason={finish_reason}")
+        return None, " ".join(text_parts)[:500] if text_parts else None
+
+    def _call_once() -> tuple[str | None, str | None]:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            return _extract_image_or_text(response)
+        except Exception:
+            logger.exception("Kakao Gemini clean failed during generate_content call")
+            return None, None
 
     loop = _asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _sync)
+    image, text = await loop.run_in_executor(None, _call_once)
+    if image:
+        return [image]
+    if text:
+        raise RuntimeError(f"Gemini returned no image data. Model text response: {text}")
+    raise RuntimeError("Gemini returned no image data for Kakao clean")
 
 
 async def _generate_images_vertex(
@@ -1327,7 +1123,14 @@ def create_image_generation_job(request: GenerationRequest, user: User) -> Gener
         and settings.gcp_project_id
         and request.provider == "gemini"
     )
-    is_real = is_openai_real or is_vertex_real
+    # Gemini image generation via generate_content (separate from Imagen/Vertex)
+    is_vertex_gemini_real = bool(
+        settings.vertex_gemini_enabled
+        and settings.gcp_project_id
+        and request.provider == "gemini"
+        and _is_gemini_image_model(request.model or settings.vertex_gemini_image_model)
+    )
+    is_real = is_openai_real or is_vertex_real or is_vertex_gemini_real
     thread = _resolve_thread_for_request(
         workspace_id=request.workspace_id,
         created_by=user.id,
@@ -1343,6 +1146,10 @@ def create_image_generation_job(request: GenerationRequest, user: User) -> Gener
             model = settings.openai_image_model
         tool_id = "openai-gpt-image-1"
         message = f"Generating images with OpenAI {model}…"
+    elif is_vertex_gemini_real:
+        model = request.model or settings.vertex_gemini_image_model
+        tool_id = "vertex-gemini-image"
+        message = f"Generating images with Gemini {model}…"
     elif is_vertex_real:
         model = request.model or settings.vertex_imagen_model
         tool_id = "vertex-imagen-3"
@@ -1564,21 +1371,10 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
         if not _mark_generation_progress(job, 10, f"Preparing {provider_label} generation..."):
             return
 
-        # ── Orchestrator: GPT-4o understands intent + enhances prompt ──────────
-        session_history = thread_store.get_context_messages(job.thread_id or "", n=6)
         context_asset_ids = list(dict.fromkeys(
             request.reference_asset_ids + request.source_asset_ids + request.client_asset_ids
         ))
         context_assets = [asset for aid in context_asset_ids if (asset := _get_asset(aid))]
-        reference_assets = [
-            asset for asset in context_assets
-            if asset.asset_role != AssetRole.client_logo
-        ]
-        logo_assets = [
-            asset for asset in context_assets
-            if asset.asset_role == AssetRole.client_logo
-        ]
-
         preserve_elements: list[str] = []
         if any(asset.asset_role == AssetRole.client_logo for asset in context_assets):
             preserve_elements.append("brand logo")
@@ -1593,30 +1389,390 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
 
         primary_size = request.output_sizes[0] if request.output_sizes else "1200x628"
         requested_sizes = request.output_sizes or [primary_size]
-        primary_w, primary_h = _parse_size(primary_size)
-        generation_session_history = session_history if request.preserve_layout else []
-        orchestrator_target_sizes = requested_sizes if request.preserve_layout else []
+        source_asset = _get_asset(job.source_asset_id) if job.source_asset_id else None
+        if not source_asset:
+            source_asset = next(
+                (_get_asset(asset_id) for asset_id in request.source_asset_ids if _get_asset(asset_id)),
+                None,
+            )
 
-        directive = await orchestrate(
-            user_prompt=request.prompt,
-            reference_assets=reference_assets,
-            session_history=generation_session_history,
-            target_sizes=orchestrator_target_sizes,
-            static_dir=STATIC_DIR,
-            upload_dir=UPLOAD_DIR,
-            api_key=settings.openai_api_key,
-            logo_assets=logo_assets or None,
-        )
-        manifest = build_preservation_manifest(
-            task_type=request.generation_mode.value,
-            prompt=request.prompt,
-            target_sizes=requested_sizes,
-            context_assets=context_assets,
-            directive=directive,
-            clarification_note=request.clarification_note,
-        )
-        ensure_manifest_clarity(manifest)
-        if not _mark_generation_progress(job, 15, "Planning resize-safe prompts..."):
+        if request.generation_mode == GenerationMode.resize:
+            if not _mark_generation_progress(job, 15, "Planning simple resize prompts..."):
+                return
+
+            source_bytes = _load_asset_bytes(source_asset) if source_asset else None
+            if not source_bytes:
+                raise RuntimeError("Resize requires a readable source image")
+
+            from app.incept.composite import get_openai_size
+
+            resize_user_note = request.prompt.replace(
+                "Resize the source image to the requested ad sizes.",
+                "",
+                1,
+            ).strip()
+            resize_preserve_elements = preserve_elements or None
+            resize_prompt_overrides = {
+                size.strip(): value.strip()
+                for size, value in (request.resize_prompt_overrides or {}).items()
+                if size and isinstance(value, str) and value.strip()
+            }
+            resize_negative_prompt_override = (
+                request.resize_negative_prompt_override.strip()
+                if isinstance(request.resize_negative_prompt_override, str)
+                and request.resize_negative_prompt_override.strip()
+                else None
+            )
+            generated_raw_by_size: dict[str, list[bytes]] = {}
+            actual_prompt_by_size: dict[str, str] = {}
+            total_sizes = max(1, len(requested_sizes))
+
+            for size_index, size in enumerate(requested_sizes):
+                start_progress = 20 + int((size_index / total_sizes) * 45)
+                if not _mark_generation_progress(
+                    job,
+                    start_progress,
+                    f"Generating resize {size_index + 1}/{total_sizes}: {size}...",
+                ):
+                    return
+
+                generation_size = "728x180" if size == "728x90" else size
+                target_w, target_h = _parse_size(generation_size)
+                openai_size = get_openai_size(target_w or 1024, target_h or 1024, model)
+                override_prompt = resize_prompt_overrides.get(size)
+                if override_prompt:
+                    enriched_prompt = override_prompt
+                    if resize_negative_prompt_override and "negative prompt:" not in override_prompt.lower():
+                        enriched_prompt = (
+                            f"{override_prompt}\n\nNegative Prompt: "
+                            f"{resize_negative_prompt_override}"
+                        )
+                else:
+                    enriched_prompt = build_resize_prompt(
+                        target_size=size,
+                        user_note=resize_user_note,
+                        preserve_elements=resize_preserve_elements,
+                        negative_prompt_override=resize_negative_prompt_override,
+                    )
+                actual_prompt_by_size[size] = enriched_prompt
+                b64_images = await _dispatch_generation(
+                    enriched_prompt,
+                    provider=request.provider,
+                    model=model,
+                    variants=request.variants,
+                    reference_images=[source_bytes],
+                    openai_size=openai_size,
+                    target_size=generation_size,
+                )
+                generated_raw_by_size[size] = [
+                    base64.b64decode(b64) for b64 in b64_images if b64
+                ]
+
+                done_progress = 20 + int(((size_index + 1) / total_sizes) * 45)
+                if not _mark_generation_progress(
+                    job,
+                    done_progress,
+                    f"Generated resize {size_index + 1}/{total_sizes}: {size}.",
+                ):
+                    return
+
+            if not _mark_generation_progress(job, 76, "Exporting resize outputs..."):
+                return
+
+            asset_ids: list[str] = []
+            created_assets: list[Asset] = []
+            for size_index, size in enumerate(requested_sizes):
+                export_progress = 76 + int((size_index / total_sizes) * 14)
+                if not _mark_generation_progress(
+                    job,
+                    export_progress,
+                    f"Saving resize output {size_index + 1}/{total_sizes}: {size}...",
+                ):
+                    return
+
+                if size == "728x90":
+                    exported_assets = await _export_oversampled_728x180_resize_assets(
+                        job=job,
+                        raw_outputs=generated_raw_by_size.get(size, []),
+                        workspace_id=request.workspace_id,
+                        created_by=user.id,
+                        provider=request.provider,
+                        model=model,
+                        label=request.theme or "Resize",
+                        theme=request.theme,
+                        source_asset=source_asset,
+                        created_at=now,
+                    )
+                else:
+                    exported_assets = await _export_master_images_to_assets(
+                        job=job,
+                        raw_outputs=generated_raw_by_size.get(size, []),
+                        workspace_id=request.workspace_id,
+                        created_by=user.id,
+                        provider=request.provider,
+                        model=model,
+                        label=request.theme or "Resize",
+                        theme=request.theme,
+                        requested_sizes=[size],
+                        source_asset=source_asset,
+                        context_assets=[source_asset] if source_asset else [],
+                        created_at=now,
+                    )
+                for asset in exported_assets:
+                    asset.prompt_hash = prompt_hash
+                    asset.analysis = {
+                        **(asset.analysis or {}),
+                        "source_prompt": request.prompt,
+                        "request_prompt": request.prompt,
+                        "actual_resize_prompt": actual_prompt_by_size.get(size, request.prompt),
+                        "target_size": size,
+                        "resize_requested_size": size,
+                        "resize_prompt_override_used": size in resize_prompt_overrides,
+                        "resize_negative_prompt_override": resize_negative_prompt_override,
+                        "resize_generation_canvas_size": "728x180" if size == "728x90" else size,
+                        "resize_pipeline": "v2_oversampled_split_generation" if size == "728x90" else "v2_simple_per_size_generation",
+                    }
+                    upsert_asset(asset)
+                    asset_ids.append(asset.id)
+                created_assets.extend(exported_assets)
+
+            if job.status != JobStatus.running:
+                return
+
+            if request.include_gif and asset_ids:
+                try:
+                    from app.incept.gif_generator import generate_cta_pulse_gif, is_gif_allowed_for_size
+
+                    gif_asset_ids: list[str] = []
+                    for asset_id in asset_ids:
+                        asset_obj = ASSETS.get(asset_id)
+                        if not asset_obj or not asset_obj.preview_url:
+                            continue
+                        size_str = (
+                            f"{asset_obj.width}x{asset_obj.height}"
+                            if asset_obj.width and asset_obj.height
+                            else ""
+                        )
+                        if not is_gif_allowed_for_size(size_str):
+                            continue
+                        img_path = _resolve_asset_path(asset_obj)
+                        if not img_path or not img_path.exists():
+                            continue
+                        img_bytes = img_path.read_bytes()
+                        gif_bytes = generate_cta_pulse_gif(
+                            image_bytes=img_bytes,
+                            target_size=size_str,
+                            anchors=(asset_obj.analysis or {}).get("anchors") if asset_obj.analysis else None,
+                        )
+                        gif_asset_id = f"{asset_id}_gif"
+                        gif_path = STATIC_DIR / f"{gif_asset_id}.gif"
+                        gif_path.write_bytes(gif_bytes)
+                        gif_preview_url = f"/static/generated/{gif_asset_id}.gif"
+                        gif_asset = Asset(
+                            id=gif_asset_id,
+                            title=f"{asset_obj.title} (GIF)",
+                            type="gif",
+                            gcs_uri=f"gs://incept-assets/generated/{request.workspace_id}/{job_id}/{gif_asset_id}.gif",
+                            preview_url=gif_preview_url,
+                            provider=request.provider,
+                            model=model,
+                            workspace_id=request.workspace_id,
+                            job_id=job_id,
+                            prompt_hash=prompt_hash,
+                            created_by=user.id,
+                            created_at=now,
+                            width=asset_obj.width,
+                            height=asset_obj.height,
+                            theme=asset_obj.theme,
+                            asset_role=AssetRole.generated,
+                            thread_id=job.thread_id,
+                            parent_asset_id=asset_id,
+                            root_asset_id=asset_id,
+                        )
+                        ASSETS[gif_asset_id] = gif_asset
+                        upsert_asset(gif_asset)
+                        gif_asset_ids.append(gif_asset_id)
+                    if gif_asset_ids:
+                        asset_ids = asset_ids + gif_asset_ids
+                        logger.info("Generated %d GIF(s) for resize job %s", len(gif_asset_ids), job_id)
+                except Exception:
+                    logger.warning("GIF generation failed for resize job %s — skipping", job_id, exc_info=True)
+
+            job.output_asset_ids = asset_ids
+            job.status = JobStatus.completed
+            job.progress = 100
+            job.message = (
+                f"Generated {len(asset_ids)} resize assets with {provider_label}: "
+                f"{request.variants} variants × {len(requested_sizes)} sizes."
+            )
+            job.updated_at = datetime.utcnow()
+
+            if job.thread_id:
+                thread_store.add_assistant_message(
+                    job.thread_id,
+                    text=f"Generated resize images: {request.prompt}",
+                    asset_ids=asset_ids,
+                    job_id=job_id,
+                )
+
+            _record_usage(job, request, user, model, prompt_hash, now)
+            return
+
+        if request.generation_mode == GenerationMode.theme_create:
+            if not _mark_generation_progress(job, 15, "Planning Theme Create prompt..."):
+                return
+
+            from app.incept.composite import get_openai_size
+
+            mode = request.theme_create_mode
+            if mode is None:
+                raise RuntimeError("Theme Create mode is required")
+
+            source_assets = [_get_asset(asset_id) for asset_id in request.source_asset_ids]
+            source_assets = [asset for asset in source_assets if asset]
+            reference_assets = [_get_asset(asset_id) for asset_id in request.reference_asset_ids]
+            reference_assets = [asset for asset in reference_assets if asset]
+            client_assets = [_get_asset(asset_id) for asset_id in request.client_asset_ids]
+            client_assets = [asset for asset in client_assets if asset]
+
+            source_bytes_list = [_load_asset_bytes(asset) for asset in source_assets]
+            source_bytes_list = [data for data in source_bytes_list if data]
+            reference_bytes_list = [_load_asset_bytes(asset) for asset in reference_assets]
+            reference_bytes_list = [data for data in reference_bytes_list if data]
+            client_bytes_list = [_load_asset_bytes(asset) for asset in client_assets]
+            client_bytes_list = [data for data in client_bytes_list if data]
+
+            if mode == "style_modify":
+                if not source_bytes_list:
+                    raise RuntimeError("Theme Create Style Modify requires a source image")
+                enriched_prompt = build_theme_create_style_modify_prompt(
+                    style_name=(request.theme_create_style_name or "").strip(),
+                    style_details=(request.theme_create_style_details or "").strip(),
+                )
+                reference_image_bytes = [source_bytes_list[0]]
+            elif mode == "style_transfer":
+                if len(source_bytes_list) < 1 or len(reference_bytes_list) < 1:
+                    raise RuntimeError("Theme Create Style Transfer requires a source image and a style reference image")
+                enriched_prompt = build_theme_create_style_transfer_prompt()
+                reference_image_bytes = [source_bytes_list[0], reference_bytes_list[0]]
+            elif mode == "asset_text_replace":
+                if len(source_bytes_list) < 1 or len(reference_bytes_list) < 2:
+                    raise RuntimeError("Theme Create Asset & Text Replace requires source, logo, and element images")
+                enriched_prompt = build_theme_create_asset_text_replace_prompt(
+                    logo_position=(request.theme_create_logo_position or "").strip(),
+                    element_position=(request.theme_create_element_position or "").strip(),
+                    old_text=(request.theme_create_old_text or "").strip(),
+                    new_text=(request.theme_create_new_text or "").strip(),
+                    font_style=(request.theme_create_font_style or "").strip(),
+                )
+                reference_image_bytes = [
+                    source_bytes_list[0],
+                    reference_bytes_list[0],
+                    reference_bytes_list[1],
+                ]
+            else:
+                raise RuntimeError(f"Unsupported Theme Create mode: {mode}")
+
+            requested_theme_sizes = request.output_sizes or ["1200x628"]
+            generated_raw_by_size: dict[str, list[bytes]] = {}
+            actual_prompt_by_size: dict[str, str] = {}
+            total_sizes = max(1, len(requested_theme_sizes))
+
+            for size_index, size in enumerate(requested_theme_sizes):
+                start_progress = 20 + int((size_index / total_sizes) * 45)
+                if not _mark_generation_progress(
+                    job,
+                    start_progress,
+                    f"Generating Theme Create {size_index + 1}/{total_sizes}: {size}...",
+                ):
+                    return
+
+                target_w, target_h = _parse_size(size)
+                openai_size = get_openai_size(target_w or 1024, target_h or 1024, model)
+                actual_prompt_by_size[size] = enriched_prompt
+                b64_images = await _dispatch_generation(
+                    enriched_prompt,
+                    provider=request.provider,
+                    model=model,
+                    variants=request.variants,
+                    reference_images=reference_image_bytes,
+                    openai_size=openai_size,
+                    target_size=size,
+                )
+                generated_raw_by_size[size] = [
+                    base64.b64decode(b64) for b64 in b64_images if b64
+                ]
+
+                done_progress = 20 + int(((size_index + 1) / total_sizes) * 45)
+                if not _mark_generation_progress(
+                    job,
+                    done_progress,
+                    f"Generated Theme Create {size_index + 1}/{total_sizes}: {size}.",
+                ):
+                    return
+
+            if not _mark_generation_progress(job, 76, "Exporting Theme Create outputs..."):
+                return
+
+            asset_ids: list[str] = []
+            for size_index, size in enumerate(requested_theme_sizes):
+                export_progress = 76 + int((size_index / total_sizes) * 14)
+                if not _mark_generation_progress(
+                    job,
+                    export_progress,
+                    f"Saving Theme Create output {size_index + 1}/{total_sizes}: {size}...",
+                ):
+                    return
+
+                exported_assets = await _export_master_images_to_assets(
+                    job=job,
+                    raw_outputs=generated_raw_by_size.get(size, []),
+                    workspace_id=request.workspace_id,
+                    created_by=user.id,
+                    provider=request.provider,
+                    model=model,
+                    label=request.theme or "Theme Create",
+                    theme=request.theme,
+                    requested_sizes=[size],
+                    source_asset=source_assets[0] if source_assets else None,
+                    context_assets=[*source_assets, *reference_assets, *client_assets],
+                    created_at=now,
+                )
+                for asset in exported_assets:
+                    asset.prompt_hash = prompt_hash
+                    asset.analysis = {
+                        **(asset.analysis or {}),
+                        "source_prompt": request.prompt,
+                        "request_prompt": request.prompt,
+                        "actual_theme_create_prompt": actual_prompt_by_size.get(size, request.prompt),
+                        "target_size": size,
+                        "theme_create_mode": mode,
+                        "theme_create_pipeline": "v1_fixed_mode_prompt",
+                    }
+                    upsert_asset(asset)
+                    asset_ids.append(asset.id)
+
+            job.output_asset_ids = asset_ids
+            job.status = JobStatus.completed
+            job.progress = 100
+            job.message = (
+                f"Generated {len(asset_ids)} Theme Create assets with {provider_label}: "
+                f"{request.variants} variants × {len(requested_theme_sizes)} sizes."
+            )
+            job.updated_at = datetime.utcnow()
+
+            if job.thread_id:
+                thread_store.add_assistant_message(
+                    job.thread_id,
+                    text=f"Generated Theme Create images: {request.prompt}",
+                    asset_ids=asset_ids,
+                    job_id=job_id,
+                )
+
+            _record_usage(job, request, user, model, prompt_hash, now)
+            return
+
+        if not _mark_generation_progress(job, 15, "Planning generation prompts..."):
             return
 
         from app.incept.composite import get_openai_size
@@ -1625,44 +1781,34 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
             for asset in context_assets[:8]
             if (data := _load_asset_bytes(asset))
         ]
-        renderer_source_asset = _select_multi_size_renderer_source_asset(request, context_assets)
-        renderer_source_bytes = _load_asset_bytes(renderer_source_asset) if renderer_source_asset else None
-        renderer_source_candidates = [
-            asset for asset in context_assets if asset.asset_role != AssetRole.client_logo
-        ]
-        # Use the orchestrator's enhanced_prompt when reference images are present
-        # (gives the model proper context about what style/content to produce).
-        # For pure free-create with no reference, the raw prompt is sufficient.
-        generation_prompt_base = (
-            directive.get("enhanced_prompt", request.prompt)
-            if (request.preserve_layout or bool(reference_image_bytes))
-            else request.prompt
-        )
-        generation_preserve_elements = (
-            (directive.get("preserve_elements") or [])
-            + preserve_elements
-            + prompt_preserve_elements(manifest)
-        ) or None
-
+        generation_prompt_base = request.prompt
+        generation_preserve_elements = preserve_elements or None
         generated_raw_by_size: dict[str, list[bytes]] = {}
-        contact_sheet_reports: list[dict] = []
-        contact_sheet_source_raws: list[bytes] = []
-        contact_sheet_preview_bytes_list: list[bytes] = []
-        contact_sheet_preview_size: str | None = None
-        renderer_rendered_outputs = []
-        renderer_manifest_snapshot: dict | None = None
+        total_sizes = max(1, len(requested_sizes))
 
-        if request.preserve_layout:
-            if not _mark_generation_progress(job, 25, f"Generating master image for {primary_size}..."):
+        for size_index, size in enumerate(requested_sizes):
+            start_progress = 20 + int((size_index / total_sizes) * 45)
+            if not _mark_generation_progress(
+                job,
+                start_progress,
+                f"Generating {size_index + 1}/{total_sizes}: {size}...",
+            ):
                 return
-            openai_size = get_openai_size(primary_w or 1024, primary_h or 1024, model)
+
+            target_w, target_h = _parse_size(size)
+            openai_size = get_openai_size(target_w or 1024, target_h or 1024, model)
+            size_prompt_base = _single_size_prompt_text(
+                generation_prompt_base,
+                target_size=size,
+                requested_sizes=requested_sizes,
+            )
             prompt_builder = (
                 build_reference_generation_prompt if reference_image_bytes else build_generation_prompt
             )
             enriched_prompt = prompt_builder(
-                user_request=generation_prompt_base,
-                target_size=primary_size,
-                style_hint=directive.get("style_description") or request.theme or None,
+                user_request=size_prompt_base,
+                target_size=size,
+                style_hint=request.theme or None,
                 preserve_elements=generation_preserve_elements,
             )
             b64_images = await _dispatch_generation(
@@ -1672,361 +1818,47 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 variants=request.variants,
                 reference_images=reference_image_bytes,
                 openai_size=openai_size,
-                target_size=primary_size,
+                target_size=size,
             )
-            generated_raw_by_size[primary_size] = [
+            generated_raw_by_size[size] = [
                 base64.b64decode(b64) for b64 in b64_images if b64
             ]
-            if not _mark_generation_progress(job, 65, f"Master image generated for {primary_size}."):
+            done_progress = 20 + int(((size_index + 1) / total_sizes) * 45)
+            if not _mark_generation_progress(
+                job,
+                done_progress,
+                f"Generated {size_index + 1}/{total_sizes}: {size}.",
+            ):
                 return
-        else:
-            use_multi_size_renderer = (
-                settings.multi_size_renderer_enabled
-                and len(requested_sizes) >= 2
-                and request.output_format == "image"
-                and request.generation_mode == GenerationMode.free_create
-                and len(renderer_source_candidates) == 1
-                and renderer_source_asset is not None
-                and renderer_source_bytes is not None
-            )
-            use_contact_sheet_split = (
-                settings.contact_sheet_split_enabled
-                and request.provider == "openai"
-                and len(requested_sizes) >= 2
-                and request.output_format == "image"
-            )
-            if use_multi_size_renderer:
-                from app.incept.analysis_pipeline import analyze_source_creative
-                from app.incept.multi_size_renderer import render_multi_size_variants
-
-                if not _mark_generation_progress(job, 25, "Analyzing source creative for multi-size renderer..."):
-                    return
-                layout_manifest, renderer_analysis_report = await analyze_source_creative(
-                    source_bytes=renderer_source_bytes,
-                    source_asset=renderer_source_asset,
-                    context_assets=context_assets,
-                    api_key=settings.openai_api_key,
-                    task_manifest=manifest,
-                )
-                renderer_manifest_snapshot = layout_manifest.to_dict()
-                renderer_source_asset.analysis = {
-                    **(renderer_source_asset.analysis or {}),
-                    "layout_manifest": renderer_manifest_snapshot,
-                    "renderer_analysis": renderer_analysis_report,
-                }
-                upsert_asset(renderer_source_asset)
-
-                if not settings.multi_size_renderer_validate_only:
-                    if not _mark_generation_progress(job, 38, "Rendering exact outputs with multi-size renderer..."):
-                        return
-                    renderer_rendered_outputs = await render_multi_size_variants(
-                        source_bytes=renderer_source_bytes,
-                        target_sizes=requested_sizes,
-                        layout_manifest=layout_manifest,
-                        guardrail_manifest=manifest,
-                        logo_overlay_bytes=_load_asset_bytes(logo_assets[0]) if logo_assets else None,
-                        detect_fn=detect_layout_anchors,
-                        api_key=settings.openai_api_key,
-                    )
-                    if not renderer_rendered_outputs:
-                        raise RuntimeError("Multi-size renderer produced no outputs")
-                    if not _mark_generation_progress(
-                        job,
-                        68,
-                        f"Rendered {len(renderer_rendered_outputs)} exact-size outputs with multi-size renderer.",
-                    ):
-                        return
-            elif use_contact_sheet_split:
-                from app.incept.contact_sheet import (
-                    CONTACT_SHEET_QUALITY,
-                    CONTACT_SHEET_SIZE,
-                    build_contact_sheet_plans,
-                    split_contact_sheet,
-                )
-                sheet_plans = build_contact_sheet_plans(requested_sizes)
-                total_plan_count = max(1, len(sheet_plans))
-                if not _mark_generation_progress(
-                    job,
-                    25,
-                    f"Generating {total_plan_count} structured contact sheet plan(s)...",
-                ):
-                    return
-                preview_sheets: list[bytes] = []
-                reports: list[dict] = []
-                all_sheet_raws: list[bytes] = []
-                for plan_index, sheet_plan in enumerate(sheet_plans):
-                    if not _mark_generation_progress(
-                        job,
-                        28 + int((plan_index / total_plan_count) * 20),
-                        f"Generating {sheet_plan.title} ({plan_index + 1}/{total_plan_count})...",
-                    ):
-                        return
-                    sheet_prompt = build_contact_sheet_generation_prompt(
-                        user_request=generation_prompt_base,
-                        target_sizes=sheet_plan.target_sizes,
-                        style_hint=directive.get("style_description") or request.theme or None,
-                        preserve_elements=generation_preserve_elements,
-                        panel_layout=sheet_plan.panel_layout,
-                        has_reference=bool(reference_image_bytes),
-                        sheet_title=sheet_plan.title,
-                    )
-                    if reference_image_bytes:
-                        sheet_b64_images = await _generate_images_openai_from_references(
-                            sheet_prompt,
-                            reference_images=reference_image_bytes,
-                            model=model,
-                            variants=request.variants,
-                            openai_size=CONTACT_SHEET_SIZE,
-                            quality=CONTACT_SHEET_QUALITY,
-                        )
-                    else:
-                        sheet_b64_images = await _generate_images_openai(
-                            sheet_prompt,
-                            model,
-                            request.variants,
-                            openai_size=CONTACT_SHEET_SIZE,
-                            quality=CONTACT_SHEET_QUALITY,
-                        )
-                    sheet_raws = [base64.b64decode(b64) for b64 in sheet_b64_images if b64]
-                    if not sheet_raws:
-                        raise RuntimeError(f"{sheet_plan.title} generation returned no image data")
-                    total_sheets = max(1, len(sheet_raws))
-                    for sheet_index, sheet_raw in enumerate(sheet_raws):
-                        detect_progress = 46 + int(
-                            ((plan_index + ((sheet_index + 1) / total_sheets)) / total_plan_count) * 18
-                        )
-                        if not _mark_generation_progress(
-                            job,
-                            detect_progress,
-                            f"Inspecting {sheet_plan.title} {sheet_index + 1}/{total_sheets} layout...",
-                        ):
-                            return
-                        _, split_report = split_contact_sheet(
-                            sheet_raw,
-                            sheet_plan.target_sizes,
-                            panel_layout=sheet_plan.panel_layout,
-                        )
-                        if split_report.get("status") != "passed":
-                            logger.warning("Contact sheet split preview warning: %s", split_report)
-                        preview_report = {
-                            **split_report,
-                            "requested_sizes": sheet_plan.target_sizes,
-                            "quality": CONTACT_SHEET_QUALITY,
-                            "sheet_title": sheet_plan.title,
-                            "panel_layout": {
-                                size: list(box) for size, box in sheet_plan.panel_layout.items()
-                            },
-                        }
-                        preview_sheets.append(sheet_raw)
-                        reports.append(preview_report)
-                        all_sheet_raws.append(sheet_raw)
-                contact_sheet_source_raws = all_sheet_raws
-                contact_sheet_preview_bytes_list = preview_sheets
-                contact_sheet_reports = reports
-                contact_sheet_preview_size = CONTACT_SHEET_SIZE
-                generated_raw_by_size[CONTACT_SHEET_SIZE] = preview_sheets
-                if not _mark_generation_progress(
-                    job,
-                    68,
-                    f"Generated {len(preview_sheets)} contact sheet preview(s).",
-                ):
-                    return
-
-            if not generated_raw_by_size and not renderer_rendered_outputs:
-                total_sizes = max(1, len(requested_sizes))
-                for size_index, size in enumerate(requested_sizes):
-                    start_progress = 20 + int((size_index / total_sizes) * 45)
-                    if not _mark_generation_progress(
-                        job,
-                        start_progress,
-                        f"Generating {size_index + 1}/{total_sizes}: {size}...",
-                    ):
-                        return
-                    target_w, target_h = _parse_size(size)
-                    openai_size = get_openai_size(target_w or 1024, target_h or 1024, model)
-                    # ── Resize mode: use dedicated per-size resize prompt ────────
-                    if request.generation_mode == GenerationMode.resize:
-                        from app.incept.prompt_builder import build_resize_prompt
-                        _user_note = request.prompt if request.prompt.strip() else ""
-                        enriched_prompt = build_resize_prompt(
-                            target_size=size,
-                            user_note=_user_note,
-                            is_endcard=(size in {"360x640", "480x480", "640x360"}),
-                            preserve_elements=generation_preserve_elements or None,
-                        )
-                    else:
-                        size_prompt_base = _single_size_prompt_text(
-                            generation_prompt_base,
-                            target_size=size,
-                            requested_sizes=requested_sizes,
-                        )
-                        prompt_builder = (
-                            build_reference_generation_prompt if reference_image_bytes else build_generation_prompt
-                        )
-                        enriched_prompt = prompt_builder(
-                            user_request=size_prompt_base,
-                            target_size=size,
-                            style_hint=directive.get("style_description") or request.theme or None,
-                            preserve_elements=generation_preserve_elements,
-                        )
-                    b64_images = await _dispatch_generation(
-                        enriched_prompt,
-                        provider=request.provider,
-                        model=model,
-                        variants=request.variants,
-                        reference_images=reference_image_bytes,
-                        openai_size=openai_size,
-                        target_size=size,
-                    )
-                    generated_raw_by_size[size] = [
-                        base64.b64decode(b64) for b64 in b64_images if b64
-                    ]
-                    done_progress = 20 + int(((size_index + 1) / total_sizes) * 45)
-                    if not _mark_generation_progress(
-                        job,
-                        done_progress,
-                        f"Generated {size_index + 1}/{total_sizes}: {size}.",
-                    ):
-                        return
 
         if not _mark_generation_progress(job, 70, "Preparing exact-size assets..."):
             return
 
-        output_types = (
-            ["image", "gif"] if request.output_format == "image_and_gif" else [request.output_format]
-        )
         asset_ids: list[str] = []
         created_assets: list[Asset] = []
-
-        logo_overlay_bytes = None
-        if logo_assets:
-            logo_overlay_bytes = _load_asset_bytes(logo_assets[0])
-        source_asset = _get_asset(job.source_asset_id) if job.source_asset_id else None
-        if not source_asset and renderer_source_asset:
-            source_asset = renderer_source_asset
-        if "image" in output_types:
-            if renderer_rendered_outputs:
-                if not _mark_generation_progress(job, 76, "Saving multi-size renderer outputs..."):
-                    return
-                created_assets.extend(
-                    await _export_renderer_outputs_to_assets(
-                        job=job,
-                        rendered_outputs=renderer_rendered_outputs,
-                        workspace_id=request.workspace_id,
-                        created_by=user.id,
-                        provider=request.provider,
-                        model=model,
-                        label=request.theme or "Generated",
-                        theme=request.theme,
-                        source_asset=source_asset,
-                        variants=request.variants,
-                        created_at=now,
-                    )
-                )
-                for asset in created_assets:
-                    asset.analysis = {
-                        **(asset.analysis or {}),
-                        "renderer_branch": True,
-                        "renderer_source_asset_id": renderer_source_asset.id if renderer_source_asset else None,
-                        "layout_manifest": renderer_manifest_snapshot,
-                    }
-            elif request.preserve_layout:
-                if not _mark_generation_progress(job, 76, "Exporting smart resize variants..."):
-                    return
-                created_assets.extend(
-                    await _export_master_images_to_assets(
-                        job=job,
-                        raw_outputs=generated_raw_by_size.get(primary_size, []),
-                        workspace_id=request.workspace_id,
-                        created_by=user.id,
-                        provider=request.provider,
-                        model=model,
-                        label=request.theme or "Generated",
-                        theme=request.theme,
-                        requested_sizes=requested_sizes,
-                        source_asset=source_asset,
-                        context_assets=context_assets,
-                        logo_overlay_bytes=logo_overlay_bytes,
-                        api_key=settings.openai_api_key,
-                        created_at=now,
-                        manifest=manifest,
-                        use_smart_resize=True,
-                    )
-                )
-            elif contact_sheet_preview_bytes_list and contact_sheet_preview_size:
-                if not _mark_generation_progress(job, 76, "Saving contact sheet previews..."):
-                    return
-                source_urls: list[str] = []
-                for idx, raw in enumerate(contact_sheet_source_raws):
-                    source_asset_id = f"{job.lineage_key}_{contact_sheet_preview_size}_{idx + 1}_sheet_src"
-                    source_urls.append(_save_image_file(source_asset_id, base64.b64encode(raw).decode()))
-                preview_assets = await _export_master_images_to_assets(
-                    job=job,
-                    raw_outputs=contact_sheet_preview_bytes_list,
-                    workspace_id=request.workspace_id,
-                    created_by=user.id,
-                    provider=request.provider,
-                    model=model,
-                    label=(request.theme or "Generated") + " Contact Sheet",
-                    theme=request.theme,
-                    requested_sizes=[contact_sheet_preview_size],
-                    source_asset=source_asset,
-                    context_assets=context_assets,
-                    logo_overlay_bytes=None,
-                    api_key=None,
-                    created_at=now,
-                    manifest=manifest,
-                    use_smart_resize=False,
-                )
-                for idx, asset in enumerate(preview_assets):
-                    report = contact_sheet_reports[idx] if idx < len(contact_sheet_reports) else {}
-                    source_url = source_urls[idx] if idx < len(source_urls) else None
-                    asset.analysis = {
-                        **(asset.analysis or {}),
-                        "contact_sheet_role": "sheet",
-                        "contact_sheet_title": report.get("sheet_title"),
-                        "contact_sheet_split": report,
-                        "contact_sheet_source_url": source_url,
-                    }
-                created_assets.extend(preview_assets)
-            else:
-                total_sizes = max(1, len(requested_sizes))
-                for size_index, size in enumerate(requested_sizes):
-                    export_progress = 74 + int((size_index / total_sizes) * 18)
-                    if not _mark_generation_progress(
-                        job,
-                        export_progress,
-                        f"Rendering output {size_index + 1}/{total_sizes}: {size}...",
-                    ):
-                        return
-                    created_assets.extend(
-                        await _export_master_images_to_assets(
-                            job=job,
-                            raw_outputs=generated_raw_by_size.get(size, []),
-                            workspace_id=request.workspace_id,
-                            created_by=user.id,
-                            provider=request.provider,
-                            model=model,
-                            label=request.theme or "Generated",
-                            theme=request.theme,
-                            requested_sizes=[size],
-                            source_asset=source_asset,
-                            context_assets=context_assets,
-                            logo_overlay_bytes=logo_overlay_bytes,
-                            api_key=settings.openai_api_key,
-                            created_at=now,
-                            manifest=manifest,
-                            use_smart_resize=False,
-                        )
-                    )
-                    done_progress = 74 + int(((size_index + 1) / total_sizes) * 18)
-                    if not _mark_generation_progress(
-                        job,
-                        done_progress,
-                        f"Rendered output {size_index + 1}/{total_sizes}: {size}.",
-                    ):
-                        return
-            for asset in created_assets:
+        for size_index, size in enumerate(requested_sizes):
+            export_progress = 74 + int((size_index / total_sizes) * 18)
+            if not _mark_generation_progress(
+                job,
+                export_progress,
+                f"Rendering output {size_index + 1}/{total_sizes}: {size}...",
+            ):
+                return
+            exported_assets = await _export_master_images_to_assets(
+                job=job,
+                raw_outputs=generated_raw_by_size.get(size, []),
+                workspace_id=request.workspace_id,
+                created_by=user.id,
+                provider=request.provider,
+                model=model,
+                label=request.theme or "Generated",
+                theme=request.theme,
+                requested_sizes=[size],
+                source_asset=source_asset,
+                context_assets=context_assets,
+                created_at=now,
+            )
+            for asset in exported_assets:
                 asset.prompt_hash = prompt_hash
                 asset.analysis = {
                     **(asset.analysis or {}),
@@ -2034,165 +1866,24 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 }
                 upsert_asset(asset)
                 asset_ids.append(asset.id)
-            output_types = [output_type for output_type in output_types if output_type != "image"]
+            created_assets.extend(exported_assets)
+            done_progress = 74 + int(((size_index + 1) / total_sizes) * 18)
+            if not _mark_generation_progress(
+                job,
+                done_progress,
+                f"Rendered output {size_index + 1}/{total_sizes}: {size}.",
+            ):
+                return
 
         if not _mark_generation_progress(job, 94, "Finalizing generated assets..."):
             return
 
-        for size in requested_sizes:
-            width, height = _parse_size(size)
-            for idx in range(request.variants):
-                for output_type in output_types:
-                    suffix = "gif" if output_type == "gif" else "img"
-                    asset_id = f"{lineage_key}_{size}_{idx + 1}_{suffix}"
-
-                    if output_type == "image" and idx < len(generated_raw):
-                        # Resize to exact target dimensions
-                        anchors = detected_anchors_by_variant[idx] if idx < len(detected_anchors_by_variant) else []
-                        analysis: dict | None = None
-                        if width and height:
-                            try:
-                                resized, adaptation_report = adapt_image_to_size(
-                                    generated_raw[idx],
-                                    width,
-                                    height,
-                                    anchors=anchors,
-                                )
-                                overlay_applied = False
-                                if logo_overlay_bytes and not any(
-                                    anchor.get("type") == "logo" for anchor in anchors
-                                ):
-                                    resized = composite_logo(resized, logo_overlay_bytes)
-                                    overlay_applied = True
-                                analysis = {
-                                    "anchors": anchors,
-                                    "adaptation": {
-                                        **adaptation_report,
-                                        "logo_overlay_applied": overlay_applied,
-                                    },
-                                }
-                                resized_b64 = base64.b64encode(resized).decode()
-                            except Exception:
-                                # adapt_image_to_size failed — use simple center-crop resize
-                                # as a guaranteed fallback so we always hit the exact size
-                                logger.warning(
-                                    "adapt_image_to_size failed for %s %s, using simple resize",
-                                    asset_id, size, exc_info=True,
-                                )
-                                try:
-                                    from app.incept.composite import resize_to_exact
-                                    simple_resized = resize_to_exact(generated_raw[idx], width, height)
-                                    resized_b64 = base64.b64encode(simple_resized).decode()
-                                except Exception:
-                                    resized_b64 = b64_images[idx]  # last resort: original
-                                analysis = {"anchors": anchors, "adaptation": {"mode": "fallback_simple_resize"}}
-                        else:
-                            resized_b64 = b64_images[idx]
-                            analysis = {"anchors": anchors, "adaptation": {"mode": "original"}}
-                        preview_url = _save_image_file(asset_id, resized_b64)
-                    else:
-                        preview_url = "/static/placeholder.png"
-                        analysis = None
-
-                    asset = Asset(
-                        id=asset_id,
-                        title=f"{request.theme} {size} v{idx + 1}",
-                        type=output_type,
-                        gcs_uri=f"gs://incept-assets/generated/{request.workspace_id}/{job_id}/{asset_id}.png",
-                        preview_url=preview_url,
-                        provider=request.provider,
-                        model=model,
-                        workspace_id=request.workspace_id,
-                        job_id=job_id,
-                        prompt_hash=prompt_hash,
-                        created_by=user.id,
-                        created_at=now,
-                        width=width,
-                        height=height,
-                        theme=request.theme,
-                        asset_role=AssetRole.generated,
-                        analysis={
-                            **(analysis or {}),
-                            "source_prompt": request.prompt,
-                        },
-                        thread_id=job.thread_id,
-                        parent_asset_id=source_asset.id if source_asset else None,
-                        root_asset_id=_inherit_root_asset_id(source_asset, asset_id),
-                    )
-                    ASSETS[asset_id] = asset
-                    created_assets.append(asset)
-                    asset_ids.append(asset_id)
-
-        if job.status != JobStatus.running:
-            return
-
-        # ── GIF generation (resize mode with include_gif=True) ───────────────
-        if request.include_gif and asset_ids:
-            try:
-                from app.incept.gif_generator import generate_cta_pulse_gif, is_gif_allowed_for_size
-                gif_asset_ids: list[str] = []
-                for asset_id in asset_ids:
-                    asset_obj = ASSETS.get(asset_id)
-                    if not asset_obj or not asset_obj.preview_url:
-                        continue
-                    size_str = f"{asset_obj.width}x{asset_obj.height}" if asset_obj.width and asset_obj.height else ""
-                    if not is_gif_allowed_for_size(size_str):
-                        continue
-                    img_path = _resolve_asset_path(asset_obj)
-                    if not img_path or not img_path.exists():
-                        continue
-                    img_bytes = img_path.read_bytes()
-                    gif_bytes = generate_cta_pulse_gif(
-                        image_bytes=img_bytes,
-                        target_size=size_str,
-                        anchors=(asset_obj.analysis or {}).get("anchors") if asset_obj.analysis else None,
-                    )
-                    gif_asset_id = f"{asset_id}_gif"
-                    gif_path = STATIC_DIR / f"{gif_asset_id}.gif"
-                    gif_path.write_bytes(gif_bytes)
-                    gif_preview_url = f"/static/generated/{gif_asset_id}.gif"
-                    gif_asset = Asset(
-                        id=gif_asset_id,
-                        title=f"{asset_obj.title} (GIF)",
-                        type="gif",
-                        gcs_uri=f"gs://incept-assets/generated/{request.workspace_id}/{job_id}/{gif_asset_id}.gif",
-                        preview_url=gif_preview_url,
-                        provider=request.provider,
-                        model=model,
-                        workspace_id=request.workspace_id,
-                        job_id=job_id,
-                        prompt_hash=prompt_hash,
-                        created_by=user.id,
-                        created_at=now,
-                        width=asset_obj.width,
-                        height=asset_obj.height,
-                        theme=asset_obj.theme,
-                        asset_role=AssetRole.generated,
-                        thread_id=job.thread_id,
-                        parent_asset_id=asset_id,
-                        root_asset_id=asset_id,
-                    )
-                    ASSETS[gif_asset_id] = gif_asset
-                    upsert_asset(gif_asset)
-                    gif_asset_ids.append(gif_asset_id)
-                if gif_asset_ids:
-                    asset_ids = asset_ids + gif_asset_ids
-                    logger.info("Generated %d GIF(s) for job %s", len(gif_asset_ids), job_id)
-            except Exception:
-                logger.warning("GIF generation failed for job %s — skipping", job_id, exc_info=True)
-
         job.output_asset_ids = asset_ids
         job.status = JobStatus.completed
         job.progress = 100
-        generation_mode_note = ""
-        reported_variant_count = request.variants
-        if renderer_rendered_outputs:
-            generation_mode_note = " via multi-size renderer"
-        elif contact_sheet_reports:
-            generation_mode_note = " as contact sheet previews"
         job.message = (
-            f"Generated {len(asset_ids)} assets with {provider_label}{generation_mode_note}: "
-            f"{reported_variant_count} variants × {len(request.output_sizes)} sizes."
+            f"Generated {len(asset_ids)} assets with {provider_label}: "
+            f"{request.variants} variants × {len(requested_sizes)} sizes."
         )
         job.updated_at = datetime.utcnow()
 
@@ -2206,8 +1897,6 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
 
         _record_usage(job, request, user, model, prompt_hash, now)
 
-    except ClarificationRequired as exc:
-        _apply_clarification_failure(job, exc.question, manifest=exc.manifest, reason=exc.reason)
     except Exception as exc:
         logger.exception("Image generation failed for job %s", job_id)
         job.status = JobStatus.failed
@@ -2218,147 +1907,6 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
         )
         job.updated_at = datetime.utcnow()
         upsert_job(job)
-
-
-# ── Inpainting / image-edit background task ───────────────────────────────────
-
-def _parse_targets(directive: dict, fallback_prompt: str) -> list[str]:
-    """
-    Extract the list of elements to detect and mask.
-
-    Examples:
-      "去掉 PlayNow 按钮和 logo" → ["PlayNow button", "logo"]
-      directive target: "PlayNow button and logo" → ["PlayNow button", "logo"]
-    """
-    target = directive.get("target", "").strip()
-    if not target:
-        target = fallback_prompt
-
-    # Split on common conjunctions to handle multi-element targets
-    import re
-    parts = re.split(r"\band\b|,|、|和|与|以及", target, flags=re.IGNORECASE)
-    return [p.strip() for p in parts if p.strip()]
-
-
-def _detection_candidates(target: str) -> list[str]:
-    """Expand a user-visible target description into better vision-detection candidates."""
-    import re
-
-    raw = (target or "").strip()
-    if not raw:
-        return []
-
-    normalized = re.sub(r"\s+", " ", raw).strip()
-    lowered = normalized.lower()
-    candidates: list[str] = [normalized]
-
-    if "playnow" in lowered:
-        candidates.extend(["Play Now", "Play Now button", "CTA button"])
-    if "play now" in lowered:
-        candidates.extend(["Play Now button", "CTA button", "green Play Now button"])
-    if "cta" in lowered or "button" in lowered:
-        candidates.extend(["CTA button", "call to action button", normalized.replace("cta", "button")])
-    if "logo" in lowered:
-        candidates.extend(["logo", "brand logo", "game logo"])
-    if "text" in lowered or "headline" in lowered or "title" in lowered:
-        candidates.extend(["text overlay", "headline text", normalized])
-
-    cleaned = re.sub(
-        r"\b(remove|delete|erase|take off|take out|get rid of|replace|change)\b",
-        "",
-        normalized,
-        flags=re.IGNORECASE,
-    ).strip(" '\"-:,")
-    if cleaned and cleaned.lower() != lowered:
-        candidates.append(cleaned)
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        value = candidate.strip()
-        key = value.lower()
-        if value and key not in seen:
-            seen.add(key)
-            deduped.append(value)
-    return deduped
-
-
-def _merge_masks(existing: "bytes | None", new_mask: bytes, ref_image: bytes) -> bytes:
-    """
-    Merge two masks: combined transparent area = union of both edit zones.
-    (transparent = edit; opaque = preserve)
-    """
-    from PIL import Image
-    import io
-
-    if existing is None:
-        return new_mask
-
-    img_a = Image.open(io.BytesIO(existing)).convert("RGBA")
-    img_b = Image.open(io.BytesIO(new_mask)).convert("RGBA")
-
-    # Make combined mask opaque (preserve) everywhere
-    w, h = img_a.size
-    merged = Image.new("RGBA", (w, h), (255, 255, 255, 255))
-
-    pa = img_a.load()
-    pb = img_b.load()
-    pm = merged.load()
-
-    for y in range(h):
-        for x in range(w):
-            # If EITHER mask is transparent here → mark as edit zone
-            if pa[x, y][3] == 0 or pb[x, y][3] == 0:
-                pm[x, y] = (0, 0, 0, 0)
-
-    buf = io.BytesIO()
-    merged.save(buf, format="PNG")
-    return buf.getvalue()
-
-
-def _build_inpaint_prompt(directive: dict, original_theme: str | None) -> str:
-    """
-    Build a focused prompt for images.edit.
-
-    CRITICAL RULE: images.edit prompt must describe what the MASKED AREA
-    should look like AFTER editing — NOT what operation to perform.
-    A long instruction prompt causes the model to ignore the original image
-    and regenerate everything from scratch.
-    """
-    operation = directive.get("operation", "edit")
-    target    = directive.get("target", "")
-    style     = directive.get("style_description") or original_theme or "matching the surrounding art style"
-
-    if operation == "remove":
-        return (
-            f"The area where {target} was is now filled with the natural background "
-            f"seamlessly continuing from the surrounding scene. "
-            f"{style}. No button, no logo, no text overlay — just clean background "
-            f"matching the surrounding colors, textures, and lighting exactly."
-        )
-
-    if operation == "replace":
-        replacement = directive.get("target", "the replacement element")
-        return (
-            f"{replacement}. Rendered in {style}. "
-            f"Same lighting, perspective, and scale as the surrounding context. "
-            f"Blends naturally with the rest of the image."
-        )
-
-    if operation == "edit_text":
-        new_text = directive.get("target_text", "")
-        return (
-            f'The text now reads: "{new_text}". '
-            f"Same font, size, colour, and position as the original text."
-        )
-
-    # Generic / fallback — keep it short
-    enhanced = directive.get("enhanced_prompt", "")
-    # Strip any instruction-style language that confuses the model
-    for bad_prefix in ["OPERATION:", "RULES:", "CRITICAL:"]:
-        if bad_prefix in enhanced:
-            enhanced = enhanced.split(bad_prefix)[0].strip()
-    return enhanced or target or "seamless background matching surrounding area"
 
 
 def create_edit_job(request: "ImageEditRequest", user: User) -> GenerationJob:
@@ -2383,7 +1931,7 @@ def create_edit_job(request: "ImageEditRequest", user: User) -> GenerationJob:
         progress=0,
         lineage_key=lineage_key,
         message="Editing image…",
-        tool_id="openai-image-edit",
+        tool_id="gemini-image-edit" if _is_gemini_image_model(request.model) else "openai-image-edit",
         title=f"Image edit — {request.prompt[:40]}",
         output_asset_ids=[],
         thread_id=thread.thread_id,
@@ -2396,22 +1944,375 @@ def create_edit_job(request: "ImageEditRequest", user: User) -> GenerationJob:
     return job
 
 
-async def run_edit_background(
+def create_generate_gif_job(request: "GenerateGifRequest", user: User) -> GenerationJob:
+    source_asset = _get_asset(request.asset_id)
+    thread = _resolve_thread_for_request(
+        workspace_id=request.workspace_id,
+        created_by=user.id,
+        generation_mode=GenerationMode.free_create,
+        thread_id=request.thread_id,
+        prompt="Generate GIF",
+        source_asset_id=source_asset.id if source_asset else None,
+    )
+    return _make_simple_job(
+        "generate-gif",
+        "Generate GIF",
+        request.workspace_id,
+        thread_id=thread.thread_id,
+        source_asset_id=source_asset.id if source_asset else None,
+    )
+
+
+def create_kakao_clean_job(request: "KakaoCleanRequest", user: User) -> GenerationJob:
+    source_asset = _get_asset(request.asset_id)
+    thread = _resolve_thread_for_request(
+        workspace_id=request.workspace_id,
+        created_by=user.id,
+        generation_mode=GenerationMode.free_create,
+        thread_id=request.thread_id,
+        prompt="Kakao Clean",
+        source_asset_id=source_asset.id if source_asset else None,
+    )
+    return _make_simple_job(
+        "kakao-clean",
+        "Kakao Clean",
+        request.workspace_id,
+        thread_id=thread.thread_id,
+        source_asset_id=source_asset.id if source_asset else None,
+    )
+
+
+def create_kakao_bizboard_job(
+    request: "KakaoBizboardComposeRequest",
+    user: User,
+) -> GenerationJob:
+    source_asset = _get_asset(request.cleaned_asset_id)
+    thread = _resolve_thread_for_request(
+        workspace_id=request.workspace_id,
+        created_by=user.id,
+        generation_mode=GenerationMode.free_create,
+        thread_id=request.thread_id,
+        prompt=request.main_copy or "Kakao Bizboard",
+        source_asset_id=source_asset.id if source_asset else None,
+    )
+    return _make_simple_job(
+        "kakao-bizboard",
+        "Kakao Bizboard",
+        request.workspace_id,
+        thread_id=thread.thread_id,
+        source_asset_id=source_asset.id if source_asset else None,
+    )
+
+
+async def run_kakao_clean_background(
     job_id: str,
-    request: "ImageEditRequest",
+    request: "KakaoCleanRequest",
     user: User,
 ) -> None:
-    """Background task: run inpainting via images.edit and save result."""
     job = JOBS.get(job_id)
     if not job:
         return
 
     settings = get_settings()
-    lineage_key = job.lineage_key
+    effective_model = settings.vertex_gemini_image_model
     now = datetime.utcnow()
 
     try:
-        # ── Resolve original image ──────────────────────────────────────────
+        original_asset = _get_asset(request.asset_id)
+        if not original_asset:
+            raise ValueError(f"Asset {request.asset_id} not found")
+
+        img_path = _resolve_asset_path(original_asset)
+        if not img_path or not img_path.exists():
+            raise FileNotFoundError(f"Image file not found for {request.asset_id}")
+
+        original_bytes = img_path.read_bytes()
+        job.progress = 20
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+        b64_images = await _generate_kakao_clean_image(
+            prompt=KAKAO_CLEAN_PROMPT,
+            source_image=original_bytes,
+            model=effective_model,
+        )
+        if not b64_images:
+            raise RuntimeError("Kakao clean returned no image data")
+
+        job.progress = 80
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+        raw_outputs = [base64.b64decode(b64) for b64 in b64_images if b64]
+        created_assets = await _export_master_images_to_assets(
+            job=job,
+            raw_outputs=raw_outputs,
+            workspace_id=request.workspace_id,
+            created_by=user.id,
+            provider="gemini",
+            model=effective_model,
+            label="Kakao Clean",
+            theme="Kakao Clean",
+            requested_sizes=[],
+            source_asset=original_asset,
+            context_assets=[original_asset],
+            created_at=now,
+        )
+        asset_ids = [asset.id for asset in created_assets]
+        prompt_hash = sha256(KAKAO_CLEAN_PROMPT.encode()).hexdigest()[:16]
+        for asset in created_assets:
+            asset.prompt_hash = prompt_hash
+            upsert_asset(asset)
+
+        job.output_asset_ids = asset_ids
+        job.status = JobStatus.completed
+        job.progress = 100
+        job.message = "Kakao clean completed."
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+        if job.thread_id:
+            thread_store.add_assistant_message(
+                job.thread_id,
+                text="Kakao cleaned image",
+                asset_ids=asset_ids,
+                job_id=job_id,
+            )
+            thread_store.touch_thread(
+                job.thread_id,
+                latest_job_id=job.job_id,
+                latest_asset_id=asset_ids[-1] if asset_ids else None,
+                cover_asset_id=asset_ids[0] if asset_ids else None,
+                title="Kakao Clean",
+            )
+    except Exception as exc:
+        logger.exception("Kakao clean failed for job %s", job_id)
+        job.status = JobStatus.failed
+        job.progress = 0
+        error_summary = f"{exc.__class__.__name__}: {str(exc)}"[:500]
+        job.message = f"Kakao clean failed: {error_summary}"
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+
+async def run_generate_gif_background(
+    job_id: str,
+    request: "GenerateGifRequest",
+    user: User,
+) -> None:
+    job = JOBS.get(job_id)
+    if not job:
+        return
+
+    now = datetime.utcnow()
+
+    try:
+        source_asset = _get_asset(request.asset_id)
+        if not source_asset:
+            raise ValueError(f"Asset {request.asset_id} not found")
+        if source_asset.type == "gif":
+            raise ValueError("Selected asset is already a GIF")
+
+        if not _mark_generation_progress(job, 20, "Loading source image for GIF generation..."):
+            return
+
+        img_path = _resolve_asset_path(source_asset)
+        if not img_path or not img_path.exists():
+            raise FileNotFoundError(f"Image file not found for {request.asset_id}")
+
+        image_bytes = img_path.read_bytes()
+        width = source_asset.width
+        height = source_asset.height
+        if not width or not height:
+            width, height = _read_image_size(image_bytes)
+        size_str = f"{width}x{height}" if width and height else ""
+
+        from app.incept.gif_generator import generate_cta_pulse_gif, is_gif_allowed_for_size
+
+        if not size_str or not is_gif_allowed_for_size(size_str):
+            raise ValueError(
+                "GIF generation is only supported for 320x50, 728x90, 1200x222, "
+                "640x100, 300x250, 360x640, 640x360, and 480x480."
+            )
+
+        if not _mark_generation_progress(job, 55, f"Generating CTA pulse GIF for {size_str}..."):
+            return
+
+        gif_bytes = generate_cta_pulse_gif(
+            image_bytes=image_bytes,
+            target_size=size_str,
+            anchors=(source_asset.analysis or {}).get("anchors") if source_asset.analysis else None,
+        )
+
+        gif_asset_id = f"{job.lineage_key}_{size_str}_gif"
+        gif_path = STATIC_DIR / f"{gif_asset_id}.gif"
+        gif_path.write_bytes(gif_bytes)
+        gif_preview_url = f"/static/generated/{gif_asset_id}.gif"
+        prompt_hash = sha256(f"generate-gif|{request.asset_id}|{size_str}".encode()).hexdigest()[:16]
+        gif_asset = Asset(
+            id=gif_asset_id,
+            title=f"{source_asset.title} (GIF)",
+            type="gif",
+            gcs_uri=f"gs://incept-assets/generated/{request.workspace_id}/{job.job_id}/{gif_asset_id}.gif",
+            preview_url=gif_preview_url,
+            provider="internal",
+            model="cta-pulse-gif",
+            workspace_id=request.workspace_id,
+            job_id=job.job_id,
+            prompt_hash=prompt_hash,
+            created_by=user.id,
+            created_at=now,
+            width=width,
+            height=height,
+            theme=source_asset.theme,
+            asset_role=AssetRole.generated,
+            analysis={
+                "source_prompt": "Generate CTA pulse GIF from existing static asset.",
+                "gif_pipeline": "cta_pulse_v1",
+                "target_size": size_str,
+            },
+            thread_id=job.thread_id,
+            parent_asset_id=source_asset.id,
+            root_asset_id=_inherit_root_asset_id(source_asset, gif_asset_id),
+        )
+        ASSETS[gif_asset_id] = gif_asset
+        upsert_asset(gif_asset)
+
+        job.output_asset_ids = [gif_asset_id]
+        job.status = JobStatus.completed
+        job.progress = 100
+        job.message = f"Generated GIF for {size_str}."
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+        if job.thread_id:
+            thread_store.add_assistant_message(
+                job.thread_id,
+                text=f"Generated GIF from {source_asset.title}",
+                asset_ids=[gif_asset_id],
+                job_id=job_id,
+            )
+            thread_store.touch_thread(
+                job.thread_id,
+                latest_job_id=job.job_id,
+                latest_asset_id=gif_asset_id,
+                cover_asset_id=gif_asset_id,
+                title=source_asset.theme or source_asset.title or "Generated GIF",
+            )
+    except Exception as exc:
+        logger.exception("Generate GIF failed for job %s", job_id)
+        job.status = JobStatus.failed
+        job.progress = 0
+        job.message = f"Generate GIF failed: {str(exc).strip() or exc.__class__.__name__}"
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+
+async def run_kakao_bizboard_background(
+    job_id: str,
+    request: "KakaoBizboardComposeRequest",
+    user: User,
+) -> None:
+    job = JOBS.get(job_id)
+    if not job:
+        return
+
+    now = datetime.utcnow()
+
+    try:
+        cleaned_asset = _get_asset(request.cleaned_asset_id)
+        if not cleaned_asset:
+            raise ValueError(f"Cleaned asset {request.cleaned_asset_id} not found")
+
+        composed_asset = _get_asset(request.composed_asset_id)
+        if not composed_asset:
+            raise ValueError(f"Composed asset {request.composed_asset_id} not found")
+
+        composed_path = _resolve_asset_path(composed_asset)
+        if not composed_path or not composed_path.exists():
+            raise FileNotFoundError(
+                f"Composed image file not found for {request.composed_asset_id}"
+            )
+
+        composed_bytes = composed_path.read_bytes()
+        job.progress = 40
+        job.message = "Finalizing Kakao Bizboard asset..."
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+        created_assets = await _export_master_images_to_assets(
+            job=job,
+            raw_outputs=[composed_bytes],
+            workspace_id=request.workspace_id,
+            created_by=user.id,
+            provider="kakao",
+            model="bizboard-template",
+            label="Kakao Bizboard",
+            theme="Kakao Bizboard",
+            requested_sizes=["1029x258"],
+            source_asset=cleaned_asset,
+            context_assets=[cleaned_asset],
+            created_at=now,
+        )
+        asset_ids = [asset.id for asset in created_assets]
+
+        prompt_hash_source = "|".join([
+            request.main_copy.strip(),
+            request.app_download_copy.strip(),
+            request.dsp_name.strip(),
+            "gacha" if request.gacha else "standard",
+        ])
+        prompt_hash = sha256(prompt_hash_source.encode()).hexdigest()[:16]
+        for asset in created_assets:
+            asset.prompt_hash = prompt_hash
+            upsert_asset(asset)
+
+        delete_asset(request.composed_asset_id)
+
+        job.output_asset_ids = asset_ids
+        job.status = JobStatus.completed
+        job.progress = 100
+        job.message = "Kakao Bizboard completed."
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+        if job.thread_id:
+            thread_store.add_assistant_message(
+                job.thread_id,
+                text=f"Kakao Bizboard: {request.main_copy}",
+                asset_ids=asset_ids,
+                job_id=job_id,
+            )
+            thread_store.touch_thread(
+                job.thread_id,
+                latest_job_id=job.job_id,
+                latest_asset_id=asset_ids[-1] if asset_ids else None,
+                cover_asset_id=asset_ids[0] if asset_ids else None,
+                title="Kakao Bizboard",
+            )
+    except Exception as exc:
+        logger.exception("Kakao Bizboard failed for job %s", job_id)
+        error_summary = str(exc).strip() or exc.__class__.__name__
+        job.status = JobStatus.failed
+        job.progress = 0
+        job.message = f"Kakao Bizboard failed: {error_summary}"
+        job.updated_at = datetime.utcnow()
+        upsert_job(job)
+
+
+async def run_edit_background(
+    job_id: str,
+    request: "ImageEditRequest",
+    user: User,
+) -> None:
+    """Run a direct image edit without legacy orchestration steps."""
+    job = JOBS.get(job_id)
+    if not job:
+        return
+
+    now = datetime.utcnow()
+
+    try:
         original_asset = _get_asset(request.asset_id)
         if not original_asset:
             raise ValueError(f"Asset {request.asset_id} not found")
@@ -2426,8 +2327,6 @@ async def run_edit_background(
             raise FileNotFoundError(f"Image file not found for {request.asset_id}")
 
         original_bytes = img_path.read_bytes()
-
-        # ── Decode mask if provided (from inpainting canvas) ───────────────
         mask_bytes: bytes | None = None
         if request.mask_data:
             mask_b64 = request.mask_data
@@ -2438,144 +2337,89 @@ async def run_edit_background(
         job.progress = 15
         job.updated_at = datetime.utcnow()
 
-        # ── Resolve extra reference assets (logos etc.) ─────────────────────
         logo_assets = [_get_asset(aid) for aid in (request.extra_asset_ids or []) if _get_asset(aid)]
-
-        # ── Orchestrate: classify intent + enhance prompt ───────────────────
-        from app.incept.orchestrator import orchestrate, auto_detect_and_mask, build_operation_prompt
-        session_history = thread_store.get_context_messages(job.thread_id or "", n=4)
-
-        directive = await orchestrate(
-            user_prompt=request.prompt,
-            reference_assets=[original_asset],
-            session_history=session_history,
-            target_sizes=_effective_output_sizes(request.output_sizes, original_asset),
-            static_dir=STATIC_DIR,
-            upload_dir=UPLOAD_DIR,
-            api_key=settings.openai_api_key,
-            logo_assets=logo_assets or None,
-        )
-        manifest = build_preservation_manifest(
-            task_type="edit",
-            prompt=request.prompt,
-            target_sizes=_effective_output_sizes(request.output_sizes, original_asset),
-            context_assets=[original_asset, *logo_assets],
-            directive=directive,
-            clarification_note=request.clarification_note,
-        )
-        ensure_manifest_clarity(manifest)
-
-        operation = directive.get("operation", "edit")
         job.progress = 25
         job.updated_at = datetime.utcnow()
 
-        # ── LOGO PLACEMENT: skip AI, use Pillow direct compositing ──────────
-        if operation == "logo_placement" and logo_assets:
-            logo_path = _resolve_asset_path(logo_assets[0])
-            if logo_path and logo_path.exists():
-                from app.incept.composite import composite_logo
-                logo_bytes = logo_path.read_bytes()
-                position = directive.get("position", "top-left")
-                result_bytes = composite_logo(original_bytes, logo_bytes, position)
+        if _is_gemini_image_model(request.model):
+            reference_images = [original_bytes]
+            for asset in logo_assets:
+                asset_bytes = _load_asset_bytes(asset)
+                if asset_bytes:
+                    reference_images.append(asset_bytes)
 
-                created_assets = await _export_master_images_to_assets(
-                    job=job,
-                    raw_outputs=[result_bytes],
-                    workspace_id=request.workspace_id,
-                    created_by=user.id,
-                    provider="pillow",
-                    model="pillow",
-                    label=f"Logo placed: {position}",
-                    theme=request.theme or "logo-composite",
-                    requested_sizes=request.output_sizes,
-                    source_asset=original_asset,
-                    context_assets=[original_asset, *logo_assets],
-                    api_key=settings.openai_api_key,
-                    created_at=now,
-                    manifest=manifest,
-                    use_smart_resize=False,
-                )
-                asset_ids = [asset.id for asset in created_assets]
-                job.output_asset_ids = asset_ids
-                job.status = JobStatus.completed
-                job.progress = 100
-                job.message = f"Logo composited at {position}."
-                job.updated_at = datetime.utcnow()
-                upsert_job(job)
-                if job.thread_id:
-                    thread_store.add_assistant_message(
-                        job.thread_id,
-                        text=f"Placed logo at {position}",
-                        asset_ids=asset_ids,
-                        job_id=job_id,
-                    )
-                    thread_store.touch_thread(
-                        job.thread_id,
-                        latest_job_id=job.job_id,
-                        latest_asset_id=asset_ids[-1] if asset_ids else None,
-                        cover_asset_id=asset_ids[0] if asset_ids else None,
-                        title=request.theme or original_asset.theme or None,
-                    )
-                return   # ← done, no AI call needed
-
-        # ── Auto-detect element mask (if no manual mask) ──────────────────────
-        # CRITICAL: images.edit REQUIRES a mask to work correctly.
-        # Without a mask, OpenAI edits the entire image and produces a completely
-        # different result — it does NOT preserve the original.
-        if not mask_bytes and settings.openai_api_key:
-            # Detect one or more elements to mask.
-            # If the user said "去掉 PlayNow 和 logo", detect each separately.
-            elements_to_mask = _parse_targets(directive, request.prompt)
-            combined_mask: bytes | None = None
-
-            for element in elements_to_mask:
-                detected = None
-                for candidate in _detection_candidates(element):
-                    detected = await auto_detect_and_mask(
-                        image_bytes=original_bytes,
-                        element_description=candidate,
-                        api_key=settings.openai_api_key,
-                    )
-                    if detected:
-                        combined_mask = _merge_masks(combined_mask, detected, original_bytes)
-                        logger.info(
-                            "Detected mask for '%s' via candidate '%s' job=%s",
-                            element,
-                            candidate,
-                            job_id,
-                        )
-                        break
-
-            mask_bytes = combined_mask
-
-        # If still no mask at all, we cannot safely edit without destroying the image
-        if not mask_bytes:
-            unresolved_targets = _parse_targets(directive, request.prompt)
-            unresolved_text = ", ".join(unresolved_targets[:2]) or "the target element"
-            _apply_clarification_failure(
-                job,
-                (
-                    f"I couldn't automatically locate {unresolved_text}. "
-                    "Please paint a mask over the area to change, or describe the target more specifically."
-                ),
-                manifest=manifest,
-                reason="Auto-detection could not confidently locate the requested edit target.",
+            b64_images = await _generate_images_gemini_from_references(
+                prompt=request.prompt,
+                reference_images=reference_images,
+                model=request.model,
+                variants=request.variants,
+                target_size=_effective_output_sizes(request.output_sizes, original_asset)[0],
             )
+            if not b64_images:
+                raise RuntimeError("Gemini image edit returned no image data")
+
+            job.progress = 80
+            job.updated_at = datetime.utcnow()
+
+            prompt_hash = sha256(request.prompt.encode()).hexdigest()[:16]
+            raw_outputs = [base64.b64decode(b64) for b64 in b64_images if b64]
+            created_assets = await _export_master_images_to_assets(
+                job=job,
+                raw_outputs=raw_outputs,
+                workspace_id=request.workspace_id,
+                created_by=user.id,
+                provider="gemini",
+                model=request.model,
+                label=request.theme or "Edit",
+                theme=request.theme or original_asset.theme,
+                requested_sizes=request.output_sizes,
+                source_asset=original_asset,
+                context_assets=[original_asset, *logo_assets],
+                created_at=now,
+            )
+            asset_ids = [asset.id for asset in created_assets]
+            for asset in created_assets:
+                asset.prompt_hash = prompt_hash
+                upsert_asset(asset)
+
+            job.output_asset_ids = asset_ids
+            job.status = JobStatus.completed
+            job.progress = 100
+            job.message = f"Edited {len(asset_ids)} image(s)."
+            job.updated_at = datetime.utcnow()
+            upsert_job(job)
+
+            if job.thread_id:
+                thread_store.add_assistant_message(
+                    job.thread_id,
+                    text=f"Edited image: {request.prompt}",
+                    asset_ids=asset_ids,
+                    job_id=job_id,
+                )
+                thread_store.touch_thread(
+                    job.thread_id,
+                    latest_job_id=job.job_id,
+                    latest_asset_id=asset_ids[-1] if asset_ids else None,
+                    cover_asset_id=asset_ids[0] if asset_ids else None,
+                    title=request.theme or original_asset.theme or None,
+                )
+            return
+
+        if not mask_bytes:
+            job.status = JobStatus.failed
+            job.progress = 0
+            job.message = "Manual mask required for non-Gemini edits."
+            job.updated_at = datetime.utcnow()
+            upsert_job(job)
             return
 
         job.progress = 40
         job.updated_at = datetime.utcnow()
 
-        # ── Build the inpainting prompt ────────────────────────────────────────
-        # IMPORTANT: images.edit prompt describes what to PUT IN the masked area,
-        # NOT what operation to perform. Keep it short and visual.
-        edit_prompt = _build_inpaint_prompt_v2(directive, original_asset.theme)
-
-        # ── Call images.edit ────────────────────────────────────────────────
         b64_images = await _edit_image_openai(
             original_bytes=original_bytes,
             mask_bytes=mask_bytes,
-            prompt=edit_prompt,
+            prompt=request.prompt,
             model=request.model,
             variants=request.variants,
         )
@@ -2604,10 +2448,7 @@ async def run_edit_background(
             requested_sizes=request.output_sizes,
             source_asset=original_asset,
             context_assets=[original_asset, *logo_assets],
-            api_key=settings.openai_api_key,
             created_at=now,
-            manifest=manifest,
-            use_smart_resize=False,
         )
         asset_ids = [asset.id for asset in created_assets]
         for asset in created_assets:
@@ -2636,14 +2477,12 @@ async def run_edit_background(
                 cover_asset_id=asset_ids[0] if asset_ids else None,
                 title=request.theme or original_asset.theme or None,
             )
-
-    except ClarificationRequired as exc:
-        _apply_clarification_failure(job, exc.question, manifest=exc.manifest, reason=exc.reason)
-    except Exception:
+    except Exception as exc:
         logger.exception("Image edit failed for job %s", job_id)
         job.status = JobStatus.failed
         job.progress = 0
-        job.message = "Image edit failed. Check OPENAI_API_KEY and logs."
+        error_summary = f"{exc.__class__.__name__}: {str(exc)}"[:500]
+        job.message = f"Image edit failed for model {request.model}: {error_summary}"
         job.updated_at = datetime.utcnow()
         upsert_job(job)
 
@@ -2797,15 +2636,6 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
             "Match the existing art style, lighting, colors, characters, and scene. "
             "Continue any elements at the edges naturally."
         )
-        manifest = build_preservation_manifest(
-            task_type="outpaint",
-            prompt=prompt,
-            target_sizes=_effective_output_sizes(request.output_sizes, original),
-            context_assets=[original],
-            directive={"operation": "outpaint"},
-            clarification_note=request.clarification_note,
-        )
-        ensure_manifest_clarity(manifest)
 
         b64_list = await _edit_image_openai(
             original_bytes=expanded_bytes,
@@ -2829,9 +2659,6 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
             requested_sizes=request.output_sizes,
             source_asset=original,
             context_assets=[original],
-            api_key=get_settings().openai_api_key,
-            manifest=manifest,
-            use_smart_resize=False,
         )
         asset_ids = [asset.id for asset in created_assets]
 
@@ -2856,8 +2683,6 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
                 title=original.theme or None,
             )
 
-    except ClarificationRequired as exc:
-        _apply_clarification_failure(job, exc.question, manifest=exc.manifest, reason=exc.reason)
     except Exception:
         logger.exception("Outpaint failed for job %s", job_id)
         job.status = JobStatus.failed
@@ -2906,15 +2731,6 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
 
         from app.incept.composite import remove_background
         result_bytes, used_rembg = remove_background(img_path.read_bytes())
-        manifest = build_preservation_manifest(
-            task_type="remove_bg",
-            prompt=request.replacement_prompt or "Remove background",
-            target_sizes=_effective_output_sizes(request.output_sizes, original),
-            context_assets=[original],
-            directive={"operation": "remove_bg"},
-            clarification_note=request.clarification_note,
-        )
-        ensure_manifest_clarity(manifest)
 
         if not used_rembg or request.replacement_prompt:
             # Fall back to images.edit for replacement or when rembg unavailable
@@ -2943,9 +2759,6 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
                 requested_sizes=request.output_sizes,
                 source_asset=original,
                 context_assets=[original],
-                api_key=get_settings().openai_api_key,
-                manifest=manifest,
-                use_smart_resize=False,
             )
             asset_ids = [asset.id for asset in created_assets]
         else:
@@ -2963,9 +2776,6 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
                 requested_sizes=request.output_sizes,
                 source_asset=original,
                 context_assets=[original],
-                api_key=get_settings().openai_api_key,
-                manifest=manifest,
-                use_smart_resize=False,
             )
             asset_ids = [asset.id for asset in created_assets]
 
@@ -2990,8 +2800,6 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
                 title=original.theme or None,
             )
 
-    except ClarificationRequired as exc:
-        _apply_clarification_failure(job, exc.question, manifest=exc.manifest, reason=exc.reason)
     except Exception:
         logger.exception("Remove-BG failed for job %s", job_id)
         job.status = JobStatus.failed
@@ -3046,15 +2854,6 @@ async def run_add_text_background(job_id: str, request: AddTextRequest, user: Us
             position=request.position,
             font_size_ratio=request.font_size_ratio,
         )
-        manifest = build_preservation_manifest(
-            task_type="add_text",
-            prompt=request.text,
-            target_sizes=_effective_output_sizes(request.output_sizes, original),
-            context_assets=[original],
-            directive={"operation": "add_text"},
-            clarification_note=request.clarification_note,
-        )
-        ensure_manifest_clarity(manifest)
 
         created_assets = await _export_master_images_to_assets(
             job=job,
@@ -3068,9 +2867,6 @@ async def run_add_text_background(job_id: str, request: AddTextRequest, user: Us
             requested_sizes=request.output_sizes,
             source_asset=original,
             context_assets=[original],
-            api_key=get_settings().openai_api_key,
-            manifest=manifest,
-            use_smart_resize=False,
         )
         asset_ids = [asset.id for asset in created_assets]
 
@@ -3095,52 +2891,9 @@ async def run_add_text_background(job_id: str, request: AddTextRequest, user: Us
                 title=original.theme or request.text[:40],
             )
 
-    except ClarificationRequired as exc:
-        _apply_clarification_failure(job, exc.question, manifest=exc.manifest, reason=exc.reason)
     except Exception:
         logger.exception("Add-text failed for job %s", job_id)
         job.status = JobStatus.failed
         job.message = "Text overlay failed."
         job.updated_at = datetime.utcnow()
         upsert_job(job)
-
-
-def _build_inpaint_prompt_v2(directive: dict, original_theme: str | None) -> str:
-    """
-    Build a shorter, edit-focused prompt for images.edit.
-
-    The prompt should describe only what the masked area should look like after
-    editing, not a full procedural instruction set.
-    """
-    operation = directive.get("operation", "edit")
-    target = directive.get("target", "")
-    style = directive.get("style_description") or original_theme or "matching the surrounding art style"
-
-    if operation == "remove":
-        target_note = f" where {target} used to be" if target else ""
-        return (
-            f"The masked area{target_note} is now seamless natural background that continues "
-            f"from the surrounding scene. Render it in {style}. Match the surrounding colors, "
-            f"textures, edges, and lighting exactly. Do not add any new object, button, logo, "
-            f"or text inside the masked region."
-        )
-
-    if operation == "replace":
-        replacement = directive.get("target", "the replacement element")
-        return (
-            f"{replacement}. Rendered in {style}. Same lighting, perspective, and scale as "
-            f"the surrounding context. Blends naturally with the rest of the image."
-        )
-
-    if operation == "edit_text":
-        new_text = directive.get("target_text", "")
-        return (
-            f'The text now reads: "{new_text}". '
-            f"Same font, size, colour, and position as the original text."
-        )
-
-    enhanced = directive.get("enhanced_prompt", "")
-    for bad_prefix in ["OPERATION:", "RULES:", "CRITICAL:"]:
-        if bad_prefix in enhanced:
-            enhanced = enhanced.split(bad_prefix)[0].strip()
-    return enhanced or target or "seamless background matching surrounding area"

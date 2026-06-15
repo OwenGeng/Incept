@@ -24,7 +24,7 @@ export default async function SignInPage() {
           style={{ width: 52, height: 52, borderRadius: 12, objectFit: "contain" }}
         />
         <div className="text-center">
-          <div className="text-[26px] font-semibold tracking-tight text-foreground">Incept</div>
+          <div className="text-[26px] font-semibold tracking-tight text-foreground">Linglong</div>
           <div className="mt-0.5 text-sm text-muted-foreground">AI Operating System</div>
         </div>
       </div>
@@ -33,7 +33,7 @@ export default async function SignInPage() {
       <div className="w-full max-w-[420px] overflow-hidden rounded-[20px] border border-border bg-card shadow-sm">
 
         <div className="px-8 pt-8 pb-6 text-center">
-          <h1 className="text-[18px] font-semibold text-foreground">Sign in to Incept</h1>
+          <h1 className="text-[18px] font-semibold text-foreground">Sign in to Linglong</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             Use your Moloco Google account to continue
           </p>

@@ -5,11 +5,11 @@ export default function BrandPage() {
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="border-b border-border pb-8">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Incept Design System
+          Linglong Design System
         </p>
         <h1 className="text-[36px] font-bold tracking-tight text-foreground">Brand & UI Guidelines</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Internal reference for Scout and Studio — the two products of the Incept platform.
+          Internal reference for Scout and Studio — the two products of the Linglong platform.
           Update when tokens or components change.
         </p>
       </div>

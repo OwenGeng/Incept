@@ -29,23 +29,35 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async signIn({ user }) {
       if (!user.email) return false;
+      const email = user.email.toLowerCase();
 
-      // Hardcoded admin fallback — works even if the API is down
-      if (user.email.toLowerCase() === "owen.geng@moloco.com") {
+      // Hardcoded admin — works even if the API is down
+      if (email === "owen.geng@moloco.com") {
         user.role = "admin";
         user.allowedProjects = null;
         user.allowedRouting = null;
         return true;
       }
 
-      const record = await getAccessRecord(user.email);
-      // record.role is null when email is unknown — deny access
-      if (!record || !record.role) return false;
+      // BQ explicit record takes priority (allows per-user role overrides for @moloco.com too)
+      const record = await getAccessRecord(email);
+      if (record?.role) {
+        user.role = record.role as UserRole;
+        user.allowedProjects = record.allowed_projects;
+        user.allowedRouting = deriveAllowedRouting(user.role, user.allowedProjects);
+        return true;
+      }
 
-      user.role = record.role as UserRole;
-      user.allowedProjects = record.allowed_projects;
-      user.allowedRouting = deriveAllowedRouting(user.role, user.allowedProjects);
-      return true;
+      // All @moloco.com accounts auto-granted admin access
+      if (email.endsWith("@moloco.com")) {
+        user.role = "admin";
+        user.allowedProjects = null;
+        user.allowedRouting = null;
+        return true;
+      }
+
+      // Non-moloco without an explicit record — deny
+      return false;
     },
 
     async jwt({ token, user }) {
@@ -55,16 +67,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.allowedProjects = user.allowedProjects;
         token.allowedRouting = user.allowedRouting;
       } else if (token.email && (!token.role || token.allowedProjects === undefined)) {
-        // Token refresh — hardcoded admin takes priority, then re-fetch from BQ
-        if ((token.email as string).toLowerCase() === "owen.geng@moloco.com") {
+        const email = (token.email as string).toLowerCase();
+        // Token refresh — hardcoded admin first, then BQ, then @moloco.com fallback
+        if (email === "owen.geng@moloco.com") {
           token.role = "admin";
           token.allowedProjects = null;
           token.allowedRouting = null;
         } else {
-          const record = await getAccessRecord(token.email as string);
-          token.role = record?.role as UserRole | undefined;
-          token.allowedProjects = record?.allowed_projects ?? null;
-          token.allowedRouting = deriveAllowedRouting(token.role as UserRole | undefined, token.allowedProjects as string[] | null | undefined);
+          const record = await getAccessRecord(email);
+          if (record?.role) {
+            token.role = record.role as UserRole | undefined;
+            token.allowedProjects = record.allowed_projects ?? null;
+            token.allowedRouting = deriveAllowedRouting(token.role as UserRole | undefined, token.allowedProjects as string[] | null | undefined);
+          } else if (email.endsWith("@moloco.com")) {
+            token.role = "admin";
+            token.allowedProjects = null;
+            token.allowedRouting = null;
+          }
         }
       }
       return token;

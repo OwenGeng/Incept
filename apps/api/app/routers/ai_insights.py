@@ -2,7 +2,7 @@ import logging
 import threading
 import time
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.models.ai_insights import AiInsightsPayload
 from app.services.ai_insights import AiInsightsService
@@ -64,20 +64,31 @@ def _get_leads(supply: SupplySmbLiveService) -> list[dict]:
             return _leads_cache  # return whatever we had (possibly [])
 
 
+_VALID_SCOPES = {"no-sdk-no-ua", "sdk-no-ua", "ua-no-sdk"}
+
+
 @router.get("", response_model=AiInsightsPayload)
-async def get_ai_insights() -> AiInsightsPayload:
-    """
-    Returns real-data AI insights:
-    - Rule-based insights from companies + leads
-    - Live dataset cache status
-    - Recent lead activity
-    - Gemini-generated memory summary (cached inside AiInsightsService)
-    """
+async def get_ai_insights(
+    scope: str = Query(default="no-sdk-no-ua"),
+) -> AiInsightsPayload:
     supply = _get_supply()
-    insights = _get_insights()
+    insights_svc = _get_insights()
 
-    dataset = supply._get_dataset()          # fast — uses supply_smb_live cache
-    companies = dataset["companies"]
-    leads = _get_leads(supply)               # fast — cached 1 h
+    if scope not in _VALID_SCOPES:
+        scope = "no-sdk-no-ua"
 
-    return insights.get_payload(companies, leads)
+    if scope == "no-sdk-no-ua":
+        dataset = supply._get_dataset()
+        companies = dataset["companies"]
+        leads = _get_leads(supply)
+        return insights_svc.get_payload(companies, leads)
+
+    if scope == "sdk-no-ua":
+        rows = supply._get_custom_dataset_rows("list-1")
+        companies = supply._build_custom_companies("list-1", rows)
+        return insights_svc.get_sdk_no_ua_payload(companies, rows)
+
+    # ua-no-sdk
+    rows = supply._get_custom_dataset_rows("list-3")
+    companies = supply._build_custom_companies("list-3", rows)
+    return insights_svc.get_ua_no_sdk_payload(companies, rows)

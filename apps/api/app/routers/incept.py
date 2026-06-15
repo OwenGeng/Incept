@@ -26,8 +26,11 @@ from app.incept.models import (
     CreativeThread,
     GenerationJob,
     GenerationRequest,
+    GenerateGifRequest,
     ImageEditRequest,
     JobStatus,
+    KakaoBizboardComposeRequest,
+    KakaoCleanRequest,
     OutpaintRequest,
     ProviderConfig,
     RemoveBGRequest,
@@ -47,7 +50,10 @@ from app.incept.store import (
     UPLOAD_DIR,
     create_add_text_job,
     create_edit_job,
+    create_generate_gif_job,
     create_image_generation_job,
+    create_kakao_bizboard_job,
+    create_kakao_clean_job,
     create_outpaint_job,
     create_remove_bg_job,
     delete_asset,
@@ -59,11 +65,13 @@ from app.incept.store import (
     list_workspaces,
     run_add_text_background,
     run_edit_background,
+    run_generate_gif_background,
     run_generation_background,
+    run_kakao_bizboard_background,
+    run_kakao_clean_background,
     run_outpaint_background,
     run_remove_bg_background,
     save_uploaded_asset,
-    split_saved_contact_sheet_asset,
 )
 from app.incept import session_store, thread_store
 from app.incept.tool_registry import get_tools, update_tool_status
@@ -201,11 +209,6 @@ class DownloadZipRequest(BaseModel):
     prefix: str = "incept"
 
 
-class ContactSheetSplitResponse(BaseModel):
-    asset_ids: list[str]
-    count: int
-
-
 @router.post("/assets/download-zip")
 async def download_assets_zip(
     body: DownloadZipRequest,
@@ -257,27 +260,6 @@ async def download_assets_zip(
             "Content-Length": str(len(zip_bytes)),
         },
     )
-
-
-@router.post("/assets/{asset_id}/split-contact-sheet", response_model=ContactSheetSplitResponse)
-async def split_contact_sheet_endpoint(
-    asset_id: str,
-    user: User = Depends(get_current_user),
-) -> ContactSheetSplitResponse:
-    try:
-        assets = await split_saved_contact_sheet_asset(asset_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unexpected split failure: {type(exc).__name__}: {exc}",
-        ) from exc
-    return ContactSheetSplitResponse(asset_ids=[asset.id for asset in assets], count=len(assets))
 
 
 @router.get("/threads", response_model=list[CreativeThread])
@@ -339,11 +321,6 @@ async def create_image_generation_job_endpoint(
             status_code=400,
             detail=f"variants cannot exceed {settings.max_image_variants}",
         )
-    if len(request.output_sizes) > settings.max_output_sizes:
-        raise HTTPException(
-            status_code=400,
-            detail=f"output_sizes cannot exceed {settings.max_output_sizes}",
-        )
     job = create_image_generation_job(request, user)
     if job.status.value == "running":
         background_tasks.add_task(run_generation_background, job.job_id, request, user)
@@ -371,6 +348,65 @@ async def image_edit_endpoint(
             job.thread_id,
             text=f"[Edit] {request.prompt}",
             reference_asset_ids=[request.asset_id, *request.extra_asset_ids],
+        )
+    return job
+
+
+@router.post("/workflows/generate-gif", response_model=GenerationJob)
+async def generate_gif_endpoint(
+    request: GenerateGifRequest,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    if request.asset_id not in ASSETS and request.asset_id not in SOURCE_ASSETS:
+        raise HTTPException(status_code=404, detail=f"Asset {request.asset_id} not found")
+    job = create_generate_gif_job(request, user)
+    background_tasks.add_task(run_generate_gif_background, job.job_id, request, user)
+    if job.thread_id:
+        thread_store.add_user_message(
+            job.thread_id,
+            text="[Generate GIF] CTA pulse animation",
+            reference_asset_ids=[request.asset_id],
+        )
+    return job
+
+
+@router.post("/workflows/kakao-clean", response_model=GenerationJob)
+async def kakao_clean_endpoint(
+    request: KakaoCleanRequest,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    if request.asset_id not in ASSETS and request.asset_id not in SOURCE_ASSETS:
+        raise HTTPException(status_code=404, detail=f"Asset {request.asset_id} not found")
+    job = create_kakao_clean_job(request, user)
+    background_tasks.add_task(run_kakao_clean_background, job.job_id, request, user)
+    if job.thread_id:
+        thread_store.add_user_message(
+            job.thread_id,
+            text="[Kakao Clean] Remove logo and text",
+            reference_asset_ids=[request.asset_id],
+        )
+    return job
+
+
+@router.post("/workflows/kakao-bizboard", response_model=GenerationJob)
+async def kakao_bizboard_endpoint(
+    request: KakaoBizboardComposeRequest,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    if request.cleaned_asset_id not in ASSETS and request.cleaned_asset_id not in SOURCE_ASSETS:
+        raise HTTPException(status_code=404, detail=f"Asset {request.cleaned_asset_id} not found")
+    if request.composed_asset_id not in ASSETS and request.composed_asset_id not in SOURCE_ASSETS:
+        raise HTTPException(status_code=404, detail=f"Asset {request.composed_asset_id} not found")
+    job = create_kakao_bizboard_job(request, user)
+    background_tasks.add_task(run_kakao_bizboard_background, job.job_id, request, user)
+    if job.thread_id:
+        thread_store.add_user_message(
+            job.thread_id,
+            text=f"[Kakao Bizboard] {request.main_copy}",
+            reference_asset_ids=[request.cleaned_asset_id],
         )
     return job
 

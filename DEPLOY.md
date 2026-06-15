@@ -329,6 +329,29 @@ gcloud run services add-iam-policy-binding incept-api \
 
 ---
 
+### ❌ `error getting credentials - exec: "docker-credential-gcloud": executable file not found in $PATH`（macOS）
+
+**原因**：`deploy.sh` 调用 `gcloud auth configure-docker` 时，会把 `docker-credential-gcloud` 写入 `~/.docker/config.json` 作为 credential helper。但 Docker Desktop on macOS 是 GUI 进程，不读 `~/.zshrc`，找不到 gcloud bin 目录，导致 push 时报错。Windows 的 Docker Desktop 会继承系统 PATH，所以没有这个问题。
+
+**一次性永久修复**（macOS 只需做一次）：
+
+```bash
+# 找到 docker-credential-gcr（gcloud SDK 自带，名字与 configure-docker 预期的不同）
+ls ~/google-cloud-sdk/bin/ | grep docker
+# 应该看到 docker-credential-gcr
+
+# 软链接两个名字（/usr/local/bin 在 Docker Desktop 的 PATH 里）
+sudo ln -sf ~/google-cloud-sdk/bin/docker-credential-gcr /usr/local/bin/docker-credential-gcloud
+sudo ln -sf ~/google-cloud-sdk/bin/docker-credential-gcr /usr/local/bin/docker-credential-gcr
+
+# 验证
+which docker-credential-gcloud   # 应该输出 /usr/local/bin/docker-credential-gcloud
+```
+
+做完后直接 `bash deploy.sh web` 即可，不需要其他操作。
+
+---
+
 ### ❌ Docker build 时报找不到 `sql/` 目录
 
 **原因**：API 的 `Dockerfile.api` 需要同时复制 `apps/api/` 和 `sql/` 两个目录，build context 必须是项目根目录，不能是 `apps/api/` 子目录。

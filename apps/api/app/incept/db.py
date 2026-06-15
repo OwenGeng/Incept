@@ -40,10 +40,6 @@ def init_db() -> None:
                 output_asset_ids TEXT DEFAULT '[]',
                 thread_id        TEXT,
                 source_asset_id  TEXT,
-                clarification_question TEXT,
-                clarification_reason   TEXT,
-                clarification_options_json TEXT DEFAULT '[]',
-                clarification_manifest_json TEXT,
                 created_at       TEXT NOT NULL,
                 updated_at       TEXT NOT NULL
             );
@@ -92,10 +88,6 @@ def init_db() -> None:
         _ensure_column(con, "assets", "root_asset_id", "TEXT")
         _ensure_column(con, "jobs", "thread_id", "TEXT")
         _ensure_column(con, "jobs", "source_asset_id", "TEXT")
-        _ensure_column(con, "jobs", "clarification_question", "TEXT")
-        _ensure_column(con, "jobs", "clarification_reason", "TEXT")
-        _ensure_column(con, "jobs", "clarification_options_json", "TEXT DEFAULT '[]'")
-        _ensure_column(con, "jobs", "clarification_manifest_json", "TEXT")
         con.executescript("""
             CREATE INDEX IF NOT EXISTS idx_assets_job_id    ON assets(job_id);
             CREATE INDEX IF NOT EXISTS idx_assets_workspace ON assets(workspace_id);
@@ -123,9 +115,8 @@ def upsert_job(job: GenerationJob) -> None:
             """INSERT OR REPLACE INTO jobs
                (job_id, workspace_id, status, progress, lineage_key, message,
                 tool_id, title, output_asset_ids, thread_id, source_asset_id,
-                clarification_question, clarification_reason, clarification_options_json, clarification_manifest_json,
                 created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 job.job_id,
                 job.workspace_id,
@@ -138,10 +129,6 @@ def upsert_job(job: GenerationJob) -> None:
                 json.dumps(job.output_asset_ids),
                 job.thread_id,
                 job.source_asset_id,
-                job.clarification_question,
-                job.clarification_reason,
-                json.dumps(job.clarification_options),
-                json.dumps(job.clarification_manifest) if job.clarification_manifest is not None else None,
                 job.created_at.isoformat(),
                 job.updated_at.isoformat(),
             ),

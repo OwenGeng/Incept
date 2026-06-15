@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app.core.config import settings
 from app.models.supply import (
@@ -158,3 +158,21 @@ async def refresh_snapshot() -> RefreshSnapshotResponse:
             message="Mock mode — no BQ write performed.",
         )
     return _get_service().refresh_snapshot()
+
+
+@router.post("/enrich-bundles")
+async def enrich_bundles(
+    file: UploadFile = File(...),
+    bundle_id_column: str = Form(default="bundle_id"),
+) -> list[dict]:
+    """
+    Upload a CSV file, match each bundle_id against Moloco BQ data, and return
+    the original rows enriched with Moloco diagnosis columns.
+    """
+    if settings.api_mode == "mock":
+        return []
+    content = await file.read()
+    try:
+        return _get_service().enrich_bundles(content, bundle_id_column)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

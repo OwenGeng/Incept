@@ -23,7 +23,7 @@ COPY sql/ ./sql/
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 # Tells _project_root() exactly where to look -- no directory traversal needed
-ENV INTERSIGHT_PROJECT_ROOT=/app
+ENV INCEPT_PROJECT_ROOT=/app
 
 EXPOSE 8080
 

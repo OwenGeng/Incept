@@ -191,7 +191,7 @@ export function HomeView({
 
         <button
           type="button"
-          onClick={() => onViewChange("Automate")}
+          onClick={() => {}}
           className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 text-left transition-colors hover:bg-muted/60"
         >
           <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">

@@ -6,6 +6,8 @@
     "dev:web": "pnpm --filter @incept/web dev",
     "build:web": "pnpm --filter @incept/web build",
     "lint:web": "pnpm --filter @incept/web lint"
+  },
+  "dependencies": {
+    "pnpm": "^11.5.2"
   }
 }
-

@@ -100,6 +100,16 @@ class BigQueryService:
             )
             PARTITION BY activated_date
             """,
+            f"""
+            CREATE TABLE IF NOT EXISTS `{project}.intersight.feedback`
+            (
+              feedback_id  STRING NOT NULL,
+              created_at   TIMESTAMP NOT NULL,
+              user_email   STRING,
+              content      STRING NOT NULL
+            )
+            PARTITION BY DATE(created_at)
+            """,
         ]
         for ddl in ddl_statements:
             try:
@@ -108,6 +118,113 @@ class BigQueryService:
                 logger.warning("DDL failed (table may already exist): %s", exc)
 
         self._tables_ready = True
+
+    # ── Bundle lookup (agent tool) ─────────────────────────────────────────────
+
+    def lookup_bundles(self, bundle_ids: list[str]) -> list[dict[str, Any]]:
+        """Return raw Moloco signals for a list of app bundle IDs / App Store IDs."""
+        if not bundle_ids:
+            return []
+        sql = """
+WITH
+input_ids AS (
+  SELECT bundle_id FROM UNNEST(@bundle_ids) AS bundle_id
+),
+sdk_supply AS (
+  SELECT
+    req.app_bundle                        AS bundle_id,
+    TRUE                                  AS has_sdk_supply,
+    MAX(req.app_name)                     AS app_name,
+    SUM(impressions)                      AS sdk_impressions_90d
+  FROM `ads-bpd-guard-china.gtm.fact_supply_with_tracking_publisher`
+  WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+    AND req.app_bundle IN UNNEST(@bundle_ids)
+  GROUP BY req.app_bundle
+),
+sdl AS (
+  SELECT
+    app_bundle,
+    MAX(is_moloco_sdk_app)          AS is_moloco_sdk_app,
+    MAX(is_moloco_advertiser_app)   AS is_moloco_advertiser_app,
+    MAX(sdk_media_cost_usd)         AS sdk_media_cost_usd,
+    MAX(eligibility_status)         AS eligibility_status
+  FROM `ads-bpd-guard-china.gtm.supply_demand_overlap`
+  WHERE app_bundle IN UNNEST(@bundle_ids)
+  GROUP BY app_bundle
+),
+ua AS (
+  SELECT
+    product.app_market_bundle       AS bundle_id,
+    SUM(gross_spend_usd)            AS ua_spend_90d
+  FROM `ads-bpd-guard-china.athena.fact_dsp_core`
+  WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+    AND product.app_market_bundle IN UNNEST(@bundle_ids)
+    AND gross_spend_usd > 0
+  GROUP BY product.app_market_bundle
+),
+meta AS (
+  SELECT
+    app_market_bundle,
+    MAX(sensortower.company.name)       AS company_name,
+    MAX(sensortower.company.hq_country) AS hq_country_st,
+    MAX(os)                             AS os
+  FROM `ads-bpd-guard-china.athena.dim1_app_v3`
+  WHERE app_market_bundle IN UNNEST(@bundle_ids)
+  GROUP BY app_market_bundle
+),
+gtm_hq AS (
+  SELECT company_name, final_hq_country
+  FROM `ads-bpd-guard-sandbox.yingzi_uploads.hq_country_triage`
+  WHERE final_hq_country IS NOT NULL
+)
+SELECT
+  i.bundle_id,
+  COALESCE(s.app_name, 'Unknown')              AS app_name,
+  COALESCE(s.has_sdk_supply, FALSE)            AS has_sdk_supply,
+  COALESCE(s.sdk_impressions_90d, 0)           AS sdk_impressions_90d,
+  COALESCE(d.is_moloco_sdk_app, FALSE)         AS is_moloco_sdk_app,
+  COALESCE(d.is_moloco_advertiser_app, FALSE)  AS is_moloco_advertiser_app,
+  COALESCE(d.sdk_media_cost_usd, 0)            AS sdk_media_cost_usd,
+  d.eligibility_status,
+  COALESCE(u.ua_spend_90d, 0)                  AS ua_spend_90d,
+  m.company_name,
+  COALESCE(g.final_hq_country, m.hq_country_st) AS final_hq_country,
+  m.os
+FROM input_ids i
+LEFT JOIN sdk_supply s ON i.bundle_id = s.bundle_id
+LEFT JOIN sdl       d ON i.bundle_id = d.app_bundle
+LEFT JOIN ua        u ON i.bundle_id = u.bundle_id
+LEFT JOIN meta      m ON i.bundle_id = m.app_market_bundle
+LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
+"""
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ArrayQueryParameter("bundle_ids", "STRING", bundle_ids)
+            ]
+        )
+        return self.query(sql, job_config=job_config)
+
+    # ── Feedback ───────────────────────────────────────────────────────────────
+
+    def write_feedback(self, feedback: dict[str, Any]) -> None:
+        """Insert a user feedback row into intersight.feedback."""
+        project = self._write_project()
+        if not project:
+            logger.warning("No write project — feedback not saved.")
+            return
+        sql = f"""
+        INSERT INTO `{project}.intersight.feedback`
+          (feedback_id, created_at, user_email, content)
+        VALUES (@feedback_id, CURRENT_TIMESTAMP(), @user_email, @content)
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("feedback_id", "STRING", feedback["feedback_id"]),
+                bigquery.ScalarQueryParameter("user_email", "STRING", feedback.get("user_email") or ""),
+                bigquery.ScalarQueryParameter("content", "STRING", feedback["content"]),
+            ]
+        )
+        self.client.query(sql, job_config=job_config).result()
 
     # ── Snapshot: write ────────────────────────────────────────────────────────
 
@@ -147,30 +264,64 @@ class BigQueryService:
 
     def read_previous_snapshot(self, before_date: str) -> dict[str, Any] | None:
         """Read the most recent snapshot strictly before before_date."""
+        rows = self.read_historical_snapshots(n_weeks=1, before_date=before_date)
+        return rows[0] if rows else None
+
+    def read_historical_snapshots(
+        self, n_weeks: int = 8, before_date: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Read the last n_weeks snapshots, optionally before a given date. Oldest first."""
         project = self._write_project()
+        if not project:
+            return []
+        where = "WHERE week_start_date < @before_date" if before_date else ""
+        params = []
+        if before_date:
+            params.append(bigquery.ScalarQueryParameter("before_date", "DATE", before_date))
+        params.append(bigquery.ScalarQueryParameter("n_weeks", "INT64", n_weeks))
         sql = f"""
         SELECT *
         FROM `{project}.intersight.supply_smb_snapshot`
-        WHERE week_start_date < @before_date
+        {where}
         ORDER BY week_start_date DESC
-        LIMIT 1
+        LIMIT @n_weeks
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        try:
+            rows = self.query(sql, job_config=job_config)
+        except Exception as exc:
+            logger.warning("read_historical_snapshots failed: %s", exc)
+            return []
+        json_fields = ("team_routing_json", "genre_mix_json", "monetization_mix_json", "top_companies_json")
+        for row in rows:
+            for field in json_fields:
+                try:
+                    row[field] = json.loads(row[field] or "{}")
+                except Exception:
+                    row[field] = {}
+        rows.reverse()  # return oldest → newest
+        return rows
+
+    def snapshot_exists_for_week(self, week_start_date: str) -> bool:
+        """Return True if a snapshot for this exact week already exists."""
+        project = self._write_project()
+        if not project:
+            return False
+        sql = f"""
+        SELECT COUNT(*) AS cnt
+        FROM `{project}.intersight.supply_smb_snapshot`
+        WHERE week_start_date = @week_start_date
         """
         job_config = bigquery.QueryJobConfig(
             query_parameters=[
-                bigquery.ScalarQueryParameter("before_date", "DATE", before_date),
+                bigquery.ScalarQueryParameter("week_start_date", "DATE", week_start_date),
             ]
         )
-        rows = self.query(sql, job_config=job_config)
-        if not rows:
-            return None
-        row = rows[0]
-        # Deserialize JSON fields
-        for field in ("team_routing_json", "genre_mix_json", "monetization_mix_json", "top_companies_json"):
-            try:
-                row[field] = json.loads(row[field] or "{}")
-            except Exception:
-                row[field] = {}
-        return row
+        try:
+            rows = self.query(sql, job_config=job_config)
+            return bool(rows and rows[0].get("cnt", 0) > 0)
+        except Exception:
+            return False
 
     # ── Lead Tracking: write ───────────────────────────────────────────────────
 

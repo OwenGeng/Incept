@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LayoutPanelTop, Sparkles, Settings, Tv } from "lucide-react";
+import { LayoutPanelTop, Sparkles, Settings, Smartphone, MessageSquare } from "lucide-react";
 import { AppSidebar, type SidebarNavItem } from "@/components/ui/app-sidebar";
 import type { UserRole } from "@/types/next-auth";
 
@@ -27,7 +27,7 @@ const ALL_MOLOCO: UserRole[] = [
   "moloco_gtm", "moloco_supply", "user",
 ];
 
-type RoledNavItem = SidebarNavItem & { roles: UserRole[] };
+type RoledNavItem = (SidebarNavItem & { roles: UserRole[] }) | { kind: "separator"; key: string; roles: UserRole[] };
 
 const ALL_NAV_ITEMS: RoledNavItem[] = [
   {
@@ -44,10 +44,10 @@ const ALL_NAV_ITEMS: RoledNavItem[] = [
   },
   {
     kind: "simple",
-    key: "ctv",
-    label: "CTV",
-    href: "/ctv",
-    icon: Tv,
+    key: "xiaomi",
+    label: "Xiaomi",
+    href: "/xiaomi",
+    icon: Smartphone,
     roles: ALL_MOLOCO,
   },
   {
@@ -59,13 +59,19 @@ const ALL_NAV_ITEMS: RoledNavItem[] = [
     roles: ALL_MOLOCO,
   },
   {
-    kind: "simple",
-    key: "settings",
-    label: "Settings",
-    href: "/settings/users",
-    icon: Settings,
-    roles: ["admin"],
+    kind: "separator",
+    key: "sep-ask-ai",
+    roles: ALL_MOLOCO,
   },
+  {
+    kind: "simple",
+    key: "ask-ai",
+    label: "Ask AI",
+    href: "/ask-ai",
+    icon: MessageSquare,
+    roles: ALL_MOLOCO,
+  },
+  // Settings moved to portal page header (admin only)
   // Brand is intentionally excluded from nav — access via /brand directly
 ];
 
@@ -78,9 +84,9 @@ function useIsActive(pathname: string) {
       case "sdk-no-ua":    return pathname.startsWith("/supply-smb/sdk-no-ua");
       case "ua-no-sdk":    return pathname.startsWith("/supply-smb/ua-no-sdk");
       case "supply-smb":   return pathname.startsWith("/supply-smb") || pathname.startsWith("/supply-smb/leads");
-      case "ctv":          return pathname.startsWith("/ctv");
+      case "xiaomi":        return pathname.startsWith("/xiaomi");
       case "ai-insights":  return pathname.startsWith("/ai-insights");
-      case "settings":     return pathname.startsWith("/settings");
+      case "ask-ai":        return pathname.startsWith("/ask-ai");
       default:             return false;
     }
   }, [pathname]);
@@ -108,9 +114,9 @@ export function Sidebar({
 
   return (
     <AppSidebar
-      productName="Scout"
+      productName="Supply"
       logo="/logo.png"
-      storageKey="scout"
+      storageKey="supply"
       items={items}
       isActive={isActive}
       user={{

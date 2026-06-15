@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Incept",
+  title: "Linglong",
   description: "AI Operating System for Moloco growth teams.",
 };
 

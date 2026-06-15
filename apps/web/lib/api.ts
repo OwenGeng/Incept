@@ -1,3 +1,4 @@
+import http from "node:http";
 import type {
   DetailedAnalysisPayload,
   GenericTopListsPayload,
@@ -75,22 +76,30 @@ function normalizeKeys<T>(value: T): T {
  * the API Cloud Run service is NOT set to allUsers — the IAM layer verifies
  * the identity token before forwarding the request to the application.
  */
+/**
+ * Fetch a Cloud Run identity token from the GCP metadata server.
+ * Only works when running inside Cloud Run / GCE. Returns null in local dev.
+ *
+ * Uses Node.js native http (not global fetch) to bypass Next.js App Router's
+ * fetch wrapper, which intercepts http:// requests and breaks the metadata call.
+ */
 async function getCloudRunIdentityToken(audience: string): Promise<string | null> {
   // K_SERVICE is only set inside Cloud Run
   if (!process.env.K_SERVICE) return null;
-  try {
+  return new Promise((resolve) => {
     const metaUrl =
       `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity` +
       `?audience=${encodeURIComponent(audience)}`;
-    const res = await fetch(metaUrl, {
-      headers: { "Metadata-Flavor": "Google" },
-      cache: "no-store",
+    const req = http.get(metaUrl, { headers: { "Metadata-Flavor": "Google" } }, (res) => {
+      if (res.statusCode !== 200) { resolve(null); return; }
+      let data = "";
+      res.on("data", (chunk: unknown) => { data += String(chunk); });
+      res.on("end", () => resolve(data.trim() || null));
     });
-    if (!res.ok) return null;
-    return (await res.text()).trim();
-  } catch {
-    return null;
-  }
+    req.on("error", () => resolve(null));
+    // 2-second timeout — metadata server is local, should respond instantly
+    req.setTimeout(2000, () => { req.destroy(); resolve(null); });
+  });
 }
 
 async function fetchFromApi<T>(
@@ -234,8 +243,8 @@ export function updateLeadStatus(
 
 // ── AI Insights ───────────────────────────────────────────────────────────────
 
-export function getAiInsights(user?: SessionUser) {
-  return fetchFromApi<AiInsightsPayload>("/api/v1/ai-insights", user);
+export function getAiInsights(user?: SessionUser, scope = "no-sdk-no-ua") {
+  return fetchFromApi<AiInsightsPayload>(`/api/v1/ai-insights?scope=${scope}`, user);
 }
 
 // ── Admin: User Management ─────────────────────────────────────────────────────

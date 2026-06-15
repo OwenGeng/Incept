@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * AppSidebar — unified sidebar component for Incept platform products (Scout, Studio).
+ * AppSidebar — unified sidebar component for Linglong platform products (Scout, Studio).
  *
  * Supports two navigation modes out of the box:
  *   - href-based  (Next.js Link + pathname, e.g. Scout)
@@ -45,6 +45,7 @@ export type SidebarNavItem =
       icon: React.ElementType;
       href?: string;
       onClick?: () => void;
+      disabled?: boolean;
     }
   | {
       kind: "group";
@@ -52,6 +53,10 @@ export type SidebarNavItem =
       label: string;
       icon: React.ElementType;
       children: SidebarChildItem[];
+    }
+  | {
+      kind: "separator";
+      key: string;
     };
 
 export type SidebarUser = {
@@ -190,20 +195,20 @@ export function AppSidebar({
         /* Collapsed: just the logo, links back to portal */
         <Link
           href="/"
-          title="Incept"
+          title="Linglong"
           className="flex shrink-0 items-center justify-center border-b border-border py-[18px] transition hover:bg-muted"
         >
           {logo ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={logo} alt="Incept" className="size-9 shrink-0 rounded-lg object-contain" />
+            <img src={logo} alt="Linglong" className="size-9 shrink-0 rounded-lg object-contain" />
           ) : (
             <div className="flex size-9 shrink-0 select-none items-center justify-center rounded-xl bg-foreground text-[11px] font-bold tracking-tight text-background">
-              IN
+              LL
             </div>
           )}
         </Link>
       ) : (
-        /* Expanded: Incept (platform, clickable) + Scout (product sub-label) */
+        /* Expanded: Linglong (platform, clickable) + Scout (product sub-label) */
         <div className="shrink-0 border-b border-border px-4 py-3">
           <Link
             href="/"
@@ -211,14 +216,14 @@ export function AppSidebar({
           >
             {logo ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={logo} alt="Incept" className="size-6 shrink-0 rounded-md object-contain" />
+              <img src={logo} alt="Linglong" className="size-6 shrink-0 rounded-md object-contain" />
             ) : (
               <div className="flex size-6 shrink-0 select-none items-center justify-center rounded-md bg-foreground text-[9px] font-bold text-background">
-                IN
+                LL
               </div>
             )}
             <span className="text-[13px] font-medium text-muted-foreground transition group-hover:text-foreground">
-              Incept
+              Linglong
             </span>
           </Link>
           <div className="mt-1.5 px-1">
@@ -233,6 +238,15 @@ export function AppSidebar({
       <div className="flex-1 overflow-y-auto py-3">
         <nav className="flex flex-col gap-0.5 px-2" aria-label="Primary navigation">
           {items.map((item) => {
+            /* ── Separator ──────────────────────────────────────────────── */
+            if (item.kind === "separator") {
+              return (
+                <div key={item.key} className={cn("my-1", isCollapsed ? "mx-2" : "mx-1")}>
+                  <div className="h-px bg-border" />
+                </div>
+              );
+            }
+
             const Icon = item.icon;
 
             /* ── Group item ─────────────────────────────────────────────── */
@@ -318,19 +332,26 @@ export function AppSidebar({
 
             /* ── Simple item ────────────────────────────────────────────── */
             const active = isActive(item.key);
+            const disabled = item.disabled ?? false;
             const simpleCls = cn(
               "group flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition",
               isCollapsed && "mx-1 w-auto justify-center px-0 py-3",
-              active
+              disabled
+                ? "cursor-default opacity-40"
+                : active
                 ? "bg-soft-accent font-semibold text-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             );
             const iconCls = cn(
               "size-4 shrink-0",
-              active ? "text-accent" : "text-muted-foreground group-hover:text-foreground",
+              disabled
+                ? "text-muted-foreground"
+                : active
+                ? "text-accent"
+                : "text-muted-foreground group-hover:text-foreground",
             );
 
-            if (item.href) {
+            if (item.href && !disabled) {
               return (
                 <Link key={item.key} href={item.href as Route} title={isCollapsed ? item.label : undefined} className={simpleCls}>
                   <Icon className={iconCls} />
@@ -343,11 +364,21 @@ export function AppSidebar({
                 key={item.key}
                 type="button"
                 title={isCollapsed ? item.label : undefined}
-                onClick={item.onClick}
+                onClick={disabled ? undefined : item.onClick}
+                disabled={disabled}
                 className={simpleCls}
               >
                 <Icon className={iconCls} />
-                {!isCollapsed && <span className="truncate">{item.label}</span>}
+                {!isCollapsed && (
+                  <>
+                    <span className="truncate">{item.label}</span>
+                    {disabled && (
+                      <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Soon
+                      </span>
+                    )}
+                  </>
+                )}
               </button>
             );
           })}

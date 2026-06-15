@@ -45,6 +45,12 @@ class GenerationMode(str, Enum):
     resize = "resize"
 
 
+class ThemeCreateMode(str, Enum):
+    style_modify = "style_modify"
+    style_transfer = "style_transfer"
+    asset_text_replace = "asset_text_replace"
+
+
 class ThreadMessage(BaseModel):
     role: Literal["user", "assistant"]
     text: str
@@ -159,8 +165,17 @@ class GenerationRequest(BaseModel):
     thread_id: str | None = None
     source_asset_id: str | None = None
     generation_mode: GenerationMode = GenerationMode.free_create
-    clarification_note: str | None = None
     include_gif: bool = False  # generate animated GIF for supported banner sizes
+    resize_prompt_overrides: dict[str, str] = Field(default_factory=dict)
+    resize_negative_prompt_override: str | None = None
+    theme_create_mode: ThemeCreateMode | None = None
+    theme_create_style_name: str | None = None
+    theme_create_style_details: str | None = None
+    theme_create_logo_position: str | None = None
+    theme_create_element_position: str | None = None
+    theme_create_old_text: str | None = None
+    theme_create_new_text: str | None = None
+    theme_create_font_style: str | None = None
     # output_sizes length is validated in the endpoint against settings.max_output_sizes
 
 
@@ -198,7 +213,25 @@ class ImageEditRequest(BaseModel):
     session_id: str | None = None
     thread_id: str | None = None
     output_sizes: list[str] = Field(default_factory=list)
-    clarification_note: str | None = None
+
+
+class KakaoCleanRequest(BaseModel):
+    workspace_id: str
+    asset_id: str
+    created_by: str = "usr_jane"
+    thread_id: str | None = None
+
+
+class KakaoBizboardComposeRequest(BaseModel):
+    workspace_id: str
+    cleaned_asset_id: str
+    composed_asset_id: str
+    main_copy: str
+    app_download_copy: str
+    dsp_name: str
+    gacha: bool = False
+    created_by: str = "usr_jane"
+    thread_id: str | None = None
 
 
 class GenerationJob(BaseModel):
@@ -213,10 +246,6 @@ class GenerationJob(BaseModel):
     output_asset_ids: list[str] = Field(default_factory=list)
     thread_id: str | None = None
     source_asset_id: str | None = None
-    clarification_question: str | None = None
-    clarification_reason: str | None = None
-    clarification_options: list[dict[str, Any]] = Field(default_factory=list)
-    clarification_manifest: dict[str, Any] | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -234,7 +263,6 @@ class OutpaintRequest(BaseModel):
     session_id: str | None = None
     thread_id: str | None = None
     output_sizes: list[str] = Field(default_factory=list)
-    clarification_note: str | None = None
 
 
 # ── Background removal ────────────────────────────────────────────────────────
@@ -248,7 +276,6 @@ class RemoveBGRequest(BaseModel):
     session_id: str | None = None
     thread_id: str | None = None
     output_sizes: list[str] = Field(default_factory=list)
-    clarification_note: str | None = None
 
 
 # ── Text overlay ──────────────────────────────────────────────────────────────
@@ -263,7 +290,13 @@ class AddTextRequest(BaseModel):
     session_id: str | None = None
     thread_id: str | None = None
     output_sizes: list[str] = Field(default_factory=list)
-    clarification_note: str | None = None
+
+
+class GenerateGifRequest(BaseModel):
+    workspace_id: str
+    asset_id: str
+    created_by: str = "usr_jane"
+    thread_id: str | None = None
 
 
 class RoleAssignment(BaseModel):

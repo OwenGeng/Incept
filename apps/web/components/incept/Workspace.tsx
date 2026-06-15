@@ -18,6 +18,7 @@ import {
   Download,
   ImageIcon,
   Loader2,
+  Maximize2,
   Menu,
   Paperclip,
   Search,
@@ -35,7 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { createImageGenerationJob, deleteAssets, downloadAssetsZip, listAssets, uploadAsset } from "@/lib/incept-api";
+import { createImageGenerationJob, deleteAssets, downloadAssetFile, downloadAssetsZip, generateGifFromAsset, listAssets, uploadAsset } from "@/lib/incept-api";
 import type { AppView } from "./Sidebar";
 import { CreateImageView } from "./CreateImageView";
 import { AppHeader } from "@/components/ui/app-header";
@@ -92,6 +93,47 @@ function getGreeting(): string {
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   return "Good evening";
+}
+
+function ZoomModal({
+  asset,
+  onClose,
+}: {
+  asset: AssetSummary;
+  onClose: () => void;
+}) {
+  const label =
+    asset.width && asset.height
+      ? `${asset.width}x${asset.height} · ${asset.type === "gif" ? "GIF" : "PNG"}`
+      : asset.type === "gif"
+      ? "GIF"
+      : "PNG";
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6" onClick={onClose}>
+      <div
+        className="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#07111F] shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-4 top-4 z-10 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
+        >
+          <X className="size-4" />
+        </button>
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-black/30 p-6">
+          <img src={asset.url} alt={asset.title} className="max-h-[72vh] max-w-full rounded-2xl object-contain" />
+        </div>
+        <div className="flex items-center gap-3 border-t border-white/10 bg-card px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-foreground">{asset.title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -467,17 +509,14 @@ function ChatInputBox({
 // ─── Other views ──────────────────────────────────────────────────────────────
 
 function ComingSoon({ activeView }: { activeView: AppView }) {
-  const details =
-    activeView === "Analyze"
-      ? ["Looker Agent", "Performance Lab", "BigQuery creative lineage analysis"]
-      : activeView === "Automate"
-      ? ["Workflow automation", "Creative optimization loops", "Scheduled jobs"]
-      : [];
+  const details = activeView === "Analyze"
+    ? ["Looker Agent", "Performance Lab", "BigQuery creative lineage analysis"]
+    : [];
   return (
     <Card className="min-h-[520px]">
       <CardContent className="flex min-h-[520px] flex-col items-center justify-center gap-5 p-10 text-center">
         <div className="grid size-14 place-items-center rounded-xl bg-soft-accent text-accent">
-          {activeView === "Analyze" ? <BarChart3 className="size-7" /> : <Bot className="size-7" />}
+          <BarChart3 className="size-7" />
         </div>
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">{activeView}</p>
@@ -500,19 +539,20 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function getContactSheetRole(asset: AssetSummary): string | null {
-  const value = asset.analysis?.contact_sheet_role;
-  return typeof value === "string" ? value : null;
-}
-
 function LibraryView({
   activeView,
   liveAssets,
   setLiveAssets,
+  setLiveJobs,
+  onJobCreated,
+  activeWorkspaceId,
 }: {
   activeView: AppView;
   liveAssets: AssetSummary[];
   setLiveAssets: Dispatch<SetStateAction<AssetSummary[]>>;
+  setLiveJobs: Dispatch<SetStateAction<JobSummary[]>>;
+  onJobCreated: (job: JobSummary) => void;
+  activeWorkspaceId: string;
 }) {
   const [tab, setTab] = useState<"generated" | "assets">("generated");
   const [search, setSearch] = useState("");
@@ -522,7 +562,9 @@ function LibraryView({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloadPrefix, setDownloadPrefix] = useState("incept");
   const [downloading, setDownloading] = useState(false);
+  const [gifGenerating, setGifGenerating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [zoomedAsset, setZoomedAsset] = useState<AssetSummary | null>(null);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -550,7 +592,15 @@ function LibraryView({
     const ids = Array.from(selected);
     if (!ids.length) return;
     setDownloading(true);
-    try { await downloadAssetsZip(ids, downloadPrefix || "incept"); }
+    try {
+      if (ids.length === 1) {
+        const asset = liveAssets.find((item) => item.id === ids[0]);
+        if (!asset) throw new Error("Selected asset not found.");
+        await downloadAssetFile(asset);
+      } else {
+        await downloadAssetsZip(ids, downloadPrefix || "incept");
+      }
+    }
     catch (e) { console.error(e); }
     finally { setDownloading(false); }
   }
@@ -566,6 +616,37 @@ function LibraryView({
       setSelected(new Set());
     } catch (e) { console.error(e); }
     finally { setDeleting(false); }
+  }
+
+  async function handleGenerateGif() {
+    const selectedAssets = liveAssets.filter((asset) => selected.has(asset.id) && asset.type !== "gif");
+    if (!selectedAssets.length) return;
+    setGifGenerating(true);
+    try {
+      for (const asset of selectedAssets) {
+        const response = await generateGifFromAsset({
+          workspaceId: activeWorkspaceId,
+          assetId: asset.id,
+          threadId: asset.threadId ?? undefined,
+        });
+        const job: JobSummary = {
+          id: response.job_id,
+          jobId: response.job_id,
+          title: response.title,
+          toolId: response.tool_id,
+          status: response.status,
+          progress: response.progress,
+          eta: response.status === "completed" ? "Completed" : "Running…",
+          lineageKey: response.lineage_key,
+        };
+        setLiveJobs((prev) => [job, ...prev]);
+        onJobCreated(job);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setGifGenerating(false);
+    }
   }
 
   if (activeView === "Settings") {
@@ -586,9 +667,7 @@ function LibraryView({
     );
   }
 
-  const generatedAssets = liveAssets.filter(
-    (a) => a.provider !== "upload" && a.jobId && !["sheet", "sheet_source"].includes(getContactSheetRole(a) ?? "")
-  );
+  const generatedAssets = liveAssets.filter((a) => a.provider !== "upload" && a.jobId);
   const uploadedAssets = liveAssets.filter((a) => a.provider === "upload");
   const q = search.trim().toLowerCase();
   const filteredGenerated = q
@@ -671,7 +750,15 @@ function LibraryView({
             className="flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-80 disabled:opacity-50"
           >
             {downloading ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
-            Download
+            {selected.size === 1 ? "Download PNG" : "Download"}
+          </button>
+          <button
+            onClick={handleGenerateGif}
+            disabled={gifGenerating || Array.from(selected).length === 0}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            {gifGenerating ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+            Generate GIF
           </button>
           <button
             onClick={handleDelete}
@@ -688,6 +775,10 @@ function LibraryView({
             Clear selection
           </button>
         </div>
+      )}
+
+      {zoomedAsset && (
+        <ZoomModal asset={zoomedAsset} onClose={() => setZoomedAsset(null)} />
       )}
 
       {/* ── Generated tab ── */}
@@ -725,7 +816,7 @@ function LibraryView({
                         "relative aspect-square cursor-pointer overflow-hidden border-2 bg-[#07111F] transition-all",
                         isSel ? "border-accent shadow-[0_0_0_1px_hsl(var(--accent)/0.3)]" : "border-transparent hover:border-border"
                       )}
-                      onClick={() => toggleSelect(asset.id)}
+                      onClick={() => hasReal && setZoomedAsset(asset)}
                     >
                       {hasReal ? (
                         <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
@@ -735,14 +826,28 @@ function LibraryView({
                         </div>
                       )}
                       {/* Checkbox */}
-                      <div className={cn(
-                        "absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full border-2 transition-all",
-                        isSel
-                          ? "border-accent bg-accent text-white"
-                          : "border-white/50 bg-black/30 opacity-0 group-hover:opacity-100"
-                      )}>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelect(asset.id);
+                        }}
+                        className={cn(
+                          "absolute right-1.5 top-1.5 z-20 flex size-5 items-center justify-center rounded-full border-2 transition-all",
+                          isSel
+                            ? "border-accent bg-accent text-white"
+                            : "border-white/50 bg-black/30 opacity-0 group-hover:opacity-100"
+                        )}
+                      >
                         {isSel && <Check className="size-3" />}
-                      </div>
+                      </button>
+                      {hasReal && (
+                        <div className="pointer-events-none absolute inset-0 hidden items-center justify-center bg-black/20 group-hover:flex">
+                          <div className="rounded-full bg-black/60 p-1.5 backdrop-blur-sm">
+                            <Maximize2 className="size-4 text-white" />
+                          </div>
+                        </div>
+                      )}
                       {/* Size + format label — always visible */}
                       <div className="absolute bottom-1.5 left-1.5 rounded-md bg-black/75 px-1.5 py-0.5 backdrop-blur-sm">
                         <span className="text-[8px] font-semibold text-white">
@@ -848,7 +953,11 @@ function LibraryView({
                         </div>
                       </button>
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="size-9 shrink-0 overflow-hidden border border-border bg-muted">
+                        <button
+                          type="button"
+                          onClick={() => hasReal && setZoomedAsset(asset)}
+                          className="size-9 shrink-0 overflow-hidden border border-border bg-muted"
+                        >
                           {hasReal ? (
                             <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
                           ) : (
@@ -856,7 +965,7 @@ function LibraryView({
                               <ImageIcon className="size-4 text-muted-foreground" />
                             </div>
                           )}
-                        </div>
+                        </button>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{asset.title}</p>
                           <p className="text-[11px] text-muted-foreground">
@@ -896,7 +1005,7 @@ function LibraryView({
                         "relative aspect-square cursor-pointer overflow-hidden border-2 bg-muted transition-all",
                         isSel ? "border-accent" : "border-transparent hover:border-border"
                       )}
-                      onClick={() => toggleSelect(asset.id)}
+                      onClick={() => hasReal && setZoomedAsset(asset)}
                     >
                       {hasReal ? (
                         <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
@@ -905,14 +1014,28 @@ function LibraryView({
                           <ImageIcon className="size-6 text-muted-foreground/40" />
                         </div>
                       )}
-                      <div className={cn(
-                        "absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full border-2 transition-all",
-                        isSel
-                          ? "border-accent bg-accent text-white"
-                          : "border-white/50 bg-black/30 opacity-0 group-hover:opacity-100"
-                      )}>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelect(asset.id);
+                        }}
+                        className={cn(
+                          "absolute right-1.5 top-1.5 z-20 flex size-5 items-center justify-center rounded-full border-2 transition-all",
+                          isSel
+                            ? "border-accent bg-accent text-white"
+                            : "border-white/50 bg-black/30 opacity-0 group-hover:opacity-100"
+                        )}
+                      >
                         {isSel && <Check className="size-3" />}
-                      </div>
+                      </button>
+                      {hasReal && (
+                        <div className="pointer-events-none absolute inset-0 hidden items-center justify-center bg-black/20 group-hover:flex">
+                          <div className="rounded-full bg-black/60 p-1.5 backdrop-blur-sm">
+                            <Maximize2 className="size-4 text-white" />
+                          </div>
+                        </div>
+                      )}
                       {/* Size + format label */}
                       <div className="absolute bottom-1.5 left-1.5 rounded-md bg-black/75 px-1.5 py-0.5 backdrop-blur-sm">
                         <span className="text-[8px] font-semibold text-white">
@@ -934,6 +1057,7 @@ function LibraryView({
     </div>
   );
 }
+
 
 function HomeOverview({ onViewChange, assetCount, jobCount }: {
   onViewChange: (v: AppView) => void; assetCount: number; jobCount: number;
@@ -1203,8 +1327,17 @@ export function Workspace({
                 onThreadSelect={onThreadSelectFromHome}
               />
             )}
-            {(activeView === "Analyze" || activeView === "Automate") && <ComingSoon activeView={activeView} />}
-            {(activeView === "Library" || activeView === "Settings") && <LibraryView activeView={activeView} liveAssets={liveAssets} setLiveAssets={setLiveAssets} />}
+            {activeView === "Analyze" && <ComingSoon activeView={activeView} />}
+            {(activeView === "Library" || activeView === "Settings") && (
+              <LibraryView
+                activeView={activeView}
+                liveAssets={liveAssets}
+                setLiveAssets={setLiveAssets}
+                setLiveJobs={setLiveJobs}
+                onJobCreated={onJobCreated}
+                activeWorkspaceId={activeWorkspaceId}
+              />
+            )}
           </div>
         )}
 

@@ -422,12 +422,26 @@ app_level AS (
     g.t1_downloads_total,           -- total downloads across all T1 countries (30d)
     g.top_dl_country_T1,            -- which T1 country has the highest downloads
     g.top_dl_country_T1_downloads,
-    -- Prospect priority label (finalized 4-tier framework)
-    -- Key rules:
-    --   CHN (final_hq_country=CHN): eligible for P1/P2 based on criteria
-    --   SGP (final_hq_country=SGP): forced to P3/P4 regardless of media_cost
-    --   P1+P2 = 119 apps / 86 companies (confirmed CHN active follow-up pool)
+    -- Prospect priority label — two independent paths by monetization type:
+    --   IAP path  : supply-visibility is always false → rank by download scale + UA market signals
+    --   IAA/Hybrid: existing supply-visibility + media-cost logic (unchanged)
+    -- _priority_code() reads the P1/P2/P3/P4 prefix, so both paths feed the same filter/sort.
     CASE
+      -- ── List 5 (IAP): UA-pitch priority based on download scale ─────────────
+      WHEN m.monetization_type = 'IAP' THEN
+        CASE
+          -- P1: large downloads + already spending on competitor UA + T1 market presence
+          WHEN d.downloads_latest_month >= 100000
+           AND COALESCE(n.competitor_network_count, 0) > 0
+           AND COALESCE(g.t1_downloads_total, 0) > 0           THEN 'P1 — UA Ready'
+          -- P2: meaningful scale + T1 presence (not yet on UA networks)
+          WHEN d.downloads_latest_month >= 50000
+           AND COALESCE(g.t1_downloads_total, 0) > 0            THEN 'P2 — T1 Scale'
+          -- P3: growing app, smaller scale
+          WHEN d.downloads_latest_month >= 20000                THEN 'P3 — Growing'
+          ELSE                                                        'P4 — Cold'
+        END
+      -- ── List 4/6 (IAA/Hybrid): supply-visibility + media-cost ───────────────
       -- P1: CHN only, all 4 signals — NBS direct priority
       WHEN UPPER(COALESCE(gtm.final_hq_country, m.hq_country)) IN ('CHN','CHINA','CN')
        AND COALESCE(sv.is_supply_partner, false) = true
@@ -448,15 +462,26 @@ app_level AS (
              NULLIF(CAST(d.downloads_prior_month AS FLOAT64), 0)
            ) > -0.1
         THEN 'P2 — Strong'
-      -- P3: supply visible (CHN remainder + SGP forced regardless of media_cost)
+      -- P3: supply visible (CHN remainder + SGP)
       WHEN COALESCE(sv.is_supply_partner, false) = true
        AND COALESCE(sv.sdl_media_cost_usd_30d, 0) > 0
         THEN 'P3 — Visible'
-      -- P4: no Moloco supply signal
       ELSE 'P4 — Cold'
     END                                                                AS prospect_label,
-    -- Numeric score for company-level aggregation (1=best)
+    -- Numeric score for company-level aggregation (1=best), mirrors prospect_label
     CASE
+      -- IAP path
+      WHEN m.monetization_type = 'IAP' THEN
+        CASE
+          WHEN d.downloads_latest_month >= 100000
+           AND COALESCE(n.competitor_network_count, 0) > 0
+           AND COALESCE(g.t1_downloads_total, 0) > 0           THEN 1
+          WHEN d.downloads_latest_month >= 50000
+           AND COALESCE(g.t1_downloads_total, 0) > 0            THEN 2
+          WHEN d.downloads_latest_month >= 20000                THEN 3
+          ELSE                                                        4
+        END
+      -- IAA/Hybrid path (unchanged)
       WHEN UPPER(COALESCE(gtm.final_hq_country, m.hq_country)) IN ('CHN','CHINA','CN')
        AND COALESCE(sv.is_supply_partner, false) = true
        AND COALESCE(sv.sdl_media_cost_usd_30d, 0) > 2000

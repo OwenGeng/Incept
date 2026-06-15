@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.routers import admin, ai_insights, health, incept, internal, leads, supply_smb
+from app.routers import admin, agent, ai_insights, feedback, health, incept, internal, leads, supply_smb
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,8 @@ def create_app() -> FastAPI:
     app.include_router(supply_smb.router)
     app.include_router(leads.router)
     app.include_router(ai_insights.router)
+    app.include_router(agent.router)
+    app.include_router(feedback.router)
     app.include_router(incept.router)
 
     # Serve Incept static files (generated images & uploads)

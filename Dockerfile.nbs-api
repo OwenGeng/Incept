@@ -34,7 +34,7 @@ RUN mkdir -p /app/static/generated /app/static/uploads
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 # Tells _project_root() in supply_smb_live.py where to look
-ENV INTERSIGHT_PROJECT_ROOT=/app
+ENV INCEPT_PROJECT_ROOT=/app
 
 EXPOSE 8080
 

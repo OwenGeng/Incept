@@ -23,6 +23,7 @@ export const defaultPageTabs = [
   { label: "Top Lists", href: "/supply-smb/no-sdk-no-ua/top-lists" },
   { label: "Detailed Analysis", href: "/supply-smb/no-sdk-no-ua/detailed-analysis" },
   { label: "Leads Pipeline", href: "/supply-smb/leads" },
+  { label: "Bundle Compare", href: "/supply-smb/no-sdk-no-ua/bundle-compare" },
 ];
 
 export const leadsPageTabs = [
@@ -36,4 +37,16 @@ export const leadsPageTabs = [
 export const genericAnalysisTabs = (baseHref: string) => [
   { label: "Top Lists", href: `${baseHref}/top-lists` },
   { label: "Detailed Analysis", href: `${baseHref}/detailed-analysis` },
+];
+
+export const aiInsightsScopeTabs = [
+  { label: "No SDK + No UA", href: "/ai-insights/no-sdk-no-ua", scope: "no-sdk-no-ua" },
+  { label: "SDK + No UA",    href: "/ai-insights/sdk-no-ua",    scope: "sdk-no-ua" },
+  { label: "UA + No SDK",    href: "/ai-insights/ua-no-sdk",    scope: "ua-no-sdk" },
+];
+
+export const askAiDatasetTabs = [
+  { label: "No SDK + No UA", href: "/ask-ai/no-sdk-no-ua", dataset: "no-sdk-no-ua" },
+  { label: "SDK + No UA",    href: "/ask-ai/sdk-no-ua",    dataset: "sdk-no-ua" },
+  { label: "UA + No SDK",    href: "/ask-ai/ua-no-sdk",    dataset: "ua-no-sdk" },
 ];

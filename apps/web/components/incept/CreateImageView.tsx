@@ -17,7 +17,7 @@ import {
   ImageIcon,
   Loader2,
   Maximize2,
-  Paperclip,
+  Plus,
   PanelRight,
   Pencil,
   RotateCcw,
@@ -26,12 +26,13 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { AssetRole, AssetSummary, CreativeThreadSummary, GenerationMode, InceptUser, JobSummary } from "@incept/shared";
+import type { AssetRole, AssetSummary, CreativeThreadSummary, InceptUser, JobSummary } from "@incept/shared";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { addTextToImage, cancelJob, createImageGenerationJob, deleteAssets, deleteThread, downloadAssetsZip, editImage, listAssets, listThreads, outpaintImage, removeBackground, renameThread, splitContactSheet, uploadAsset } from "@/lib/incept-api";
+import { addTextToImage, cancelJob, createImageGenerationJob, deleteAssets, deleteThread, downloadAssetFile, downloadAssetsZip, editImage, generateGifFromAsset, listAssets, listThreads, outpaintImage, removeBackground, renameThread, uploadAsset } from "@/lib/incept-api";
 import { InpaintingCanvas } from "@/components/incept/InpaintingCanvas";
 import { DocsButton, FeedbackButton } from "@/components/incept/FeedbackButton";
+import { KakaoFlow } from "@/components/incept/KakaoFlow";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,10 +40,10 @@ type CreativeMode = "image" | "endcard";
 type OutputFormat = "static" | "gif";
 type ProviderId = "openai" | "gemini";
 type ActiveChip = "model" | "sizes" | "format" | "variants" | null;
-type CreateFlow = GenerationMode;
+type CreateFlow = "resize" | "theme_create" | "kakao";
 type DraftAssetPreview = { id: string; url: string; name: string; file: File; role: AssetRole };
 type AssetBucketState = Partial<Record<AssetRole, DraftAssetPreview[]>>;
-type ClarificationOption = { id: string; label: string; note?: string };
+type ThemeCreateMode = "style_modify" | "style_transfer" | "asset_text_replace";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -56,18 +57,20 @@ const RESIZE_SIZE_GROUPS = [
   { label: "Endcard",          sizes: ["360x640", "480x480", "640x360"] },
 ] as const;
 
+const RESIZE_SIZE_ORDER = RESIZE_SIZE_GROUPS.flatMap((group) => group.sizes);
+
 const ENDCARD_SIZE_SET = new Set(["360x640", "480x480", "640x360"]);
 
 const IMAGE_SIZES = [
-  "320x50", "1200x628", "320x480", "300x250",
-  "728x90", "640x100", "720x720", "1200x600", "1200x222",
+  "1200x628", "320x480", "300x250",
+  "720x720", "1200x600", "360x640", "480x480", "640x360",
 ];
 
-// GIF supported for banner + medium + endcard sizes (large landscape GIF is impractical)
+// GIF supported for medium + endcard sizes
 const GIF_ALLOWED_SIZES = new Set([
-  "320x50", "728x90", "1200x222", "640x100", // banner
-  "300x250",                                   // medium
-  "360x640", "480x480", "640x360",             // endcard
+  "300x250",                       // medium
+  "320x480",                       // portrait
+  "360x640", "480x480", "640x360", // endcard
 ]);
 
 const ENDCARD_SIZES = [
@@ -82,24 +85,23 @@ const DEFAULT_IMAGE_SIZES = ["1200x628", "300x250", "320x480"];
 
 const CREATE_FLOW_TABS: Array<{ id: CreateFlow; label: string; blurb: string }> = [
   { id: "resize",       label: "Resize",       blurb: "Adapt one image to multiple ad sizes. Background and style stay identical." },
-  { id: "free_create",  label: "Theme Create", blurb: "Generate new creative variants from client assets and a theme prompt." },
+  { id: "theme_create", label: "Theme Create", blurb: "Modify a source creative using one of three Gemini image workflows." },
+  { id: "kakao",        label: "Kakao",        blurb: "Batch-generate Kakao Bizboard banners (1029×258) from your ad creatives." },
 ];
 
-const STYLE_MATCH_ROLES: Array<{ role: AssetRole; title: string; hint: string; required?: boolean }> = [
-  { role: "reference_ad", title: "Reference Ad", hint: "Upload the ad whose composition and style we should match.", required: true },
-  { role: "client_character", title: "Client Character", hint: "Character or hero subject that must stay recognizable." },
-  { role: "client_logo", title: "Client Logo", hint: "Brand logo. This should survive adaptation and stay legible.", required: true },
-  { role: "client_product", title: "Product / Packshot", hint: "Optional product art or packshot to preserve." },
-  { role: "client_background", title: "Background", hint: "Optional environment or key scene asset." },
+const THEME_CREATE_MODES: Array<{ id: ThemeCreateMode; label: string; blurb: string }> = [
+  { id: "style_modify", label: "Style Modify", blurb: "Keep the exact layout of one source image and transform its artistic style." },
+  { id: "style_transfer", label: "Style Transfer", blurb: "Use Image 1 for content and Image 2 only for visual style DNA." },
+  { id: "asset_text_replace", label: "Asset & Text Replace", blurb: "Replace a logo, replace one element, and rewrite one text string." },
 ];
 
-const THEME_CREATE_ROLES: Array<{ role: AssetRole; title: string; hint: string; required?: boolean }> = [
-  { role: "client_character", title: "Client Character", hint: "Hero character or main visual subject." },
-  { role: "client_logo", title: "Client Logo", hint: "Brand logo that must remain visible and consistent.", required: true },
-  { role: "client_product", title: "Product / Packshot", hint: "Optional product asset or featured object." },
-  { role: "client_background", title: "Background", hint: "Optional scene starting point or environment." },
-  { role: "brand_element", title: "Brand Elements", hint: "Optional CTA shell, frame, sticker, or badge." },
-];
+const THEME_CREATE_POSITION_OPTIONS = [
+  { value: "top-left", label: "Top Left" },
+  { value: "top-right", label: "Top Right" },
+  { value: "center", label: "Center" },
+  { value: "bottom-left", label: "Bottom Left" },
+  { value: "bottom-right", label: "Bottom Right" },
+] as const;
 
 // Flat list of supported models — provider shown as sub-text prefix
 const ALL_MODELS: Array<{
@@ -109,7 +111,6 @@ const ALL_MODELS: Array<{
   sub: string;
 }> = [
   { id: "gemini-3.1-flash-image", provider: "gemini", short: "Gemini 3.1 Flash", sub: "Google · Fastest" },
-  { id: "gemini-2.5-flash-image", provider: "gemini", short: "Gemini 2.5 Flash", sub: "Google · Balanced" },
   { id: "gpt-image-2",            provider: "openai", short: "GPT Image 2",      sub: "OpenAI · Latest" },
 ];
 
@@ -143,36 +144,10 @@ function formatDateGroup(iso: string): string {
 }
 
 function formatThreadMode(mode: CreateFlow): string {
-  if (mode === "style_match") return "Style Match";
+  if (mode === "resize") return "Resize";
+  if (mode === "kakao") return "Kakao";
   if (mode === "theme_create") return "Theme Create";
   return "Free Create";
-}
-
-function getContactSheetRole(asset: AssetSummary): string | null {
-  const value = asset.analysis?.contact_sheet_role;
-  return typeof value === "string" ? value : null;
-}
-
-function isContactSheetPreview(asset: AssetSummary): boolean {
-  return getContactSheetRole(asset) === "sheet";
-}
-
-function isContactSheetHidden(asset: AssetSummary): boolean {
-  const role = getContactSheetRole(asset);
-  return role === "sheet" || role === "sheet_source";
-}
-
-function isContactSheetAlreadySplit(asset: AssetSummary): boolean {
-  return asset.analysis?.contact_sheet_split_status === "split_completed";
-}
-
-function getContactSheetTitle(asset: AssetSummary): string {
-  const title = asset.analysis?.contact_sheet_title;
-  if (typeof title === "string" && title.trim()) return title.trim();
-  const family = asset.analysis?.contact_sheet_family;
-  if (family === "banner") return "Banner Sheet";
-  if (family === "hero") return "Hero Sheet";
-  return "Contact Sheet";
 }
 
 // ─── Dropdown panel (shared wrapper) ─────────────────────────────────────────
@@ -189,7 +164,7 @@ function DropdownPanel({
   return (
     <div
       className={cn(
-        "absolute bottom-[calc(100%+6px)] z-50 min-w-[180px] overflow-hidden rounded-xl border border-border bg-card py-1 shadow-xl",
+        "absolute bottom-[calc(100%+6px)] z-50 min-w-[180px] rounded-xl border border-border bg-card py-1 shadow-xl",
         className
       )}
     >
@@ -311,6 +286,76 @@ function AssetBucketUploader({
   );
 }
 
+function ThemeAssetInput({
+  title,
+  hint,
+  file,
+  onPick,
+  onClear,
+  required,
+}: {
+  title: string;
+  hint: string;
+  file: DraftAssetPreview | null;
+  onPick: (file: File | null) => void;
+  onClear: () => void;
+  required?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="rounded-xl border border-border bg-background/60 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-foreground">{title}</p>
+            {required && <Badge variant="secondary" className="text-[10px]">Required</Badge>}
+          </div>
+          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{hint}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground"
+        >
+          {file ? "Replace" : "Upload"}
+        </button>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={(e) => {
+          onPick(e.target.files?.[0] ?? null);
+          e.target.value = "";
+        }}
+      />
+
+      {file ? (
+        <div className="mt-3 flex items-center gap-3 rounded-lg border border-border bg-card/80 p-2">
+          <div className="size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-[#07111F]">
+            <img src={file.url} alt={file.name} className="h-full w-full object-cover" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-foreground">{file.name}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClear}
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : (
+        <p className="mt-3 text-[11px] text-muted-foreground">No file chosen.</p>
+      )}
+    </div>
+  );
+}
+
 // ─── Chip button ──────────────────────────────────────────────────────────────
 
 function ChipButton({
@@ -341,7 +386,15 @@ function ChipButton({
 
 // ─── Image zoom modal ────────────────────────────────────────────────────────
 
-function ZoomModal({ asset, onClose }: { asset: AssetSummary; onClose: () => void }) {
+function ZoomModal({
+  asset,
+  onClose,
+  onRegenerate,
+}: {
+  asset: AssetSummary;
+  onClose: () => void;
+  onRegenerate?: (asset: AssetSummary) => void;
+}) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", onKey);
@@ -352,6 +405,7 @@ function ZoomModal({ asset, onClose }: { asset: AssetSummary; onClose: () => voi
   const label = asset.width && asset.height
     ? `${asset.width}×${asset.height} · ${fmt}`
     : fmt;
+  const canRegenerate = Boolean(onRegenerate && (asset.parentAssetId || asset.rootAssetId) && asset.width && asset.height);
 
   return (
     <div
@@ -363,15 +417,29 @@ function ZoomModal({ asset, onClose }: { asset: AssetSummary; onClose: () => voi
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between px-4 py-2.5 border-b border-border">
-          <span className="text-xs font-semibold text-foreground">{label}</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <X className="size-4" />
-          </button>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-semibold text-foreground">{label}</p>
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{asset.title}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {canRegenerate && (
+              <button
+                type="button"
+                onClick={() => onRegenerate?.(asset)}
+                className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] font-semibold text-foreground hover:bg-muted"
+              >
+                Regenerate This Size
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
         {/* Image */}
         <div className="min-h-0 flex-1 overflow-auto">
@@ -393,23 +461,25 @@ function GenerationCard({
   title,
   promptText,
   isGenerating,
+  selectedAssetIds,
+  onToggleSelect,
   onSetWorking,
   onRegenerate,
+  onRegenerateAsset,
   onHide,
   onZoom,
-  onSplit,
-  splittingAssetId,
 }: {
   assets: AssetSummary[];
   title: string;
   promptText?: string;
   isGenerating?: boolean;
+  selectedAssetIds?: Set<string>;
+  onToggleSelect?: (assetId: string) => void;
   onSetWorking?: (asset: AssetSummary) => void;
   onRegenerate?: () => void;
+  onRegenerateAsset?: (asset: AssetSummary) => void;
   onHide?: () => void;
   onZoom?: (asset: AssetSummary) => void;
-  onSplit?: (asset: AssetSummary) => void;
-  splittingAssetId?: string | null;
 }) {
   if (isGenerating) {
     return (
@@ -427,10 +497,7 @@ function GenerationCard({
 
   const realAssets = assets.filter((a) => a.url && !a.url.includes("placeholder"));
   if (realAssets.length === 0) return null;
-  const firstWorkingAsset =
-    realAssets.find((asset) => !isContactSheetPreview(asset)) ?? realAssets[0];
-  const splitTargets = realAssets.filter((asset) => isContactSheetPreview(asset));
-
+  const firstWorkingAsset = realAssets[0];
   function fmtLabel(a: AssetSummary) {
     const size = a.width && a.height ? `${a.width}×${a.height}` : "";
     const fmt  = a.type === "gif" ? "GIF" : "PNG";
@@ -442,13 +509,36 @@ function GenerationCard({
       {/* ── Images in 3-column grid ── */}
       <div className="min-w-0 flex-1">
         <div className="grid grid-cols-3 gap-3">
-          {realAssets.map((a, i) => {
+          {realAssets.map((a) => {
             const r = a.width && a.height ? a.width / a.height : 16 / 9;
+            const canRegenerateAsset = Boolean(onRegenerateAsset && (a.parentAssetId || a.rootAssetId) && a.width && a.height);
+            const selected = selectedAssetIds?.has(a.id) ?? false;
             return (
-              <div key={a.id} className="group/img">
+              <div key={a.id} className="group/img relative">
+                {onToggleSelect && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSelect(a.id)}
+                    className={cn(
+                      "absolute right-2 top-2 z-30 flex size-5 items-center justify-center rounded-full border-2 transition-all",
+                      selected
+                        ? "border-accent bg-accent text-white"
+                        : "border-white/70 bg-black/35 text-white hover:border-white"
+                    )}
+                    title={selected ? "Deselect" : "Select"}
+                  >
+                    {selected ? <Check className="size-3" /> : <span className="size-2 rounded-full bg-white/90" />}
+                  </button>
+                )}
+
                 {/* Image tile — click to zoom */}
                 <div
-                  className="relative cursor-zoom-in overflow-hidden border border-border bg-[#07111F]"
+                  className={cn(
+                    "relative cursor-zoom-in overflow-hidden border bg-[#07111F]",
+                    selected
+                      ? "border-accent shadow-[0_0_0_1px_hsl(var(--accent)/0.35)]"
+                      : "border-border"
+                  )}
                   style={{ aspectRatio: Math.min(Math.max(r, 0.3), 4) }}
                   onClick={() => onZoom?.(a)}
                 >
@@ -462,6 +552,17 @@ function GenerationCard({
                       className="absolute left-2 top-2 hidden rounded-lg bg-accent/90 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm hover:bg-accent group-hover:flex"
                     >
                       Use
+                    </button>
+                  )}
+
+                  {canRegenerateAsset && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onRegenerateAsset(a); }}
+                      className="absolute right-9 top-2 z-10 hidden rounded-lg border border-white/20 bg-black/60 p-1.5 text-white backdrop-blur-sm hover:bg-black/75 group-hover/img:flex"
+                      title={`Regenerate ${fmtLabel(a)}`}
+                    >
+                      <RotateCcw className="size-3.5" />
                     </button>
                   )}
 
@@ -505,27 +606,6 @@ function GenerationCard({
             <RotateCcw className="size-4" />
           </button>
         )}
-        {splitTargets.length > 0 && onSplit && splitTargets.map((target) => (
-          <button
-            key={target.id}
-            type="button"
-            title={`Split ${getContactSheetTitle(target)}`}
-            onClick={() => onSplit(target)}
-            disabled={splittingAssetId === target.id}
-            className="rounded-lg border border-border bg-card px-2 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <span className="block text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
-              {getContactSheetTitle(target).replace(" Sheet", "")}
-            </span>
-            <span className="block px-0.5 text-[10px] font-semibold">
-              {splittingAssetId === target.id
-                ? "..."
-                : isContactSheetAlreadySplit(target)
-                ? "Split Again"
-                : "Split"}
-            </span>
-          </button>
-        ))}
         {onHide && (
           <button
             type="button"
@@ -561,7 +641,6 @@ export function CreateImageView({
   const [mode, setMode] = useState<CreativeMode>("image");
   const [createFlow, setCreateFlow] = useState<CreateFlow>("resize");
   const [prompt, setPrompt] = useState("");
-  const [themeBrief, setThemeBrief] = useState("");
   const [modelId, setModelId] = useState("gemini-3.1-flash-image");
   const [selectedSizes, setSelectedSizes] = useState<string[]>(DEFAULT_IMAGE_SIZES);
   const [format, setFormat] = useState<OutputFormat>("static");
@@ -572,35 +651,33 @@ export function CreateImageView({
   // ── Resize source image ──
   const [resizeSourceAsset, setResizeSourceAsset] = useState<{ id: string | null; url: string; name: string; file?: File } | null>(null);
   const resizeFileRef = useRef<HTMLInputElement>(null);
-  const [variants, setVariants] = useState<1 | 2 | 3>(1);
+  const [showDevPromptOverride, setShowDevPromptOverride] = useState(false);
+  const [resizePromptOverrides, setResizePromptOverrides] = useState<Record<string, string>>({});
+  const [resizeNegativePromptOverride, setResizeNegativePromptOverride] = useState("");
+  const [variants, setVariants] = useState<1 | 2>(1);
   const [activeChip, setActiveChip] = useState<ActiveChip>(null);
 
   // Derive provider from selected model
   const activeModel = ALL_MODELS.find((m) => m.id === modelId) ?? ALL_MODELS[0];
   const provider = activeModel.provider;
 
-  // ── Reference images ──
-  const [refPreviews, setRefPreviews] = useState<
-    { id: string; url: string; name: string; file: File }[]
-  >([]);
-  const [styleMatchAssets, setStyleMatchAssets] = useState<AssetBucketState>({});
+  // ── Theme Create ──
+  const [themeCreateMode, setThemeCreateMode] = useState<ThemeCreateMode>("style_modify");
   const [themeCreateAssets, setThemeCreateAssets] = useState<AssetBucketState>({});
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [themeCreateStyleName, setThemeCreateStyleName] = useState("");
+  const [themeCreateStyleDetails, setThemeCreateStyleDetails] = useState("");
+  const [themeCreateLogoPosition, setThemeCreateLogoPosition] = useState("top-left");
+  const [themeCreateElementPosition, setThemeCreateElementPosition] = useState("top-right");
+  const [themeCreateOldText, setThemeCreateOldText] = useState("");
+  const [themeCreateNewText, setThemeCreateNewText] = useState("");
+  const [themeCreateFontStyle, setThemeCreateFontStyle] = useState("");
 
   // ── Generation state ──
   const [generating, setGenerating] = useState(false);
+  const [uploadingSource, setUploadingSource] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [clarificationState, setClarificationState] = useState<{
-    jobId: string;
-    question: string;
-    reason?: string;
-    options: ClarificationOption[];
-  } | null>(null);
-  const [clarificationSubmitting, setClarificationSubmitting] = useState(false);
-  const clarificationRetryRef = useRef<((note: string) => Promise<void>) | null>(null);
-
   // ── Session ──
 
   // ── Working image ("current working object", drives edit vs generate) ──
@@ -617,7 +694,6 @@ export function CreateImageView({
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [startingNewSession, setStartingNewSession] = useState(false);
   const [previewState, setPreviewState] = useState<{ assets: AssetSummary[]; index: number } | null>(null);
-  const [splittingAssetId, setSplittingAssetId] = useState<string | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement>(null);
   const [workingImage, setWorkingImage] = useState<{
     assetId: string | null; // null while uploading
@@ -673,7 +749,6 @@ export function CreateImageView({
   }
 
   async function handleOutpaint(
-    clarificationNote?: string,
     overrideDirection?: "left" | "right" | "top" | "bottom" | "all",
     overrideRatio?: number,
   ) {
@@ -681,7 +756,6 @@ export function CreateImageView({
     if (!id) return;
     const direction = overrideDirection ?? outpaintDir;
     const ratio = overrideRatio ?? outpaintRatio;
-    clarificationRetryRef.current = (note) => handleOutpaint(note, direction, ratio);
     setGenerating(true); setError(null);
     try {
       const res = await outpaintImage({
@@ -689,7 +763,6 @@ export function CreateImageView({
         direction, ratio,
         threadId: selectedThreadId ?? undefined,
         outputSizes: selectedSizes,
-        clarificationNote,
       });
       const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running…", lineageKey: res.lineage_key };
       setCurrentJobId(res.job_id);
@@ -707,10 +780,9 @@ export function CreateImageView({
     }
   }
 
-  async function handleRemoveBG(clarificationNote?: string) {
+  async function handleRemoveBG() {
     const id = requireAssetId();
     if (!id) return;
-    clarificationRetryRef.current = (note) => handleRemoveBG(note);
     setGenerating(true); setError(null);
     try {
       const res = await removeBackground({
@@ -718,7 +790,6 @@ export function CreateImageView({
         assetId: id,
         threadId: selectedThreadId ?? undefined,
         outputSizes: selectedSizes,
-        clarificationNote,
       });
       const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running…", lineageKey: res.lineage_key };
       setCurrentJobId(res.job_id);
@@ -735,12 +806,11 @@ export function CreateImageView({
     }
   }
 
-  async function handleAddText(clarificationNote?: string, overrideText?: string) {
+  async function handleAddText(overrideText?: string) {
     const baseText = (overrideText ?? textInput).trim();
     if (!baseText) return;
     const id = requireAssetId();
     if (!id) return;
-    clarificationRetryRef.current = (note) => handleAddText(note, baseText);
     setGenerating(true); setError(null);
     try {
       const res = await addTextToImage({
@@ -750,7 +820,6 @@ export function CreateImageView({
         position: textPosition,
         threadId: selectedThreadId ?? undefined,
         outputSizes: selectedSizes,
-        clarificationNote,
       });
       const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running…", lineageKey: res.lineage_key };
       setCurrentJobId(res.job_id);
@@ -765,53 +834,6 @@ export function CreateImageView({
     } catch (err) {
       setGenerating(false);
       setError(`Add text failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  async function handleEditWithPrompt(
-    clarificationNote?: string,
-    overridePrompt?: string,
-    overrideRefs?: { id: string; url: string; name: string; file: File }[],
-  ) {
-    const id = requireAssetId();
-    const basePrompt = (overridePrompt ?? prompt).trim() || lastPrompt.trim();
-    const refsToUse = overrideRefs ?? refPreviews;
-    if (!id || !basePrompt || generating) return;
-    clarificationRetryRef.current = (note) => handleEditWithPrompt(note, basePrompt, refsToUse);
-    setGenerating(true); setError(null); setLastPrompt(basePrompt);
-
-    // Upload any pending refPreviews to get their asset IDs
-    const extraIds: string[] = [];
-    for (const r of refsToUse) {
-      try {
-        const up = await uploadAsset(r.file, activeWorkspaceId, "upload");
-        if (up) extraIds.push(up.id);
-      } catch { /* skip */ }
-    }
-
-    try {
-      const res = await editImage({
-        workspaceId: activeWorkspaceId, assetId: id,
-        extraAssetIds: extraIds,
-        maskDataUrl: undefined, prompt: basePrompt, model: modelId, variants,
-        theme: basePrompt.split(/\s+/).slice(0, 5).join(" "),
-        threadId: selectedThreadId ?? undefined,
-        outputSizes: selectedSizes,
-        clarificationNote,
-      });
-      const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running…", lineageKey: res.lineage_key };
-      setCurrentJobId(res.job_id);
-      if (res.thread_id) {
-        setSelectedThreadId(res.thread_id);
-        setStartingNewSession(false);
-        onThreadSelect?.(res.thread_id);
-      }
-      setLiveJobs((p) => [job, ...p]);
-      onJobCreated(job);
-      setPrompt("");
-    } catch (err) {
-      setGenerating(false);
-      setError(`Edit failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -832,8 +854,7 @@ export function CreateImageView({
       a.jobId &&
       a.url &&
       !a.url.includes("placeholder") &&
-      a.workspaceId === activeWorkspaceId &&
-      !isContactSheetHidden(a)
+      a.workspaceId === activeWorkspaceId
   );
   const currentProjectSessions = [...liveThreads]
     .filter((thread) => thread.workspaceId === activeWorkspaceId)
@@ -842,6 +863,8 @@ export function CreateImageView({
   const allSelected =
     downloadableAssets.length > 0 &&
     downloadableAssets.every((a) => selectedAssetIds.has(a.id));
+  const selectedAssets = downloadableAssets.filter((asset) => selectedAssetIds.has(asset.id));
+  const selectedGifEligibleAssets = selectedAssets.filter((asset) => asset.type !== "gif");
 
   function toggleAsset(id: string) {
     setSelectedAssetIds((prev) => {
@@ -864,7 +887,13 @@ export function CreateImageView({
     if (ids.length === 0) return;
     setDownloading(true);
     try {
-      await downloadAssetsZip(ids, downloadPrefix || "incept");
+      if (ids.length === 1) {
+        const asset = downloadableAssets.find((item) => item.id === ids[0]);
+        if (!asset) throw new Error("Selected asset not found.");
+        await downloadAssetFile(asset);
+      } else {
+        await downloadAssetsZip(ids, downloadPrefix || "incept");
+      }
     } catch (err) {
       console.error("Download failed:", err);
     } finally {
@@ -872,22 +901,257 @@ export function CreateImageView({
     }
   }
 
-  async function handleSplitSheet(asset: AssetSummary) {
-    if (splittingAssetId) return;
-    setSplittingAssetId(asset.id);
+  async function handleGenerateGifSelected() {
+    if (selectedGifEligibleAssets.length === 0) return;
+    setGenerating(true);
     setError(null);
+    let lastResponse: Awaited<ReturnType<typeof generateGifFromAsset>> | null = null;
     try {
-      await splitContactSheet(asset.id);
-      const [assets, threads] = await Promise.all([
-        listAssets(activeWorkspaceId),
-        listThreads(activeWorkspaceId),
-      ]);
-      setLiveAssets(assets);
-      setLiveThreads(threads);
+      for (const asset of selectedGifEligibleAssets) {
+        const response = await generateGifFromAsset({
+          workspaceId: activeWorkspaceId,
+          assetId: asset.id,
+          threadId: asset.threadId ?? selectedThreadId ?? undefined,
+        });
+        lastResponse = response;
+        const job: JobSummary = {
+          id: response.job_id,
+          jobId: response.job_id,
+          title: response.title,
+          toolId: response.tool_id,
+          status: response.status,
+          progress: response.progress,
+          eta: response.status === "completed" ? "Completed" : "Running…",
+          lineageKey: response.lineage_key,
+        };
+        setLiveJobs((prev) => [job, ...prev]);
+        onJobCreated(job);
+      }
+      if (lastResponse?.thread_id) {
+        setSelectedThreadId(lastResponse.thread_id);
+        setStartingNewSession(false);
+        onThreadSelect?.(lastResponse.thread_id);
+      }
+      if (lastResponse) {
+        setCurrentJobId(lastResponse.job_id);
+        setLastPrompt("Generate GIF");
+      } else {
+        setGenerating(false);
+      }
     } catch (err) {
-      setError(`Split failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setSplittingAssetId(null);
+      setGenerating(false);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function triggerGifJob(assetId: string, threadId?: string | null) {
+    setGenerating(true);
+    setError(null);
+    setCurrentJobId(null);
+    setLastPrompt("Generate GIF");
+    try {
+      const response = await generateGifFromAsset({
+        workspaceId: activeWorkspaceId,
+        assetId,
+        threadId: threadId ?? selectedThreadId ?? undefined,
+      });
+      const job: JobSummary = {
+        id: response.job_id,
+        jobId: response.job_id,
+        title: response.title,
+        toolId: response.tool_id,
+        status: response.status,
+        progress: response.progress,
+        eta: response.status === "completed" ? "Completed" : "Running…",
+        lineageKey: response.lineage_key,
+      };
+      setCurrentJobId(response.job_id);
+      if (response.thread_id) {
+        setSelectedThreadId(response.thread_id);
+        setStartingNewSession(false);
+        onThreadSelect?.(response.thread_id);
+      }
+      setLiveJobs((prev) => [job, ...prev]);
+      onJobCreated(job);
+    } catch (err) {
+      setGenerating(false);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleGenerateGifFromResizeSource() {
+    if (!resizeSourceAsset) return;
+    let sourceId = resizeSourceAsset.id;
+    if (!sourceId && resizeSourceAsset.file) {
+      setUploadingSource(true);
+      try {
+        const uploaded = await uploadAsset(resizeSourceAsset.file, activeWorkspaceId, "upload");
+        if (uploaded) {
+          sourceId = uploaded.id;
+          setResizeSourceAsset((prev) => (prev ? { ...prev, id: uploaded.id } : null));
+        }
+      } finally {
+        setUploadingSource(false);
+      }
+    }
+    if (!sourceId) {
+      setError("Upload a source image first.");
+      return;
+    }
+    await triggerGifJob(sourceId, selectedThreadId);
+  }
+
+  async function handleRegenerate(entry: (typeof jobEntries)[number]) {
+    const resizeAssets = entry.assets.filter((asset) => asset.parentAssetId || asset.rootAssetId);
+    const sourceAssetId = resizeAssets[0]?.parentAssetId ?? resizeAssets[0]?.rootAssetId;
+    const outputSizes = Array.from(
+      new Set(
+        resizeAssets
+          .map((asset) =>
+            typeof asset.analysis?.resize_requested_size === "string" && asset.analysis.resize_requested_size.trim()
+              ? asset.analysis.resize_requested_size.trim()
+              : asset.width && asset.height
+                ? `${asset.width}x${asset.height}`
+                : ""
+          )
+          .filter((size) => size.length > 0)
+      )
+    );
+    if (!sourceAssetId || outputSizes.length === 0) {
+      setError("This run cannot be regenerated because the resize source is missing.");
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+    setCurrentJobId(null);
+    setLastPrompt(`Resize to ${outputSizes.join(", ")}`);
+
+    try {
+      const response = await createImageGenerationJob({
+        workspace_id: activeWorkspaceId,
+        prompt:
+          entry.promptText?.trim() ||
+          `Resize the source image to the requested ad sizes.`,
+        provider,
+        model: modelId,
+        variants: 1,
+        aspect_ratio: "multi-size",
+        created_by: currentUser.id,
+        source_asset_ids: [sourceAssetId],
+        reference_asset_ids: [sourceAssetId],
+        theme: `Resize ${outputSizes.join(" ")}`,
+        output_sizes: outputSizes,
+        output_format: "image",
+        preserve_layout: true,
+        use_reference_style: true,
+        client_asset_ids: [],
+        thread_id: entry.threadId || selectedThreadId || undefined,
+        generation_mode: "resize",
+        include_gif: false,
+        resize_prompt_overrides: Object.fromEntries(
+          outputSizes
+            .map((size) => [size, resizePromptOverrides[size]?.trim() ?? ""])
+            .filter(([, value]) => value.length > 0)
+        ),
+        resize_negative_prompt_override: resizeNegativePromptOverride.trim() || undefined,
+      });
+
+      const job: JobSummary = {
+        id: response.job_id,
+        jobId: response.job_id,
+        title: response.title,
+        toolId: response.tool_id,
+        status: response.status,
+        progress: response.progress,
+        eta: response.status === "completed" ? "Completed" : "Running…",
+        lineageKey: response.lineage_key,
+      };
+      setCurrentJobId(response.job_id);
+      if (response.thread_id) {
+        setSelectedThreadId(response.thread_id);
+        setStartingNewSession(false);
+        onThreadSelect?.(response.thread_id);
+      }
+      setLiveJobs((prev) => [job, ...prev]);
+      onJobCreated(job);
+    } catch (err) {
+      setGenerating(false);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleRegenerateAsset(asset: AssetSummary) {
+    const sourceAssetId = asset.parentAssetId ?? asset.rootAssetId;
+    const targetSize =
+      typeof asset.analysis?.resize_requested_size === "string" && asset.analysis.resize_requested_size.trim()
+        ? asset.analysis.resize_requested_size.trim()
+        : asset.width && asset.height
+          ? `${asset.width}x${asset.height}`
+          : "";
+    if (!sourceAssetId || !targetSize) {
+      setError("This image cannot be regenerated because its resize source or size is missing.");
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+    setCurrentJobId(null);
+    setLastPrompt(`Resize to ${targetSize}`);
+    setZoomedAsset(null);
+    setPreviewState(null);
+
+    try {
+      const sourcePrompt =
+        typeof asset.analysis?.source_prompt === "string" && asset.analysis.source_prompt.trim()
+          ? asset.analysis.source_prompt.trim()
+          : "Resize the source image to the requested ad size.";
+      const response = await createImageGenerationJob({
+        workspace_id: activeWorkspaceId,
+        prompt: sourcePrompt,
+        provider,
+        model: modelId,
+        variants: 1,
+        aspect_ratio: "multi-size",
+        created_by: currentUser.id,
+        source_asset_ids: [sourceAssetId],
+        reference_asset_ids: [sourceAssetId],
+        theme: `Resize ${targetSize}`,
+        output_sizes: [targetSize],
+        output_format: "image",
+        preserve_layout: true,
+        use_reference_style: true,
+        client_asset_ids: [],
+        thread_id: asset.threadId || selectedThreadId || undefined,
+        generation_mode: "resize",
+        include_gif: false,
+        resize_prompt_overrides: resizePromptOverrides[targetSize]?.trim()
+          ? { [targetSize]: resizePromptOverrides[targetSize].trim() }
+          : undefined,
+        resize_negative_prompt_override: resizeNegativePromptOverride.trim() || undefined,
+      });
+
+      const job: JobSummary = {
+        id: response.job_id,
+        jobId: response.job_id,
+        title: response.title,
+        toolId: response.tool_id,
+        status: response.status,
+        progress: response.progress,
+        eta: response.status === "completed" ? "Completed" : "Running…",
+        lineageKey: response.lineage_key,
+      };
+      setCurrentJobId(response.job_id);
+      if (response.thread_id) {
+        setSelectedThreadId(response.thread_id);
+        setStartingNewSession(false);
+        onThreadSelect?.(response.thread_id);
+      }
+      setLiveJobs((prev) => [job, ...prev]);
+      onJobCreated(job);
+    } catch (err) {
+      setGenerating(false);
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -942,18 +1206,6 @@ export function CreateImageView({
     if (!currentJobId || !generating) return;
     const job = liveJobs.find((j) => (j.jobId ?? j.id) === currentJobId);
     if (!job) return;
-    if (job.status === "needs_clarification") {
-      setGenerating(false);
-      setCurrentJobId(null);
-      setClarificationState({
-        jobId: job.jobId ?? job.id,
-        question: job.clarificationQuestion ?? job.message ?? "Clarification needed before continuing.",
-        reason: job.clarificationReason,
-        options: job.clarificationOptions ?? [],
-      });
-      setError(null);
-      return;
-    }
     if (job.status === "completed") {
       Promise.all([listAssets(activeWorkspaceId), listThreads(activeWorkspaceId)])
         .then(([a, threads]) => {
@@ -983,6 +1235,20 @@ export function CreateImageView({
     return () => document.removeEventListener("mousedown", handler);
   }, [activeChip]);
 
+  // Theme Create always generates at 1200x628
+  useEffect(() => {
+    if (createFlow === "theme_create") {
+      setSelectedSizes(["1200x628"]);
+    }
+  }, [createFlow]);
+
+  useEffect(() => {
+    if (createFlow === "resize" || createFlow === "kakao") {
+      setModelId("gemini-3.1-flash-image");
+      setActiveChip((prev) => (prev === "model" ? null : prev));
+    }
+  }, [createFlow]);
+
   useEffect(() => {
     if (!sessionMenuOpen) return;
     function handler(e: MouseEvent) {
@@ -1008,9 +1274,8 @@ export function CreateImageView({
     setError("Generation cancelled.");
   }
 
-  async function handleEditSubmit(maskDataUrl: string, editPrompt: string, clarificationNote?: string) {
+  async function handleEditSubmit(maskDataUrl: string, editPrompt: string) {
     if (!editTarget) return;
-    clarificationRetryRef.current = (note) => handleEditSubmit(maskDataUrl, editPrompt, note);
     setEditSubmitting(true);
     try {
       const response = await editImage({
@@ -1021,7 +1286,6 @@ export function CreateImageView({
         theme: editTarget.theme,
         threadId: selectedThreadId ?? undefined,
         outputSizes: selectedSizes,
-        clarificationNote,
       });
       const job = {
         id: response.job_id,
@@ -1048,67 +1312,22 @@ export function CreateImageView({
     }
   }
 
-  // ── Reference image helpers ──
-  function addRefs(files: FileList | null) {
-    if (!files) return;
-    const fileArray = Array.from(files);
-
-    // First file → auto-set as working image (if none pinned yet)
-    if (!workingImage && fileArray.length > 0) {
-      setWorkingImageFromFile(fileArray[0]);
-      fileArray.splice(0, 1);
-    }
-
-    // Remaining → extra references
-    if (fileArray.length > 0) {
-      const next = fileArray.map((file) => ({
-        id: `ref_${Math.random().toString(36).slice(2)}`,
+  function setSingleThemeAsset(role: AssetRole, file: File | null) {
+    setThemeCreateAssets((prev) => {
+      const existing = prev[role] ?? [];
+      existing.forEach((item) => URL.revokeObjectURL(item.url));
+      const next = { ...prev };
+      if (!file) {
+        delete next[role];
+        return next;
+      }
+      next[role] = [{
+        id: `${role}_${Math.random().toString(36).slice(2)}`,
         url: URL.createObjectURL(file),
         name: file.name,
         file,
-      }));
-      setRefPreviews((prev) => [...prev, ...next]);
-    }
-  }
-
-  function removeRef(id: string) {
-    setRefPreviews((prev) => {
-      const item = prev.find((r) => r.id === id);
-      if (item) URL.revokeObjectURL(item.url);
-      return prev.filter((r) => r.id !== id);
-    });
-  }
-
-  function addFlowAssets(flow: Exclude<CreateFlow, "free_create">, role: AssetRole, files: FileList | null) {
-    if (!files) return;
-    const nextItems: DraftAssetPreview[] = Array.from(files).map((file) => ({
-      id: `${role}_${Math.random().toString(36).slice(2)}`,
-      url: URL.createObjectURL(file),
-      name: file.name,
-      file,
-      role,
-    }));
-
-    const setter = flow === "style_match" ? setStyleMatchAssets : setThemeCreateAssets;
-    setter((prev) => ({
-      ...prev,
-      [role]: [...(prev[role] ?? []), ...nextItems],
-    }));
-  }
-
-  function removeFlowAsset(flow: Exclude<CreateFlow, "free_create">, role: AssetRole, id: string) {
-    const setter = flow === "style_match" ? setStyleMatchAssets : setThemeCreateAssets;
-    setter((prev) => {
-      const bucket = prev[role] ?? [];
-      const target = bucket.find((item) => item.id === id);
-      if (target) URL.revokeObjectURL(target.url);
-      const nextBucket = bucket.filter((item) => item.id !== id);
-      const next = { ...prev };
-      if (nextBucket.length > 0) {
-        next[role] = nextBucket;
-      } else {
-        delete next[role];
-      }
+        role,
+      }];
       return next;
     });
   }
@@ -1135,20 +1354,21 @@ export function CreateImageView({
   }
 
   // ── Generate / Edit router ──
-  async function handleGenerate(clarificationNote?: string) {
+  async function handleGenerate() {
     if (generating) return;
 
     // Effective sizes (for resize the checkbox grid already has endcard included if selected)
     const sizes = selectedSizes.length ? selectedSizes : DEFAULT_IMAGE_SIZES;
 
-    clarificationRetryRef.current = (note) => handleGenerate(note);
     setGenerating(true);
     setError(null);
     setCurrentJobId(null);
     setLastPrompt(
       createFlow === "resize"
         ? `Resize to ${sizes.join(", ")}`
-        : prompt.trim() || themeBrief.trim() || createFlow.replace("_", " ")
+        : createFlow === "theme_create"
+        ? `Theme Create · ${THEME_CREATE_MODES.find((item) => item.id === themeCreateMode)?.label ?? "Theme Create"}`
+        : prompt.trim() || createFlow.replace("_", " ")
     );
 
     try {
@@ -1164,7 +1384,9 @@ export function CreateImageView({
         // Upload source if not yet uploaded
         let sourceId = resizeSourceAsset.id;
         if (!sourceId && resizeSourceAsset.file) {
+          setUploadingSource(true);
           const up = await uploadAsset(resizeSourceAsset.file, activeWorkspaceId, "upload");
+          setUploadingSource(false);
           if (up) {
             sourceId = up.id;
             setResizeSourceAsset((prev) => prev ? { ...prev, id: up.id } : null);
@@ -1189,141 +1411,80 @@ export function CreateImageView({
           thread_id: selectedThreadId ?? undefined,
           generation_mode: "resize",
           include_gif: includeGif,
+          resize_prompt_overrides: Object.fromEntries(
+            sizes
+              .map((size) => [size, resizePromptOverrides[size]?.trim() ?? ""])
+              .filter(([, value]) => value.length > 0)
+          ),
+          resize_negative_prompt_override: resizeNegativePromptOverride.trim() || undefined,
         });
       }
 
-      // ── FREE CREATE (Theme Create) ─────────────────────────────────────────
-      else if (createFlow === "free_create") {
-        const basePrompt = prompt.trim() || lastPrompt.trim();
-        if (!basePrompt) {
-          setGenerating(false);
-          setError("Add a prompt to generate.");
-          return;
-        }
-
-        const referenceIds: string[] = [];
-        if (workingImage?.assetId) {
-          referenceIds.push(workingImage.assetId);
-        }
-        for (const r of refPreviews) {
-          const up = await uploadAsset(r.file, activeWorkspaceId, "upload");
-          if (up) referenceIds.push(up.id);
-        }
-
-        response = await createImageGenerationJob({
-          workspace_id: activeWorkspaceId,
-          prompt: basePrompt,
-          provider,
-          model: modelId,
-          variants,
-          aspect_ratio: "multi-size",
-          created_by: currentUser.id,
-          source_asset_ids: [],
-          theme: basePrompt.split(/\s+/).slice(0, 5).join(" "),
-          output_sizes: sizes,
-          output_format: format === "gif" ? "gif" : "image",
-          reference_asset_ids: referenceIds,
-          preserve_layout: false,
-          use_reference_style: referenceIds.length > 0,
-          client_asset_ids: [],
-          thread_id: selectedThreadId ?? undefined,
-          generation_mode: "free_create",
-          clarification_note: clarificationNote,
-        });
-      } else if (createFlow === "style_match") {
-        if (!hasRoleAssets(styleMatchAssets, "reference_ad")) {
-          setGenerating(false);
-          setError("Style Match requires at least one reference ad.");
-          return;
-        }
-        if (!hasRoleAssets(styleMatchAssets, "client_logo")) {
-          setGenerating(false);
-          setError("Style Match requires a client logo.");
-          return;
-        }
-        if (!hasRoleAssets(styleMatchAssets, "client_character") && !hasRoleAssets(styleMatchAssets, "client_product")) {
-          setGenerating(false);
-          setError("Style Match needs at least one client character or product asset.");
-          return;
-        }
-
-        const uploaded = await uploadRoleBuckets(styleMatchAssets);
-        const referenceIds = flattenUploaded(uploaded, ["reference_ad"]);
-        const sourceIds = flattenUploaded(uploaded, ["client_logo", "client_product", "client_background", "brand_element"]);
-        const clientIds = flattenUploaded(uploaded, ["client_character"]);
-        const stylePrompt = [
-          "Create a new ad set that matches the uploaded reference ad's composition, layout rhythm, and visual style.",
-          "Use the uploaded client assets as the hero content.",
-          "Keep the brand logo visible and legible in every requested size.",
-          prompt.trim() ? `Additional direction: ${prompt.trim()}` : "",
-        ].filter(Boolean).join(" ");
-
-        response = await createImageGenerationJob({
-          workspace_id: activeWorkspaceId,
-          prompt: stylePrompt,
-          provider,
-          model: modelId,
-          variants,
-          aspect_ratio: "multi-size",
-          created_by: currentUser.id,
-          source_asset_ids: sourceIds,
-          theme: "Style Match",
-          output_sizes: sizes,
-          output_format: format === "gif" ? "gif" : "image",
-          reference_asset_ids: referenceIds,
-          preserve_layout: false,
-          use_reference_style: true,
-          client_asset_ids: clientIds,
-          thread_id: selectedThreadId ?? undefined,
-          generation_mode: "style_match",
-          clarification_note: clarificationNote,
-        });
-      } else {
-        if (!themeBrief.trim()) {
-          setGenerating(false);
-          setError("Theme Create requires a theme brief.");
-          return;
-        }
-        if (!hasRoleAssets(themeCreateAssets, "client_logo")) {
-          setGenerating(false);
-          setError("Theme Create requires a client logo.");
-          return;
-        }
-        if (!hasRoleAssets(themeCreateAssets, "client_character") && !hasRoleAssets(themeCreateAssets, "client_product")) {
-          setGenerating(false);
-          setError("Theme Create needs at least one client character or product asset.");
-          return;
-        }
-
+      else {
         const uploaded = await uploadRoleBuckets(themeCreateAssets);
-        const sourceIds = flattenUploaded(uploaded, ["client_logo", "client_product", "client_background", "brand_element"]);
-        const clientIds = flattenUploaded(uploaded, ["client_character"]);
-        const themePrompt = [
-          `Create a themed ad set for: ${themeBrief.trim()}.`,
-          "Use the uploaded client assets as the fixed brand inputs.",
-          "Keep the logo visible, preserve character identity, and adapt cleanly across all requested sizes.",
-          prompt.trim() ? `Additional direction: ${prompt.trim()}` : "",
-        ].filter(Boolean).join(" ");
+        const sourceIds = flattenUploaded(uploaded, ["upload"]);
+        const referenceIds = flattenUploaded(uploaded, ["reference_ad", "client_logo", "brand_element"]);
 
+        if (!sourceIds.length) {
+          setGenerating(false);
+          setError("Theme Create requires a source image.");
+          return;
+        }
+
+        if (themeCreateMode === "style_modify") {
+          if (!prompt.trim()) {
+            setGenerating(false);
+            setError("Style Modify requires a prompt.");
+            return;
+          }
+        }
+
+        if (themeCreateMode === "style_transfer" && !referenceIds[0]) {
+          setGenerating(false);
+          setError("Style Transfer requires a style reference image.");
+          return;
+        }
+
+        if (themeCreateMode === "asset_text_replace") {
+          if (referenceIds.length < 2) {
+            setGenerating(false);
+            setError("Asset & Text Replace requires both a new logo image and a new element image.");
+            return;
+          }
+          if (!themeCreateOldText.trim() || !themeCreateNewText.trim() || !themeCreateFontStyle.trim()) {
+            setGenerating(false);
+            setError("Asset & Text Replace requires old text, new text, and font style.");
+            return;
+          }
+        }
+
+        const modeLabel = THEME_CREATE_MODES.find((item) => item.id === themeCreateMode)?.label ?? "Theme Create";
         response = await createImageGenerationJob({
           workspace_id: activeWorkspaceId,
-          prompt: themePrompt,
+          prompt: `Theme Create · ${modeLabel}`,
           provider,
           model: modelId,
           variants,
           aspect_ratio: "multi-size",
           created_by: currentUser.id,
-          source_asset_ids: sourceIds,
-          theme: themeBrief.trim(),
-          output_sizes: sizes,
-          output_format: format === "gif" ? "gif" : "image",
-          reference_asset_ids: [],
+          source_asset_ids: [sourceIds[0]],
+          theme: modeLabel,
+          output_sizes: ["1200x628"],
+          output_format: "image",
+          reference_asset_ids: referenceIds,
           preserve_layout: false,
           use_reference_style: false,
-          client_asset_ids: clientIds,
+          client_asset_ids: [],
           thread_id: selectedThreadId ?? undefined,
           generation_mode: "theme_create",
-          clarification_note: clarificationNote,
+          theme_create_mode: themeCreateMode,
+          theme_create_style_name: themeCreateMode === "style_modify" ? prompt.trim() : themeCreateStyleName.trim() || undefined,
+          theme_create_style_details: themeCreateMode === "style_modify" ? prompt.trim() : themeCreateStyleDetails.trim() || undefined,
+          theme_create_logo_position: themeCreateLogoPosition,
+          theme_create_element_position: themeCreateElementPosition,
+          theme_create_old_text: themeCreateOldText.trim() || undefined,
+          theme_create_new_text: themeCreateNewText.trim() || undefined,
+          theme_create_font_style: themeCreateFontStyle.trim() || undefined,
         });
       }
 
@@ -1359,18 +1520,13 @@ export function CreateImageView({
       }
     } catch (err) {
       setGenerating(false);
+      setUploadingSource(false);
       const msg = err instanceof Error ? err.message : String(err);
       // "Failed to fetch" = server not running; HTTP errors = something else
-      if (msg.toLowerCase().includes("fetch") || msg.toLowerCase().includes("network")) {
-        setError("Cannot reach the API server. Run: cd services/api && uv run uvicorn app.main:app --reload --port 8000");
-      } else if (msg.includes("400")) {
-        setError(`Bad request (400) — check variants ≤ 3 and sizes ≤ 6. Detail: ${msg}`);
-      } else if (msg.includes("401") || msg.includes("403")) {
-        setError(`Auth error (${msg}). Check AUTH_MODE=dev and INCEPT_ADMIN_EMAILS in services/api/.env`);
-      } else if (msg.includes("422")) {
-        setError(`Validation error (422) — the API rejected the request body. Detail: ${msg}`);
+      if (msg.toLowerCase().includes("failed to fetch") || msg.toLowerCase().includes("networkerror")) {
+        setError("Cannot reach the API. Check your connection or contact support.");
       } else {
-        setError(`Generation failed: ${msg}`);
+        setError(msg);
       }
     }
   }
@@ -1388,18 +1544,23 @@ export function CreateImageView({
     }, new Map<string, AssetSummary[]>())
   )
     .map(([jobId, assets]) => {
-      const previewAssets = assets.filter((asset) => isContactSheetPreview(asset));
-      const displayAssets = previewAssets.length > 0 ? previewAssets : assets.filter((asset) => getContactSheetRole(asset) !== "sheet_source");
       return {
         id: jobId,
         threadId: assets[0]?.threadId ?? "",
         createdAt: assets[0]?.createdAt ?? new Date().toISOString(),
-        assets: displayAssets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+        assets: assets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
         title: liveJobMap.get(jobId)?.title ?? assets[0]?.theme ?? "Generation",
-        promptText:
-          (typeof assets[0]?.analysis?.source_prompt === "string" && assets[0]?.analysis?.source_prompt.trim())
-            ? assets[0]?.analysis?.source_prompt.trim()
-            : undefined,
+        promptText: (() => {
+          const requestPrompt = assets[0]?.analysis?.request_prompt;
+          if (typeof requestPrompt === "string" && requestPrompt.trim()) {
+            return requestPrompt.trim();
+          }
+          const sourcePrompt = assets[0]?.analysis?.source_prompt;
+          if (typeof sourcePrompt === "string" && sourcePrompt.trim()) {
+            return sourcePrompt.trim();
+          }
+          return undefined;
+        })(),
       };
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1448,28 +1609,34 @@ export function CreateImageView({
     : selectedSizes.length === 1 ? selectedSizes[0]
     : `${selectedSizes[0]} +${selectedSizes.length - 1}`;
 
-  const styleMatchReady =
-    hasRoleAssets(styleMatchAssets, "reference_ad") &&
-    hasRoleAssets(styleMatchAssets, "client_logo") &&
-    (hasRoleAssets(styleMatchAssets, "client_character") || hasRoleAssets(styleMatchAssets, "client_product"));
-
   const themeCreateReady =
-    themeBrief.trim().length > 0 &&
-    hasRoleAssets(themeCreateAssets, "client_logo") &&
-    (hasRoleAssets(themeCreateAssets, "client_character") || hasRoleAssets(themeCreateAssets, "client_product"));
+    hasRoleAssets(themeCreateAssets, "upload") &&
+    (
+      themeCreateMode === "style_modify"
+        ? prompt.trim().length > 0
+        : themeCreateMode === "style_transfer"
+        ? hasRoleAssets(themeCreateAssets, "reference_ad")
+        : hasRoleAssets(themeCreateAssets, "client_logo") &&
+          hasRoleAssets(themeCreateAssets, "brand_element") &&
+          themeCreateOldText.trim().length > 0 &&
+          themeCreateNewText.trim().length > 0 &&
+          themeCreateFontStyle.trim().length > 0
+    );
 
   const resizeReady = createFlow === "resize" && !!resizeSourceAsset && selectedSizes.length > 0;
+  const orderedSelectedResizeSizes = RESIZE_SIZE_ORDER.filter((size) => selectedSizes.includes(size));
+  const hasAnyResizeOverride =
+    orderedSelectedResizeSizes.some((size) => (resizePromptOverrides[size] ?? "").trim().length > 0) ||
+    resizeNegativePromptOverride.trim().length > 0;
 
   const canGenerate =
     !generating &&
     (
       createFlow === "resize"
         ? resizeReady
-        : createFlow === "free_create"
-        ? prompt.trim().length > 0
-        : createFlow === "style_match"
-        ? styleMatchReady
-        : themeCreateReady
+        : createFlow === "theme_create"
+        ? themeCreateReady
+        : false
     );
   const activeRunningJob =
     (currentJobId ? liveJobs.find((j) => (j.jobId ?? j.id) === currentJobId) : null) ??
@@ -1478,40 +1645,17 @@ export function CreateImageView({
   const isTaskRunning = generating || activeRunningJob?.status === "running" || activeRunningJob?.status === "pending";
   const taskProgress = activeRunningJob?.progress ?? (currentJobId ? 15 : 5);
   const taskMessage = activeRunningJob?.message ?? "";
-  const taskStatusLabel = !currentJobId && !activeRunningJob
+  const taskStatusLabel = uploadingSource
+    ? "Uploading source image"
+    : !currentJobId && !activeRunningJob
     ? "Starting"
     : taskProgress < 30
     ? "Planning"
     : taskProgress < 70
-    ? "Generating sheet"
+    ? "Generating"
     : taskProgress < 95
-    ? "Preparing previews"
-    : "Finalizing sheets";
-
-  async function handleClarificationChoice(option: ClarificationOption) {
-    if (!clarificationRetryRef.current) {
-      setClarificationState(null);
-      return;
-    }
-    setClarificationSubmitting(true);
-    setClarificationState(null);
-    setError(null);
-    try {
-      await clarificationRetryRef.current(option.note ?? option.label);
-    } catch (err) {
-      setGenerating(false);
-      setError(`Clarification retry failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setClarificationSubmitting(false);
-    }
-  }
-
-  function dismissClarification() {
-    setClarificationState(null);
-    setCurrentJobId(null);
-    setGenerating(false);
-  }
-
+    ? "Preparing"
+    : "Finalizing";
 
   // ─────────────────────────────────────────────────────────────────────────────
   return (
@@ -1719,12 +1863,21 @@ export function CreateImageView({
                 assets={jobEntry.assets}
                 title={jobEntry.title}
                 promptText={jobEntry.promptText}
+                selectedAssetIds={selectedAssetIds}
+                onToggleSelect={toggleAsset}
                 onSetWorking={setWorkingImageFromAsset}
-                onRegenerate={() => setPrompt(jobEntry.promptText || jobEntry.title)}
+                onRegenerate={
+                  jobEntry.assets.some((asset) => asset.parentAssetId || asset.rootAssetId)
+                    ? () => handleRegenerate(jobEntry)
+                    : undefined
+                }
+                onRegenerateAsset={
+                  jobEntry.assets.some((asset) => asset.parentAssetId || asset.rootAssetId)
+                    ? handleRegenerateAsset
+                    : undefined
+                }
                 onHide={() => setHiddenJobIds((prev) => new Set([...prev, jobEntry.id]))}
                 onZoom={setZoomedAsset}
-                onSplit={(asset) => void handleSplitSheet(asset)}
-                splittingAssetId={splittingAssetId}
               />
             ))}
           </div>
@@ -1760,7 +1913,7 @@ export function CreateImageView({
       </div>
 
       {/* ── Bottom input bar — floats over history ── */}
-      <div className="relative shrink-0 bg-background px-6 pb-6 pt-3">
+      <div className="relative min-h-0 shrink-0 overflow-visible bg-background px-6 pb-6 pt-3" style={{ maxHeight: "calc(100svh - 120px)" }}>
         {/* Gradient fade so history content dissolves into the bar */}
         <div className="pointer-events-none absolute inset-x-0 bottom-full h-16 bg-gradient-to-t from-background to-transparent" />
         <div className="mx-auto max-w-2xl">
@@ -1782,10 +1935,10 @@ export function CreateImageView({
                 <Loader2 className="size-3.5 animate-spin text-accent" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-semibold text-accent">
-                    {taskMessage || `${taskStatusLabel} image assets`}
+                    {taskMessage || `${taskStatusLabel}…`}
                   </p>
                   <p className="truncate text-[11px] text-accent/70">
-                    {lastPrompt || "Your generation is running"}
+                    {uploadingSource ? "Sending image to server" : (lastPrompt || "Your generation is running")}
                   </p>
                 </div>
                 <button
@@ -1807,11 +1960,12 @@ export function CreateImageView({
 
           <div
             ref={barRef}
-            className="rounded-2xl border border-border bg-card shadow-[0_2px_16px_rgba(0,0,0,0.06)] transition-shadow focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.10)]"
+            className="rounded-2xl border border-border bg-card shadow-[0_2px_16px_rgba(0,0,0,0.06)] transition-shadow focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.10)] flex flex-col"
+            style={{ maxHeight: "calc(100svh - 220px)" }}
           >
 
             {/* Task type tabs: Resize | Theme Create */}
-            <div className="flex items-center gap-1 px-4 pt-3 pb-2 border-b border-border">
+            <div className="shrink-0 flex items-center gap-1 px-4 pt-3 pb-2 border-b border-border">
               {CREATE_FLOW_TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -1827,244 +1981,258 @@ export function CreateImageView({
                   {tab.label}
                 </button>
               ))}
-              {/* GIF addon — only shown in Resize mode */}
-              {createFlow === "resize" && (
-                <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={includeGif}
-                    onChange={(e) => setIncludeGif(e.target.checked)}
-                    className="size-3.5 rounded accent-accent"
-                  />
-                  + GIF
-                  <span className="text-[9px] text-muted-foreground/60">(banner + endcard)</span>
-                </label>
-              )}
             </div>
 
-            {/* ── Resize: source image + size checkboxes ── */}
-            {createFlow === "resize" && (
-              <div className="border-t border-border px-4 py-3 space-y-3">
-                {/* Source image upload */}
-                <div>
-                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Source Image
-                  </p>
-                  {resizeSourceAsset ? (
-                    <div className="flex items-center gap-3 rounded-xl border border-accent/40 bg-soft-accent/40 px-3 py-2">
-                      <div className="size-10 shrink-0 overflow-hidden rounded-lg border border-accent/20">
-                        <img src={resizeSourceAsset.url} alt="" className="h-full w-full object-cover" />
-                      </div>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{resizeSourceAsset.name}</span>
-                      <button type="button" onClick={() => setResizeSourceAsset(null)} className="text-muted-foreground hover:text-foreground">
-                        <X className="size-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => resizeFileRef.current?.click()}
-                      className="flex w-full items-center gap-2 rounded-xl border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground transition-colors hover:border-accent/60 hover:text-foreground"
-                    >
-                      <ImageIcon className="size-4 shrink-0" />
-                      Upload source image to resize
-                    </button>
-                  )}
-                  <input
-                    ref={resizeFileRef}
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      const url = URL.createObjectURL(file);
-                      setResizeSourceAsset({ id: null, url, name: file.name, file });
-                      e.target.value = "";
-                    }}
-                  />
-                </div>
-
-                {/* Size checkboxes grouped by family */}
-                <div>
-                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                    Target Sizes
-                  </p>
-                  <div className="space-y-2">
-                    {RESIZE_SIZE_GROUPS.map((group) => (
-                      <div key={group.label}>
-                        <p className="mb-1 text-[10px] font-semibold text-muted-foreground/70">{group.label}</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {group.sizes.map((sz) => {
-                            const checked = selectedSizes.includes(sz);
-                            return (
-                              <label
-                                key={sz}
-                                className={cn(
-                                  "flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-all",
-                                  checked
-                                    ? "border-accent/50 bg-soft-accent text-accent"
-                                    : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
-                                )}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="sr-only"
-                                  checked={checked}
-                                  onChange={(e) =>
-                                    setSelectedSizes((prev) =>
-                                      e.target.checked ? [...prev, sz] : prev.filter((s) => s !== sz)
-                                    )
-                                  }
-                                />
-                                {sz}
-                                {includeGif && GIF_ALLOWED_SIZES.has(sz) && (
-                                  <span className="ml-0.5 rounded bg-accent/20 px-0.5 text-[8px] font-bold text-accent">+GIF</span>
-                                )}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Endcard hint when any endcard size is selected */}
-                {selectedSizes.some((s) => ENDCARD_SIZE_SET.has(s)) && (
-                  <div className="rounded-xl border border-border bg-muted/20 px-3 py-2">
-                    <p className="text-[10px] text-muted-foreground">
-                      Endcard layout: Logo top · App Store + Google Play middle · CTA bottom
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {createFlow === "style_match" && (
-              <div className="grid gap-3 border-t border-border px-4 py-3 md:grid-cols-2">
-                {STYLE_MATCH_ROLES.map((bucket) => (
-                  <AssetBucketUploader
-                    key={bucket.role}
-                    title={bucket.title}
-                    hint={bucket.hint}
-                    role={bucket.role}
-                    required={bucket.required}
-                    files={styleMatchAssets[bucket.role] ?? []}
-                    onAdd={(role, files) => addFlowAssets("style_match", role, files)}
-                    onRemove={(role, id) => removeFlowAsset("style_match", role, id)}
-                  />
-                ))}
-              </div>
-            )}
+            {/* Scrollable form sections — keeps textarea+chips always visible */}
+            <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
 
             {createFlow === "theme_create" && (
-              <div className="border-t border-border px-4 py-3">
-                <div className="mb-3 rounded-xl border border-border bg-background/60 p-3">
-                  <p className="text-sm font-medium text-foreground">Theme Brief</p>
-                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                    Describe the campaign theme we should build around, for example `World Cup 2026`, `Summer Sale`, or `Anniversary Event`.
-                  </p>
-                  <input
-                    value={themeBrief}
-                    onChange={(e) => setThemeBrief(e.target.value)}
-                    placeholder="World Cup 2026"
-                    className="mt-3 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/60"
-                  />
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {THEME_CREATE_ROLES.map((bucket) => (
-                    <AssetBucketUploader
-                      key={bucket.role}
-                      title={bucket.title}
-                      hint={bucket.hint}
-                      role={bucket.role}
-                      required={bucket.required}
-                      files={themeCreateAssets[bucket.role] ?? []}
-                      onAdd={(role, files) => addFlowAssets("theme_create", role, files)}
-                      onRemove={(role, id) => removeFlowAsset("theme_create", role, id)}
-                    />
+              <div className="space-y-4 border-t border-border px-4 py-3">
+                <div className="flex flex-wrap gap-2">
+                  {THEME_CREATE_MODES.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setThemeCreateMode(item.id)}
+                      className={cn(
+                        "rounded-xl border px-3 py-2 text-left transition-colors",
+                        themeCreateMode === item.id
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border bg-background/60 text-foreground hover:border-foreground/20"
+                      )}
+                    >
+                      <p className="text-sm font-medium">{item.label}</p>
+                      <p className={cn("mt-1 text-[11px] leading-5", themeCreateMode === item.id ? "text-background/80" : "text-muted-foreground")}>
+                        {item.blurb}
+                      </p>
+                    </button>
                   ))}
                 </div>
-              </div>
-            )}
 
-            {/* ── Working image pinned bar ── */}
-            {createFlow === "free_create" && workingImage && (
-              <div className="mx-4 mb-2 overflow-hidden rounded-xl border border-accent/30 bg-soft-accent/50">
-                {/* Main row */}
-                <div className="flex items-center gap-2.5 px-3 py-2">
-                  {/* Thumbnail */}
-                  <div className="size-9 shrink-0 overflow-hidden rounded-lg border border-accent/20">
-                    <img src={workingImage.url} alt="" className="h-full w-full object-cover" />
-                  </div>
-                  {/* Label */}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-semibold text-accent">Working image</p>
-                    <p className="truncate text-[10px] text-accent/70">
-                      {workingImage.label}
-                      {!workingImage.assetId && " · uploading…"}
-                    </p>
-                  </div>
-                  {/* Clear */}
-                  <button
-                    type="button"
-                    onClick={() => { setWorkingImage(null); setActiveOp(null); }}
-                    className="shrink-0 rounded-md p-1 text-accent/60 hover:bg-accent/15 hover:text-accent"
-                  >
-                    <X className="size-3.5" />
-                  </button>
+                <div className="flex flex-wrap gap-2">
+                  <ThemeAssetInput
+                    title="Source Image"
+                    hint="Image 1"
+                    required
+                    file={themeCreateAssets.upload?.[0] ?? null}
+                    onPick={(file) => setSingleThemeAsset("upload", file)}
+                    onClear={() => setSingleThemeAsset("upload", null)}
+                  />
+
+                  {themeCreateMode === "style_transfer" && (
+                    <ThemeAssetInput
+                      title="Reference Image"
+                      hint="Image 2"
+                      required
+                      file={themeCreateAssets.reference_ad?.[0] ?? null}
+                      onPick={(file) => setSingleThemeAsset("reference_ad", file)}
+                      onClear={() => setSingleThemeAsset("reference_ad", null)}
+                    />
+                  )}
+
+                  {themeCreateMode === "asset_text_replace" && (
+                    <>
+                      <ThemeAssetInput
+                        title="Reference Image A"
+                        hint="Image 2 · New Logo"
+                        required
+                        file={themeCreateAssets.client_logo?.[0] ?? null}
+                        onPick={(file) => setSingleThemeAsset("client_logo", file)}
+                        onClear={() => setSingleThemeAsset("client_logo", null)}
+                      />
+                      <ThemeAssetInput
+                        title="Reference Image B"
+                        hint="Image 3 · New Button / Element"
+                        required
+                        file={themeCreateAssets.brand_element?.[0] ?? null}
+                        onPick={(file) => setSingleThemeAsset("brand_element", file)}
+                        onClear={() => setSingleThemeAsset("brand_element", null)}
+                      />
+                    </>
+                  )}
                 </div>
 
-                {/* Outpaint panel */}
-                {false && activeOp === "outpaint" && (
-                  <div className="border-t border-accent/20 px-3 py-2">
-                    <p className="mb-1.5 text-[10px] font-medium text-accent/70">Expand direction</p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex gap-1">
-                        {(["↑ Top","← Left","All","Right →","↓ Bot"] as const).map((lbl, i) => {
-                          const dirs = ["top","left","all","right","bottom"] as const;
-                          const d = dirs[i];
-                          return (
-                            <button key={d} type="button" onClick={() => setOutpaintDir(d)}
-                              className={cn("rounded-md px-2 py-1 text-[10px] font-medium transition-colors",
-                                outpaintDir === d ? "bg-accent text-white" : "border border-accent/30 text-accent hover:bg-accent/10"
-                              )}>
-                              {lbl}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <input type="range" min="10" max="70" value={Math.round(outpaintRatio * 100)}
-                        onChange={(e) => setOutpaintRatio(Number(e.target.value) / 100)}
-                        className="flex-1 accent-accent" />
-                      <span className="text-[10px] text-accent/70">{Math.round(outpaintRatio * 100)}%</span>
-                      <button type="button" onClick={() => void handleOutpaint()}
-                        disabled={!workingImage?.assetId || generating}
-                        className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-white hover:opacity-80 disabled:opacity-40">
-                        Expand
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Add text panel */}
-                {false && activeOp === "text" && (
-                  <div className="border-t border-accent/20 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <input value={textInput} onChange={(e) => setTextInput(e.target.value)}
-                        placeholder="Text to overlay…"
-                        className="min-w-0 flex-1 rounded-lg border border-accent/30 bg-white/60 px-3 py-1.5 text-sm outline-none focus:border-accent/60" />
-                      <select value={textPosition} onChange={(e) => setTextPosition(e.target.value as "top"|"center"|"bottom")}
-                        className="rounded-lg border border-accent/30 bg-white/60 px-2 py-1.5 text-xs outline-none">
-                        <option value="top">Top</option>
-                        <option value="center">Center</option>
-                        <option value="bottom">Bottom</option>
+                {themeCreateMode === "asset_text_replace" && (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        Logo Position
+                      </label>
+                      <select
+                        value={themeCreateLogoPosition}
+                        onChange={(e) => setThemeCreateLogoPosition(e.target.value)}
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/40"
+                      >
+                        {THEME_CREATE_POSITION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                       </select>
-                      <button type="button" onClick={() => void handleAddText()}
-                        disabled={!textInput.trim() || !workingImage?.assetId || generating}
-                        className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-white hover:opacity-80 disabled:opacity-40">
-                        Apply
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        Element Position
+                      </label>
+                      <select
+                        value={themeCreateElementPosition}
+                        onChange={(e) => setThemeCreateElementPosition(e.target.value)}
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/40"
+                      >
+                        {THEME_CREATE_POSITION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        Old Text
+                      </label>
+                      <input
+                        value={themeCreateOldText}
+                        onChange={(e) => setThemeCreateOldText(e.target.value)}
+                        placeholder="Text currently shown in Image 1"
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        New Text
+                      </label>
+                      <input
+                        value={themeCreateNewText}
+                        onChange={(e) => setThemeCreateNewText(e.target.value)}
+                        placeholder="Exact replacement text"
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        Font Style
+                      </label>
+                      <input
+                        value={themeCreateFontStyle}
+                        onChange={(e) => setThemeCreateFontStyle(e.target.value)}
+                        placeholder="bold sans-serif, elegant serif, condensed display..."
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Resize source image thumbnail chip */}
+            {createFlow === "resize" && resizeSourceAsset && (
+              <div className="flex flex-wrap gap-1.5 px-4 pb-1 pt-0">
+                <div className="group relative flex items-center gap-2 rounded-lg border border-accent/40 bg-soft-accent/30 px-2 py-1">
+                  <div className="size-7 shrink-0 overflow-hidden rounded-md border border-accent/20">
+                    <img src={resizeSourceAsset.url} alt="" className="h-full w-full object-cover" />
+                  </div>
+                  <span className="max-w-[120px] truncate text-xs text-foreground">{resizeSourceAsset.name}</span>
+                  <button type="button" onClick={() => setResizeSourceAsset(null)} className="text-muted-foreground hover:text-foreground">
+                    <X className="size-3" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateGifFromResizeSource()}
+                  disabled={generating || uploadingSource}
+                  className={cn(
+                    "rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                    generating || uploadingSource
+                      ? "cursor-not-allowed border-border bg-muted text-muted-foreground"
+                      : "border-border bg-background/80 text-foreground hover:border-foreground/20 hover:bg-muted"
+                  )}
+                >
+                  Generate GIF
+                </button>
+              </div>
+            )}
+
+            {false && createFlow === "resize" && (
+              <div className="border-t border-border px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => setShowDevPromptOverride((prev) => !prev)}
+                  className="flex w-full items-center justify-between rounded-xl border border-border bg-background/60 px-3 py-2 text-left transition-colors hover:border-foreground/20"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Dev Prompt Override</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      Override resize prompts per size for local testing without editing backend templates.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {hasAnyResizeOverride && (
+                      <Badge variant="secondary" className="text-[10px]">Override Active</Badge>
+                    )}
+                    <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", showDevPromptOverride && "rotate-180")} />
+                  </div>
+                </button>
+
+                {showDevPromptOverride && (
+                  <div className="mt-3 space-y-3 rounded-2xl border border-border bg-background/40 p-3">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        Negative Prompt Override
+                      </label>
+                      <textarea
+                        value={resizeNegativePromptOverride}
+                        onChange={(e) => setResizeNegativePromptOverride(e.target.value)}
+                        rows={3}
+                        placeholder="Optional. Leave blank to use the default negative prompt."
+                        className="w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 outline-none placeholder:text-muted-foreground focus:border-accent/40"
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      {orderedSelectedResizeSizes.map((size) => (
+                        <div key={size} className="space-y-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                              {size} Prompt Override
+                            </label>
+                            {(resizePromptOverrides[size] ?? "").trim() && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setResizePromptOverrides((prev) => {
+                                    const next = { ...prev };
+                                    delete next[size];
+                                    return next;
+                                  })
+                                }
+                                className="text-[11px] text-muted-foreground hover:text-foreground"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                          <textarea
+                            value={resizePromptOverrides[size] ?? ""}
+                            onChange={(e) =>
+                              setResizePromptOverrides((prev) => ({
+                                ...prev,
+                                [size]: e.target.value,
+                              }))
+                            }
+                            rows={8}
+                            placeholder={`Optional override for ${size}. Leave blank to use the backend default prompt.`}
+                            className="w-full resize-y rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 outline-none placeholder:text-muted-foreground focus:border-accent/40"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResizePromptOverrides({});
+                          setResizeNegativePromptOverride("");
+                        }}
+                        className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground"
+                      >
+                        Clear All Overrides
                       </button>
                     </div>
                   </div>
@@ -2072,41 +2240,59 @@ export function CreateImageView({
               </div>
             )}
 
-            {/* Reference image thumbnails — compact chips shown above textarea */}
-            {createFlow === "free_create" && refPreviews.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-4 pb-1 pt-0">
-                {refPreviews.map((r) => (
-                  <div
-                    key={r.id}
-                    className="group relative size-10 shrink-0 overflow-hidden rounded-lg border border-border"
-                  >
-                    <img src={r.url} alt={r.name} className="h-full w-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => removeRef(r.id)}
-                      className="absolute inset-0 hidden items-center justify-center rounded-lg bg-black/60 group-hover:flex"
-                    >
-                      <X className="size-3 text-white" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Hidden file input */}
+            {/* Hidden file inputs */}
             <input
-              ref={fileInputRef}
+              ref={resizeFileRef}
               type="file"
               accept="image/*"
-              multiple
               className="sr-only"
-              onChange={(e) => { addRefs(e.target.files); e.target.value = ""; }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const url = URL.createObjectURL(file);
+                setResizeSourceAsset({ id: null, url, name: file.name, file });
+                e.target.value = "";
+              }}
             />
+            {/* Kakao Bizboard batch flow */}
+            {createFlow === "kakao" && (
+              <div className="flex-1">
+                <KakaoFlow
+                  activeWorkspaceId={activeWorkspaceId}
+                  onAssetsCreated={() => {
+                    Promise.all([listAssets(activeWorkspaceId), listThreads(activeWorkspaceId)])
+                      .then(([a, t]) => {
+                        setLiveAssets(a);
+                        setLiveThreads(t);
+                        const latestThread = [...t].sort(
+                          (left, right) =>
+                            new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+                        )[0];
+                        if (latestThread?.id) {
+                          setSelectedThreadId(latestThread.id);
+                          setStartingNewSession(false);
+                          onThreadSelect?.(latestThread.id);
+                        }
+                      })
+                      .catch(() => {});
+                  }}
+                />
+              </div>
+            )}
 
-            {/* Textarea */}
-            <textarea
+            </div>{/* end scrollable form sections */}
+
+            {/* Textarea — hidden only for Kakao */}
+            {createFlow !== "kakao" && <textarea
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setPrompt(value);
+                if (createFlow === "theme_create" && themeCreateMode === "style_modify") {
+                  setThemeCreateStyleName(value);
+                  setThemeCreateStyleDetails(value);
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && canGenerate) {
                   e.preventDefault();
@@ -2114,102 +2300,115 @@ export function CreateImageView({
                 }
               }}
               placeholder={
-                createFlow === "free_create" && workingImage
-                  ? "Describe what to change in the working image…"
-                  : createFlow === "style_match"
-                  ? "Optional direction for matching the reference ad…"
+                createFlow === "resize"
+                  ? resizeSourceAsset
+                    ? "Optional note on the resize (e.g. focus on the logo)…"
+                    : "Tap + to upload a source image, then send to resize…"
                   : createFlow === "theme_create"
-                  ? "Optional art direction, copy notes, or campaign constraints…"
+                  ? themeCreateMode === "style_modify"
+                    ? "Describe the new artistic style and visual treatment you want..."
+                    : themeCreateMode === "style_transfer"
+                    ? "Optional direction for how Image 1 should inherit the style of Image 2..."
+                    : "Optional instruction for the replacement task..."
                   : mode === "image"
                   ? "Describe the image you want to generate…"
                   : "Describe your endcard creative…"
               }
               rows={3}
               className="w-full resize-none bg-transparent px-4 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground"
-            />
+            />}
 
-            {/* ── Chip row ── */}
+            {/* ── Chip row (hidden for Kakao) ── */}
+            {createFlow !== "kakao" &&
             <div className="flex items-center gap-1.5 px-4 pb-3 pt-1">
 
               {/* Model chip */}
-              <div className="relative">
-                <ChipButton
-                  label="Model"
-                  active={activeChip === "model"}
-                  onClick={() => toggleChip("model")}
-                />
-                {activeChip === "model" && (
-                  <DropdownPanel className="left-0 w-64">
-                    <DropdownLabel>Model</DropdownLabel>
-                    {ALL_MODELS.map((m) => (
-                      <DropdownItem
-                        key={m.id}
-                        label={m.short}
-                        sub={m.sub}
-                        selected={modelId === m.id}
-                        onClick={() => { setModelId(m.id); setActiveChip(null); }}
-                      />
-                    ))}
-                  </DropdownPanel>
-                )}
-              </div>
+              {createFlow === "theme_create" ? (
+                <div className="relative">
+                  <ChipButton
+                    label={`Model · ${activeModel.short}`}
+                    active={activeChip === "model"}
+                    onClick={() => toggleChip("model")}
+                  />
+                  {activeChip === "model" && (
+                    <DropdownPanel className="left-0 w-64">
+                      <DropdownLabel>Model</DropdownLabel>
+                      {ALL_MODELS.map((m) => (
+                        <DropdownItem
+                          key={m.id}
+                          label={m.short}
+                          sub={m.sub}
+                          selected={modelId === m.id}
+                          onClick={() => { setModelId(m.id); setActiveChip(null); }}
+                        />
+                      ))}
+                    </DropdownPanel>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  Model · Gemini 3.1 Flash
+                </div>
+              )}
 
-              {/* Sizes / Format / Variants chips — hidden in Resize mode (handled by checkbox grid) */}
-              {/* Sizes chip */}
-              <div className={cn("relative", createFlow === "resize" && "hidden")}>
-                <ChipButton
-                  label="Size"
-                  active={activeChip === "sizes"}
-                  onClick={() => toggleChip("sizes")}
-                />
-                {activeChip === "sizes" && (
-                  <DropdownPanel className="left-0 w-52">
-                    <DropdownLabel>
-                      Sizes — {selectedSizes.length} selected
-                    </DropdownLabel>
-                    {(mode === "endcard" ? ENDCARD_SIZES.map(s => ({ id: s.id, display: `${s.id} · ${s.label}` })) : IMAGE_SIZES.map(s => ({ id: s, display: s }))).map(({ id, display }) => (
-                      <DropdownItem
-                        key={id}
-                        label={display}
-                        selected={selectedSizes.includes(id)}
-                        onClick={() =>
-                          setSelectedSizes((cur) =>
-                            cur.includes(id)
-                              ? cur.filter((x) => x !== id)
-                              : [...cur, id]
-                          )
-                        }
-                      />
-                    ))}
-                  </DropdownPanel>
-                )}
-              </div>
+              {/* Size chip — multi-select for Resize, fixed 1200x628 for Theme Create */}
+              {createFlow === "resize" ? (
+                <div className="relative">
+                  <ChipButton
+                    label={`Size · ${selectedSizes.length || "0"}`}
+                    active={activeChip === "sizes"}
+                    onClick={() => toggleChip("sizes")}
+                  />
+                  {activeChip === "sizes" && (
+                    <DropdownPanel className="left-0 w-52">
+                      <p className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">
+                        Target Sizes — {selectedSizes.length} selected
+                      </p>
+                      <div className="max-h-72 overflow-y-auto [scrollbar-width:thin]">
+                        {RESIZE_SIZE_GROUPS.map((group) => (
+                          <div key={group.label}>
+                            <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+                              {group.label}
+                            </div>
+                            {group.sizes.map((sz) => (
+                              <DropdownItem
+                                key={sz}
+                                label={sz}
+                                selected={selectedSizes.includes(sz)}
+                                onClick={() =>
+                                  setSelectedSizes((cur) =>
+                                    cur.includes(sz) ? cur.filter((x) => x !== sz) : [...cur, sz]
+                                  )
+                                }
+                              />
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </DropdownPanel>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  1200×628
+                </div>
+              )}
 
-              {/* Format chip */}
-              <div className={cn("relative", createFlow === "resize" && "hidden")}>
-                <ChipButton
-                  label="Format"
-                  active={activeChip === "format"}
-                  onClick={() => toggleChip("format")}
-                />
-                {activeChip === "format" && (
-                  <DropdownPanel className="left-0 w-44">
-                    <DropdownLabel>Format</DropdownLabel>
-                    <DropdownItem
-                      label="Static"
-                      sub="PNG · ready to serve"
-                      selected={format === "static"}
-                      onClick={() => { setFormat("static"); setActiveChip(null); }}
-                    />
-                    <DropdownItem
-                      label="GIF"
-                      sub="Animated loop"
-                      selected={format === "gif"}
-                      onClick={() => { setFormat("gif"); setActiveChip(null); }}
-                    />
-                  </DropdownPanel>
-                )}
-              </div>
+              {/* GIF toggle — Resize only */}
+              {createFlow === "resize" && (
+                <button
+                  type="button"
+                  onClick={() => setIncludeGif((v) => !v)}
+                  className={cn(
+                    "flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
+                    includeGif
+                      ? "border-accent/50 bg-soft-accent text-accent"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  + GIF
+                </button>
+              )}
 
               {/* Variants chip */}
               <div className={cn("relative", createFlow === "resize" && "hidden")}>
@@ -2221,7 +2420,7 @@ export function CreateImageView({
                 {activeChip === "variants" && (
                   <DropdownPanel className="right-0 w-40">
                     <DropdownLabel>Variants</DropdownLabel>
-                    {([1, 2, 3] as const).map((n) => (
+                    {([1, 2] as const).map((n) => (
                       <DropdownItem
                         key={n}
                         label={String(n)}
@@ -2247,29 +2446,24 @@ export function CreateImageView({
 
               {/* Attach + Send (right-aligned group) */}
               <div className={cn("flex items-center gap-1.5", !isTaskRunning && "ml-auto")}>
-                {/* Attachment icon — opens file picker */}
+                {/* Upload button — source image for Resize */}
                 <button
                   type="button"
-                  title={createFlow === "free_create" ? "Attach reference images" : "Reference upload is above"}
+                  title={createFlow === "resize" ? "Upload source image" : undefined}
                   onClick={() => {
-                    if (createFlow === "free_create") fileInputRef.current?.click();
+                    if (createFlow === "resize") resizeFileRef.current?.click();
                   }}
-                  disabled={createFlow !== "free_create"}
+                  disabled={createFlow !== "resize"}
                   className={cn(
                     "relative flex size-8 items-center justify-center rounded-full transition-colors",
-                    createFlow !== "free_create"
+                    createFlow !== "resize"
                       ? "cursor-not-allowed text-muted-foreground/40"
-                      : refPreviews.length > 0
+                      : createFlow === "resize" && resizeSourceAsset
                       ? "bg-soft-accent text-accent"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
                 >
-                  <Paperclip className="size-4" />
-                  {createFlow === "free_create" && refPreviews.length > 0 && (
-                    <span className="absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-accent text-[8px] font-bold text-white">
-                      {refPreviews.length}
-                    </span>
-                  )}
+                  <Plus className="size-4" />
                 </button>
 
                 {/* Send button */}
@@ -2292,7 +2486,8 @@ export function CreateImageView({
                 </button>
               </div>
 
-            </div>
+            </div>}
+
           </div>
         </div>
       </div>
@@ -2394,9 +2589,12 @@ export function CreateImageView({
                       {/* Checkbox */}
                       <button
                         type="button"
-                        onClick={() => toggleAsset(asset.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleAsset(asset.id);
+                        }}
                         className={cn(
-                          "absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full border-2 transition-all",
+                          "absolute right-1.5 top-1.5 z-10 flex size-5 items-center justify-center rounded-full border-2 transition-all",
                           selected
                             ? "border-accent bg-accent text-white"
                             : "border-white/60 bg-black/30 group-hover:border-white"
@@ -2424,6 +2622,24 @@ export function CreateImageView({
           <div className="shrink-0 space-y-2 border-t border-border p-3">
             <button
               type="button"
+              onClick={handleGenerateGifSelected}
+              disabled={selectedGifEligibleAssets.length === 0 || generating}
+              className={cn(
+                "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all",
+                selectedGifEligibleAssets.length > 0 && !generating
+                  ? "border border-border bg-background text-foreground hover:bg-muted"
+                  : "cursor-not-allowed bg-muted text-muted-foreground"
+              )}
+            >
+              {generating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {selectedGifEligibleAssets.length === 0
+                ? "Select PNG assets"
+                : selectedGifEligibleAssets.length === 1
+                ? "Generate GIF"
+                : `Generate GIF (${selectedGifEligibleAssets.length})`}
+            </button>
+            <button
+              type="button"
               onClick={handleDownload}
               disabled={selectedAssetIds.size === 0 || downloading}
               className={cn(
@@ -2434,7 +2650,7 @@ export function CreateImageView({
               )}
             >
               {downloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-              {downloading ? "Preparing…" : selectedAssetIds.size === 0 ? "Select to download" : `Download ${selectedAssetIds.size}`}
+              {downloading ? "Preparing…" : selectedAssetIds.size === 0 ? "Select to download" : selectedAssetIds.size === 1 ? "Download PNG" : `Download ${selectedAssetIds.size}`}
             </button>
             <button
               type="button"
@@ -2458,71 +2674,14 @@ export function CreateImageView({
 
     {/* ── Image zoom modal ── */}
     {zoomedAsset && (
-      <ZoomModal asset={zoomedAsset} onClose={() => setZoomedAsset(null)} />
+      <ZoomModal
+        asset={zoomedAsset}
+        onClose={() => setZoomedAsset(null)}
+        onRegenerate={handleRegenerateAsset}
+      />
     )}
 
     {/* ── Inpainting canvas modal ── */}
-    {clarificationState && (
-      <div className="fixed inset-0 z-[72] flex items-center justify-center bg-black/65 p-6">
-        <div className="w-full max-w-xl rounded-3xl border border-border bg-card p-6 shadow-2xl">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-accent">
-                Clarification Needed
-              </p>
-              <h3 className="mt-2 text-xl font-semibold text-foreground">
-                Choose what to preserve first
-              </h3>
-            </div>
-            <button
-              type="button"
-              onClick={dismissClarification}
-              className="rounded-full border border-border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-          <p className="mt-4 text-sm leading-6 text-muted-foreground">
-            {clarificationState.question}
-          </p>
-          {clarificationState.options.length > 0 ? (
-            <div className="mt-5 space-y-3">
-              {clarificationState.options.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => void handleClarificationChoice(option)}
-                  disabled={clarificationSubmitting}
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-left transition-colors hover:border-foreground/20 hover:bg-muted/40 disabled:opacity-60"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold text-foreground">{option.label}</span>
-                    {clarificationSubmitting && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-                  </div>
-                  {option.note && (
-                    <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{option.note}</p>
-                  )}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-5 rounded-2xl border border-dashed border-border bg-background/70 px-4 py-4 text-sm text-muted-foreground">
-              This request needs a more specific instruction before we continue.
-            </div>
-          )}
-          <div className="mt-6 flex items-center justify-end gap-3">
-            <button
-              type="button"
-              onClick={dismissClarification}
-              className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-
     {previewState && previewState.assets[previewState.index] && (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6">
         <div className="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#07111F] shadow-2xl">
@@ -2578,6 +2737,30 @@ export function CreateImageView({
             >
               Mask Edit
             </button>
+            {previewState.assets[previewState.index].type !== "gif" && (
+              <button
+                type="button"
+                onClick={() => {
+                  const asset = previewState.assets[previewState.index];
+                  void triggerGifJob(asset.id, asset.threadId);
+                  setPreviewState(null);
+                }}
+                className="rounded-xl border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
+              >
+                Generate GIF
+              </button>
+            )}
+            {((previewState.assets[previewState.index].parentAssetId || previewState.assets[previewState.index].rootAssetId) &&
+              previewState.assets[previewState.index].width &&
+              previewState.assets[previewState.index].height) && (
+              <button
+                type="button"
+                onClick={() => handleRegenerateAsset(previewState.assets[previewState.index])}
+                className="rounded-xl border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
+              >
+                Regenerate This Size
+              </button>
+            )}
             {previewState.assets.length > 1 && (
               <div className="ml-auto flex items-center gap-2">
                 <button

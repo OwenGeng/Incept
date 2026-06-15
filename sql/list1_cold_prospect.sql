@@ -114,15 +114,7 @@ net_signals AS (
   SELECT
     app_id,
     STRING_AGG(DISTINCT network ORDER BY network)  AS active_ua_networks,
-    COUNTIF(LOWER(network) NOT LIKE '%moloco%')    AS competitor_network_count,
-    MAX(CASE WHEN LOWER(network) LIKE '%applovin%' OR LOWER(network) LIKE '%max%'   THEN 1 ELSE 0 END) AS on_applovin,
-    MAX(CASE WHEN LOWER(network) LIKE '%unity%'      THEN 1 ELSE 0 END) AS on_unity,
-    MAX(CASE WHEN LOWER(network) LIKE '%ironsource%' THEN 1 ELSE 0 END) AS on_ironsource,
-    MAX(CASE WHEN LOWER(network) LIKE '%facebook%' OR LOWER(network) LIKE '%meta%' THEN 1 ELSE 0 END) AS on_meta,
-    MAX(CASE WHEN LOWER(network) LIKE '%tiktok%'     THEN 1 ELSE 0 END) AS on_tiktok,
-    MAX(CASE WHEN LOWER(network) LIKE '%pangle%'     THEN 1 ELSE 0 END) AS on_pangle,
-    MAX(CASE WHEN LOWER(network) LIKE '%mintegral%'  THEN 1 ELSE 0 END) AS on_mintegral,
-    MAX(CASE WHEN LOWER(network) LIKE '%google%' OR LOWER(network) LIKE '%uac%'    THEN 1 ELSE 0 END) AS on_google
+    COUNTIF(LOWER(network) NOT LIKE '%moloco%')    AS competitor_network_count
   FROM `ads-bpd-guard-china.sensortower.network_analysis`
   WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
   GROUP BY app_id
@@ -135,8 +127,7 @@ geo_raw AS (
   SELECT
     app_id,
     country_code,
-    SUM(download) AS dl_30d,
-    SUM(revenue)  AS rev_30d
+    SUM(download) AS dl_30d
   FROM `ads-bpd-guard-china.sensortower.download_revenue_v3`
   WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
     AND app_id IS NOT NULL
@@ -145,16 +136,11 @@ geo_raw AS (
 geo_metrics AS (
   SELECT
     app_id,
-    SUM(dl_30d)                                          AS total_downloads_30d,
-    SUM(rev_30d)                                         AS total_revenue_30d,
-    MAX(CASE WHEN dl_rank  = 1 THEN country_code END)    AS top_dl_country,
-    MAX(CASE WHEN dl_rank  = 1 THEN dl_30d END)          AS top_dl_country_downloads,
-    MAX(CASE WHEN rev_rank = 1 THEN country_code END)    AS top_rev_country,
-    MAX(CASE WHEN rev_rank = 1 THEN rev_30d END)         AS top_rev_country_revenue
+    SUM(dl_30d)                                        AS total_downloads_30d,
+    MAX(CASE WHEN dl_rank = 1 THEN country_code END)   AS top_dl_country
   FROM (
     SELECT *,
-      ROW_NUMBER() OVER (PARTITION BY app_id ORDER BY dl_30d  DESC) AS dl_rank,
-      ROW_NUMBER() OVER (PARTITION BY app_id ORDER BY rev_30d DESC) AS rev_rank
+      ROW_NUMBER() OVER (PARTITION BY app_id ORDER BY dl_30d DESC) AS dl_rank
     FROM geo_raw
   )
   GROUP BY app_id
@@ -248,20 +234,8 @@ tagged AS (
     d.success_threshold_status,
     n.active_ua_networks,
     COALESCE(n.competitor_network_count, 0)             AS competitor_network_count,
-    COALESCE(n.on_applovin,   0)                        AS on_applovin,
-    COALESCE(n.on_unity,      0)                        AS on_unity,
-    COALESCE(n.on_ironsource, 0)                        AS on_ironsource,
-    COALESCE(n.on_meta,       0)                        AS on_meta,
-    COALESCE(n.on_tiktok,     0)                        AS on_tiktok,
-    COALESCE(n.on_pangle,     0)                        AS on_pangle,
-    COALESCE(n.on_mintegral,  0)                        AS on_mintegral,
-    COALESCE(n.on_google,     0)                        AS on_google,
     g.total_downloads_30d,
-    g.total_revenue_30d,
     g.top_dl_country,
-    g.top_dl_country_downloads,
-    g.top_rev_country,
-    g.top_rev_country_revenue,
     stc.top_sdk_impression_country
 
   FROM sdk_bundles s
@@ -280,10 +254,7 @@ tagged AS (
 company_level AS (
   SELECT
     canonical_company,
-    MAX(sensortower_hq_country)                                   AS sensortower_hq_country,
     MAX(final_hq_country)                                         AS final_hq_country,
-    MAX(hq_country_source)                                        AS hq_country_source,
-    MAX(hq_region)                                                AS hq_region,
     MAX(team_routing)                                             AS team_routing,
     MAX(website)                                                  AS website,
     MAX(tracking_publisher_name)                                  AS tracking_publisher_name,
@@ -299,6 +270,7 @@ company_level AS (
     AND UPPER(final_hq_country) IN ('CHN', 'HKG', 'TWN', 'MAC', 'SGP')
   GROUP BY canonical_company
   HAVING COUNT(DISTINCT CASE WHEN is_buying_ua THEN bundle_id END) = 0
+    AND MAX(CASE WHEN is_moloco_advertiser_app THEN 1 ELSE 0 END) = 0
 )
 
 -- =============================================================================
@@ -309,10 +281,7 @@ SELECT
   cl.team_routing,
   t.canonical_company,
   t.tracking_publisher_name,
-  t.sensortower_hq_country,
   t.final_hq_country,
-  t.hq_country_source,
-  t.hq_region,
   t.bundle_id,
   t.app_name,
   t.os,
@@ -323,8 +292,6 @@ SELECT
   t.sdk_media_cost_usd_30d,
   t.sdk_media_cost_rank,
   t.pub_rank_30d,
-  t.is_moloco_sdk_app,
-  t.is_moloco_advertiser_app,
   t.eligibility_status,
   t.ineligibility_reasons,
   t.eligibility_evaluation_date,
@@ -335,20 +302,8 @@ SELECT
   t.sdl_ads_growth_pods,
   t.active_ua_networks,
   t.competitor_network_count,
-  t.on_applovin,
-  t.on_unity,
-  t.on_ironsource,
-  t.on_meta,
-  t.on_tiktok,
-  t.on_pangle,
-  t.on_mintegral,
-  t.on_google,
   t.total_downloads_30d,
   t.top_dl_country,
-  t.top_dl_country_downloads,
-  t.total_revenue_30d,
-  t.top_rev_country,
-  t.top_rev_country_revenue,
   t.top_sdk_impression_country,
   cl.total_sdk_apps,
   cl.untapped_apps,

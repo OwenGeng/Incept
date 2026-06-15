@@ -134,18 +134,41 @@ function StatChip({ label, value, color }: { label: string; value: number; color
   );
 }
 
+const SCOPE_STATS: Record<string, Array<{ label: string; color: string; key: keyof AiInsightsPayload }>> = {
+  "no-sdk-no-ua": [
+    { label: "Total Prospects", color: "hsl(var(--foreground))", key: "totalProspects" },
+    { label: "P1 — Prime",      color: "hsl(var(--accent))",    key: "p1Count" },
+    { label: "P2 — Strong",     color: "#8338ec",               key: "p2Count" },
+    { label: "In Pipeline",     color: "#fb5607",               key: "leadsTotal" },
+    { label: "Spending DSP",    color: "#10B981",               key: "spendingCount" },
+  ],
+  "sdk-no-ua": [
+    { label: "Total Companies", color: "hsl(var(--foreground))", key: "totalProspects" },
+    { label: "Eligible",        color: "#10B981",               key: "p1Count" },
+    { label: "High Value",      color: "hsl(var(--accent))",    key: "p2Count" },
+    { label: "No Manager",      color: "#fb5607",               key: "leadsTotal" },
+    { label: "Spending DSP",    color: "#8338ec",               key: "spendingCount" },
+  ],
+  "ua-no-sdk": [
+    { label: "Total Companies", color: "hsl(var(--foreground))", key: "totalProspects" },
+    { label: "Active UA Buyers", color: "hsl(var(--accent))",   key: "p1Count" },
+    { label: "High UA Value",   color: "#8338ec",               key: "p2Count" },
+    { label: "Untapped Apps",   color: "#fb5607",               key: "leadsTotal" },
+    { label: "Spending DSP",    color: "#10B981",               key: "spendingCount" },
+  ],
+};
+
 // ─── Main View ────────────────────────────────────────────────────────────────
 
 export function AiInsightsView({ data }: { data: AiInsightsPayload }) {
+  const stats = SCOPE_STATS[data.scope] ?? SCOPE_STATS["no-sdk-no-ua"];
   return (
     <div className="space-y-6">
       {/* Stats overview */}
       <div className="grid grid-cols-5 gap-3">
-        <StatChip label="Total Prospects" value={data.totalProspects} color="hsl(var(--foreground))" />
-        <StatChip label="P1 — Prime" value={data.p1Count} color="hsl(var(--accent))" />
-        <StatChip label="P2 — Strong" value={data.p2Count} color="#8338ec" />
-        <StatChip label="In Pipeline" value={data.leadsTotal} color="#fb5607" />
-        <StatChip label="Spending DSP" value={data.spendingCount} color="#10B981" />
+        {stats.map((s) => (
+          <StatChip key={s.label} label={s.label} value={data[s.key] as number} color={s.color} />
+        ))}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
@@ -211,7 +234,9 @@ export function AiInsightsView({ data }: { data: AiInsightsPayload }) {
           {/* Call Prep — top P1/P2 companies */}
           {data.callPrepCompanies.length > 0 && (
             <Card className="p-6">
-              <CardTitle className="mb-4">P1 + P2 Outreach Queue</CardTitle>
+              <CardTitle className="mb-4">
+                {data.scope === "no-sdk-no-ua" ? "P1 + P2 Outreach Queue" : "Top Companies — Outreach Queue"}
+              </CardTitle>
               <div className="space-y-2">
                 {data.callPrepCompanies.slice(0, 6).map((co) => (
                   <div

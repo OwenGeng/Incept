@@ -30,6 +30,7 @@ export interface CallPrepCompany {
 }
 
 export interface AiInsightsPayload {
+  scope: string;
   insights: InsightItem[];
   agents: AgentStatus[];
   recentActivity: ActivityItem[];

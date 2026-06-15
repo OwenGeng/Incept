@@ -21,6 +21,7 @@ export type AssetRole =
   | "generated";
 
 export type GenerationMode = "free_create" | "style_match" | "theme_create" | "resize";
+export type ThemeCreateMode = "style_modify" | "style_transfer" | "asset_text_replace";
 
 export interface CreativeThreadSummary {
   id: string;
@@ -142,6 +143,16 @@ export interface ImageGenerationRequest {
   generation_mode?: GenerationMode;
   include_gif?: boolean;
   clarification_note?: string;
+  resize_prompt_overrides?: Record<string, string>;
+  resize_negative_prompt_override?: string;
+  theme_create_mode?: ThemeCreateMode;
+  theme_create_style_name?: string;
+  theme_create_style_details?: string;
+  theme_create_logo_position?: string;
+  theme_create_element_position?: string;
+  theme_create_old_text?: string;
+  theme_create_new_text?: string;
+  theme_create_font_style?: string;
 }
 
 export interface ImageGenerationResponse {

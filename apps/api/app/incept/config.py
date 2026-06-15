@@ -18,7 +18,7 @@ class Settings(BaseModel):
     manager_emails: set[str] = Field(default_factory=set)
 
     gcp_project_id: str | None = Field(default=None)
-    gcp_location: str = Field(default="us-central1")
+    gcp_location: str = Field(default="global")
     incept_asset_bucket: str = Field(default="INCEPT_ASSET_BUCKET")
     bigquery_enabled: bool = Field(default=False)
     bigquery_dataset: str = Field(default="incept")
@@ -36,13 +36,9 @@ class Settings(BaseModel):
     vertex_gemini_image_model: str = Field(default="gemini-3.1-flash-image")
     vertex_gemini_enabled: bool = Field(default=True)
     vertex_gemini_model: str = Field(default="gemini-2.5-flash")
-    gcp_vision_enabled: bool = Field(default=True)
+    gcp_vision_enabled: bool = Field(default=False)
     max_image_variants: int = Field(default=2)
-    max_output_sizes: int = Field(default=6)
-    contact_sheet_split_enabled: bool = Field(default=False)
-    contact_sheet_split_fallback_enabled: bool = Field(default=False)
-    multi_size_renderer_enabled: bool = Field(default=False)
-    multi_size_renderer_validate_only: bool = Field(default=False)
+    max_output_sizes: int = Field(default=32)
 
     cors_origins: list[str] = Field(default_factory=lambda: [
         "http://localhost:3000",
@@ -65,8 +61,8 @@ def get_settings() -> Settings:
         iap_jwt_audience=os.getenv("IAP_JWT_AUDIENCE"),
         admin_emails={item.lower() for item in _split_csv(os.getenv("INCEPT_ADMIN_EMAILS"))},
         manager_emails={item.lower() for item in _split_csv(os.getenv("INCEPT_MANAGER_EMAILS"))},
-        gcp_project_id=os.getenv("GCP_PROJECT_ID"),
-        gcp_location=os.getenv("GCP_LOCATION", "us-central1"),
+        gcp_project_id=os.getenv("GCP_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT"),
+        gcp_location=os.getenv("GCP_LOCATION", "global"),
         incept_asset_bucket=os.getenv("INCEPT_ASSET_BUCKET", "INCEPT_ASSET_BUCKET"),
         bigquery_enabled=os.getenv("BIGQUERY_ENABLED", "false").lower() == "true",
         bigquery_dataset=os.getenv("BIGQUERY_DATASET", "incept"),
@@ -80,13 +76,9 @@ def get_settings() -> Settings:
         vertex_gemini_image_model=os.getenv("VERTEX_GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
         vertex_gemini_enabled=os.getenv("VERTEX_GEMINI_ENABLED", "true").lower() == "true",
         vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash"),
-        gcp_vision_enabled=os.getenv("GCP_VISION_ENABLED", "true").lower() == "true",
+        gcp_vision_enabled=os.getenv("GCP_VISION_ENABLED", "false").lower() == "true",
         max_image_variants=int(os.getenv("MAX_IMAGE_VARIANTS", "2")),
-        max_output_sizes=int(os.getenv("MAX_OUTPUT_SIZES", "6")),
-        contact_sheet_split_enabled=os.getenv("INCEPT_ENABLE_CONTACT_SHEET_SPLIT", "false").lower() == "true",
-        contact_sheet_split_fallback_enabled=os.getenv("INCEPT_CONTACT_SHEET_FALLBACK", "false").lower() == "true",
-        multi_size_renderer_enabled=os.getenv("INCEPT_ENABLE_MULTI_SIZE_RENDERER", "false").lower() == "true",
-        multi_size_renderer_validate_only=os.getenv("INCEPT_MULTI_SIZE_RENDERER_VALIDATE_ONLY", "false").lower() == "true",
+        max_output_sizes=int(os.getenv("MAX_OUTPUT_SIZES", "32")),
         cors_origins=_split_csv(os.getenv("CORS_ORIGINS")) or [
             "http://localhost:3000",
             "http://127.0.0.1:3000",
