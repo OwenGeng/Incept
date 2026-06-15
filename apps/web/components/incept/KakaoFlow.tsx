@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, ImageIcon, Loader2, Plus, X } from "lucide-react";
@@ -11,7 +11,13 @@ import {
   uploadAsset,
 } from "@/lib/incept-api";
 import {
+  buildKakaoDefaultMainCopy,
+  buildKakaoDisclosure,
+  buildKakaoSubtitle,
   composeKakaoBizboard,
+  KAKAO_DEFAULT_DISCLOSURE,
+  KAKAO_GACHA_DISCLOSURE,
+  KAKAO_SUBTITLE_SUFFIX,
   loadSpoqaFonts,
   validateKakaoBizboardInputs,
 } from "@/lib/kakao-compositor";
@@ -83,10 +89,12 @@ export function KakaoFlow({
   const [cleaned, setCleaned] = useState<KakaoCleaned[]>([]);
   const [cleanStatus, setCleanStatus] = useState<Record<number, CleanStatus>>({});
   const [appIconUrl, setAppIconUrl] = useState<string | null>(null);
+  const [appName, setAppName] = useState("");
   const [mainCopy, setMainCopy] = useState("");
-  const [appDownloadCopy, setAppDownloadCopy] = useState("앱에서 확인 >");
-  const [dspName, setDspName] = useState("Moloco");
+  const [appDownloadCopy, setAppDownloadCopy] = useState("");
+  const [dspName, setDspName] = useState(KAKAO_DEFAULT_DISCLOSURE);
   const [gacha, setGacha] = useState(false);
+  const [mainCopyCustomized, setMainCopyCustomized] = useState(false);
   const [composedCount, setComposedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -102,6 +110,20 @@ export function KakaoFlow({
   }, []);
 
   useEffect(() => {
+    if (!mainCopyCustomized) {
+      setMainCopy(buildKakaoDefaultMainCopy(appName));
+    }
+  }, [appName, mainCopyCustomized]);
+
+  useEffect(() => {
+    setAppDownloadCopy(buildKakaoSubtitle(appName));
+  }, [appName]);
+
+  useEffect(() => {
+    setDspName(buildKakaoDisclosure(gacha));
+  }, [gacha]);
+
+  useEffect(() => {
     const firstAccepted = cleaned.find((c) => c.accepted && c.assetId);
     if (!firstAccepted || (step !== "metadata" && step !== "composing")) {
       setPreviewUrl((prev) => {
@@ -112,17 +134,17 @@ export function KakaoFlow({
       setMainCopyWidthPx(0);
       return;
     }
+    const previewAsset = firstAccepted;
 
     let cancelled = false;
     let previewObjectUrl: string | null = null;
 
     async function buildPreview() {
       const validation = await validateKakaoBizboardInputs({
-        thumbnailUrl: firstAccepted.url,
+        thumbnailUrl: previewAsset.url,
         appIconUrl,
+        subtitle: buildKakaoSubtitle(appName),
         mainCopy,
-        appDownloadCopy,
-        dspName,
         gacha,
       });
       if (cancelled) return;
@@ -139,11 +161,10 @@ export function KakaoFlow({
       }
 
       const blob = await composeKakaoBizboard({
-        thumbnailUrl: firstAccepted.url,
+        thumbnailUrl: previewAsset.url,
         appIconUrl,
+        subtitle: buildKakaoSubtitle(appName),
         mainCopy,
-        appDownloadCopy,
-        dspName,
         gacha,
       });
       if (cancelled) return;
@@ -168,7 +189,7 @@ export function KakaoFlow({
       cancelled = true;
       if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
     };
-  }, [cleaned, step, appIconUrl, mainCopy, appDownloadCopy, dspName, gacha]);
+  }, [cleaned, step, appIconUrl, appName, mainCopy, gacha]);
 
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
@@ -260,9 +281,8 @@ export function KakaoFlow({
         const blob = await composeKakaoBizboard({
           thumbnailUrl: item.url,
           appIconUrl,
+          subtitle: buildKakaoSubtitle(appName),
           mainCopy,
-          appDownloadCopy,
-          dspName,
           gacha,
         });
         const sourceName = (sources[item.sourceIdx]?.name ?? `image_${item.sourceIdx + 1}`)
@@ -278,8 +298,8 @@ export function KakaoFlow({
           cleanedAssetId: item.assetId,
           composedAssetId: uploaded.id,
           mainCopy,
-          appDownloadCopy,
-          dspName,
+          appDownloadCopy: buildKakaoSubtitle(appName),
+          dspName: buildKakaoDisclosure(gacha),
           gacha,
         });
         await pollForCleanedAsset(jobResp.job_id, activeWorkspaceId);
@@ -301,10 +321,12 @@ export function KakaoFlow({
     setSources([]);
     setCleaned([]);
     setCleanStatus({});
+    setAppName("");
     setMainCopy("");
-    setAppDownloadCopy("앱에서 확인 >");
-    setDspName("Moloco");
+    setAppDownloadCopy("");
+    setDspName(KAKAO_DEFAULT_DISCLOSURE);
     setGacha(false);
+    setMainCopyCustomized(false);
     setAppIconUrl(null);
     setComposedCount(0);
     setError(null);
@@ -360,7 +382,7 @@ export function KakaoFlow({
             <div>
               <p className="mb-1 text-sm font-medium text-foreground">Source Images</p>
               <p className="mb-3 text-xs text-muted-foreground">
-                Upload up to 10 creatives. We clean each image first, then turn the accepted cleaned result into a fixed Kakao Bizboard `1029×258` asset.
+                Upload up to 10 creatives. We clean each image first, then turn the accepted cleaned result into a fixed Kakao Bizboard `1029脳258` asset.
               </p>
 
               {sources.length < 10 && step === "upload" && (
@@ -417,7 +439,7 @@ export function KakaoFlow({
 
             {step === "cleaning" && (
               <p className="text-xs text-muted-foreground">
-                Cleaning {Object.values(cleanStatus).filter((s) => s === "done").length} / {sources.length}…
+                Cleaning {Object.values(cleanStatus).filter((s) => s === "done").length} / {sources.length}鈥?
               </p>
             )}
             {error && <p className="text-xs text-destructive">{error}</p>}
@@ -509,9 +531,36 @@ export function KakaoFlow({
                     className="flex items-center gap-2 rounded-lg border border-dashed border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-accent/60 hover:text-foreground"
                   >
                     <ImageIcon className="size-4" />
-                    Upload app icon (required, 38×38)
+                    Upload app icon (required, 38脳38)
                   </button>
                 )}
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  App Name <span className="text-destructive">*</span>
+                </label>
+                <input
+                  value={appName}
+                  onChange={(e) => setAppName(e.target.value)}
+                  placeholder="APP_NAME"
+                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/60"
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Subtitle is fixed to <span className="font-medium text-foreground">{`APP_NAME ${KAKAO_SUBTITLE_SUFFIX}`}</span>.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Subtitle Preview
+                </label>
+                <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
+                  {buildKakaoSubtitle(appName) || `APP_NAME ${KAKAO_SUBTITLE_SUFFIX}`}
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  The suffix <span className="font-medium text-foreground">{KAKAO_SUBTITLE_SUFFIX}</span> must stay unchanged.
+                </p>
               </div>
 
               <div>
@@ -520,45 +569,30 @@ export function KakaoFlow({
                 </label>
                 <input
                   value={mainCopy}
-                  onChange={(e) => setMainCopy(e.target.value)}
-                  placeholder="게임 제목 또는 브랜드명"
+                  onChange={(e) => {
+                    setMainCopy(e.target.value);
+                    setMainCopyCustomized(true);
+                  }}
+                  placeholder={buildKakaoDefaultMainCopy(appName) || "APP_NAME 출시"}
                   className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/60"
                 />
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  Must include the advertised subject. Width must stay between 290 px and 585 px at 48pt.
+                  Default copy is <span className="font-medium text-foreground">{buildKakaoDefaultMainCopy(appName) || "APP_NAME 출시"}</span>, but you can fully replace it.
                 </p>
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  Current measured width: {Math.round(mainCopyWidthPx)} px
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  App Download Copy
-                </label>
-                <input
-                  value={appDownloadCopy}
-                  onChange={(e) => setAppDownloadCopy(e.target.value)}
-                  placeholder="앱에서 확인 >"
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/60"
-                />
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  Must include the word `앱` and end with the `&gt;` icon.
+                  Width must stay between 290 px and 585 px at 48pt. Current width: {Math.round(mainCopyWidthPx)} px
                 </p>
               </div>
 
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  DSP Name
+                  Moloco Disclosure
                 </label>
-                <input
-                  value={dspName}
-                  onChange={(e) => setDspName(e.target.value)}
-                  placeholder="Moloco"
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/60"
-                />
+                <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
+                  {gacha ? KAKAO_GACHA_DISCLOSURE : KAKAO_DEFAULT_DISCLOSURE}
+                </div>
                 <p className="mt-1 text-[10px] text-muted-foreground">
-                  This drives the fixed AD disclosure line.
+                  This line is fixed and not editable.
                 </p>
               </div>
 
@@ -569,7 +603,9 @@ export function KakaoFlow({
                   onChange={(e) => setGacha(e.target.checked)}
                   className="rounded"
                 />
-                <span className="text-sm text-foreground">확률형 아이템 포함 (Gacha items)</span>
+                <span className="text-sm text-foreground">
+                  Use gacha disclosure: {KAKAO_GACHA_DISCLOSURE}
+                </span>
               </label>
 
               {validationErrors.length > 0 && (
@@ -590,7 +626,7 @@ export function KakaoFlow({
               {step === "composing" && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
-                  Composing {composedCount} / {acceptedCount}…
+                  Composing {composedCount} / {acceptedCount}鈥?
                 </div>
               )}
             </div>
@@ -599,7 +635,7 @@ export function KakaoFlow({
               <div>
                 <p className="text-sm font-medium text-foreground">Bizboard Preview</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Fixed transparent `1029×258` Bizboard. The cleaned image is inserted into the locked thumbnail slot on the right.
+                  Fixed transparent `1029脳258` Bizboard. The cleaned image is inserted into the locked thumbnail slot on the right.
                 </p>
               </div>
               <div className="overflow-hidden rounded-2xl border border-border bg-muted/30 p-4">
@@ -722,3 +758,5 @@ export function KakaoFlow({
     </div>
   );
 }
+
+

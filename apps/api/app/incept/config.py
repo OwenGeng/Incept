@@ -35,7 +35,7 @@ class Settings(BaseModel):
     # Gemini image generation (generate_content API — replaces Imagen long-term)
     vertex_gemini_image_model: str = Field(default="gemini-3.1-flash-image")
     vertex_gemini_enabled: bool = Field(default=True)
-    vertex_gemini_model: str = Field(default="gemini-2.5-flash")
+    vertex_gemini_model: str = Field(default="gemini-3.1-flash-lite")
     gcp_vision_enabled: bool = Field(default=False)
     max_image_variants: int = Field(default=2)
     max_output_sizes: int = Field(default=32)
@@ -75,7 +75,7 @@ def get_settings() -> Settings:
         vertex_imagen_edit_model=os.getenv("VERTEX_IMAGEN_EDIT_MODEL", "imagen-4.0-generate-001"),
         vertex_gemini_image_model=os.getenv("VERTEX_GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
         vertex_gemini_enabled=os.getenv("VERTEX_GEMINI_ENABLED", "true").lower() == "true",
-        vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash"),
+        vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.1-flash-lite"),
         gcp_vision_enabled=os.getenv("GCP_VISION_ENABLED", "false").lower() == "true",
         max_image_variants=int(os.getenv("MAX_IMAGE_VARIANTS", "2")),
         max_output_sizes=int(os.getenv("MAX_OUTPUT_SIZES", "32")),

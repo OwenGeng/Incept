@@ -1,4 +1,6 @@
-// Kakao Bizboard template compositor — produces 1029×258 transparent PNG
+﻿"use client";
+
+// Kakao Bizboard template compositor - produces a 1029x258 transparent PNG
 
 const W = 1029;
 const H = 258;
@@ -16,27 +18,31 @@ const MAIN_COPY_Y = 167;
 const APP_ICON_SZ = 38;
 const APP_ICON_X = SAFE_L;
 const APP_ICON_Y = 88;
-const APP_DL_X = APP_ICON_X + APP_ICON_SZ + 8;
-const APP_DL_Y = APP_ICON_Y + 28;
+const SUBTITLE_X = APP_ICON_X + APP_ICON_SZ + 8;
+const SUBTITLE_Y = APP_ICON_Y + 28;
 const AD_PILL_X = SAFE_L;
 const AD_PILL_Y = 208;
 const AD_COPY_X = AD_PILL_X + 34;
 const AD_COPY_Y = AD_PILL_Y + 15;
+
+export const KAKAO_SUBTITLE_SUFFIX = "앱에서 확인";
+export const KAKAO_DEFAULT_DISCLOSURE = "Moloco 광고입니다";
+export const KAKAO_GACHA_DISCLOSURE = "Moloco 광고 · 확률형 아이템 포함";
 
 let fontsLoaded = false;
 
 export async function loadSpoqaFonts(): Promise<void> {
   if (fontsLoaded) return;
   try {
-    const BASE =
+    const base =
       "https://cdn.jsdelivr.net/gh/spoqa/spoqa-han-sans@latest/fonts/SpoqaHanSansNeo";
     const regular = new FontFace(
       "SpoqaHanSansNeo",
-      `url(${BASE}/SpoqaHanSansNeo-Regular.woff2)`,
+      `url(${base}/SpoqaHanSansNeo-Regular.woff2)`,
     );
     const bold = new FontFace(
       "SpoqaHanSansNeo",
-      `url(${BASE}/SpoqaHanSansNeo-Bold.woff2)`,
+      `url(${base}/SpoqaHanSansNeo-Bold.woff2)`,
       { weight: "700" },
     );
     await Promise.all([regular.load(), bold.load()]);
@@ -44,7 +50,7 @@ export async function loadSpoqaFonts(): Promise<void> {
     document.fonts.add(bold);
     fontsLoaded = true;
   } catch {
-    // Falls back to system Korean font — text still renders
+    // Fall back to the system Korean font stack if the CDN is unavailable.
   }
 }
 
@@ -59,8 +65,10 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 function centerCropParams(
-  srcW: number, srcH: number,
-  dstW: number, dstH: number,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
 ) {
   const srcR = srcW / srcH;
   const dstR = dstW / dstH;
@@ -75,9 +83,8 @@ function centerCropParams(
 export interface KakaoCompositeParams {
   thumbnailUrl: string;
   appIconUrl: string | null;
+  subtitle: string;
   mainCopy: string;
-  appDownloadCopy: string;
-  dspName: string;
   gacha: boolean;
 }
 
@@ -107,11 +114,18 @@ function hasEmoji(value: string) {
   return /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(value);
 }
 
-function buildAdDisclosure(dspName: string, gacha: boolean) {
-  const normalized = normalizeCopy(dspName) || "Moloco";
-  return gacha
-    ? `${normalized} 광고 · 확률형 아이템 포함`
-    : `${normalized} 광고입니다.`;
+export function buildKakaoSubtitle(appName: string) {
+  const normalized = normalizeCopy(appName);
+  return normalized ? `${normalized} ${KAKAO_SUBTITLE_SUFFIX}` : "";
+}
+
+export function buildKakaoDefaultMainCopy(appName: string) {
+  const normalized = normalizeCopy(appName);
+  return normalized ? `${normalized} 출시` : "";
+}
+
+export function buildKakaoDisclosure(gacha: boolean) {
+  return gacha ? KAKAO_GACHA_DISCLOSURE : KAKAO_DEFAULT_DISCLOSURE;
 }
 
 export async function validateKakaoBizboardInputs(
@@ -119,63 +133,58 @@ export async function validateKakaoBizboardInputs(
 ): Promise<KakaoBizboardValidationResult> {
   await loadSpoqaFonts();
   const ctx = makeMeasureContext();
-  const FONT = fontStack();
+  const font = fontStack();
   const errors: string[] = [];
+  const subtitle = normalizeCopy(p.subtitle);
   const mainCopy = normalizeCopy(p.mainCopy);
-  const appDownloadCopy = normalizeCopy(p.appDownloadCopy);
-  const dspName = normalizeCopy(p.dspName);
+  const disclosure = buildKakaoDisclosure(p.gacha);
 
   if (!p.thumbnailUrl) errors.push("A cleaned thumbnail image is required.");
   if (!p.appIconUrl) errors.push("A 38x38 app icon is required.");
+  if (!subtitle) errors.push("Subtitle is required.");
   if (!mainCopy) errors.push("Main copy is required.");
-  if (!appDownloadCopy) errors.push("App download copy is required.");
-  if (!dspName) errors.push("DSP name is required.");
+
+  if (subtitle) {
+    if (!subtitle.endsWith(KAKAO_SUBTITLE_SUFFIX)) {
+      errors.push(`Subtitle must end with "${KAKAO_SUBTITLE_SUFFIX}".`);
+    }
+    if (hasEmoji(subtitle)) {
+      errors.push("Subtitle cannot include emoji.");
+    }
+    ctx.font = `26px ${font}`;
+    if (ctx.measureText(subtitle).width > LEFT_ZONE_W - APP_ICON_SZ - 8) {
+      errors.push("Subtitle is too long for the fixed Bizboard slot.");
+    }
+  }
 
   if (mainCopy) {
-    ctx.font = `700 48px ${FONT}`;
+    ctx.font = `700 48px ${font}`;
     const mainCopyWidthPx = ctx.measureText(mainCopy).width;
     if (mainCopyWidthPx < MAIN_COPY_MIN_W) {
-      errors.push(`Main copy is too short. It must be at least ${MAIN_COPY_MIN_W}px wide at 48pt.`);
+      errors.push(
+        `Main copy is too short. It must be at least ${MAIN_COPY_MIN_W}px wide at 48pt.`,
+      );
     }
     if (mainCopyWidthPx > MAIN_COPY_MAX_W) {
-      errors.push(`Main copy is too long. It must not exceed ${MAIN_COPY_MAX_W}px wide at 48pt.`);
+      errors.push(
+        `Main copy is too long. It must not exceed ${MAIN_COPY_MAX_W}px wide at 48pt.`,
+      );
     }
     if (mainCopyWidthPx > LEFT_ZONE_W) {
       errors.push("Main copy overlaps the Bizboard thumbnail zone.");
     }
   }
 
-  if (appDownloadCopy) {
-    if (!appDownloadCopy.includes("앱")) {
-      errors.push('App download copy must include the word "앱".');
-    }
-    if (!appDownloadCopy.trim().endsWith(">")) {
-      errors.push('App download copy must end with the ">" icon.');
-    }
-    if (hasEmoji(appDownloadCopy)) {
-      errors.push("App download copy cannot include emoji.");
-    }
-    ctx.font = `26px ${FONT}`;
-    if (ctx.measureText(appDownloadCopy).width > LEFT_ZONE_W - APP_ICON_SZ - 8) {
-      errors.push("App download copy is too long for the fixed Bizboard slot.");
-    }
-  }
-
-  if (dspName) {
-    if (hasEmoji(dspName)) {
-      errors.push("DSP name cannot include emoji.");
-    }
-    ctx.font = `22px ${FONT}`;
-    if (ctx.measureText(buildAdDisclosure(dspName, p.gacha)).width > LEFT_ZONE_W - 34) {
-      errors.push("DSP disclosure text is too long for the fixed Bizboard slot.");
-    }
+  ctx.font = `22px ${font}`;
+  if (ctx.measureText(disclosure).width > LEFT_ZONE_W - 34) {
+    errors.push("Moloco disclosure text is too long for the fixed Bizboard slot.");
   }
 
   return {
     errors,
     mainCopyWidthPx: mainCopy
       ? (() => {
-          ctx.font = `700 48px ${FONT}`;
+          ctx.font = `700 48px ${font}`;
           return ctx.measureText(mainCopy).width;
         })()
       : 0,
@@ -184,25 +193,31 @@ export async function validateKakaoBizboardInputs(
   };
 }
 
-export async function composeKakaoBizboard(p: KakaoCompositeParams): Promise<Blob> {
+export async function composeKakaoBizboard(
+  p: KakaoCompositeParams,
+): Promise<Blob> {
   const validation = await validateKakaoBizboardInputs(p);
   if (validation.errors.length) {
     throw new Error(validation.errors[0]);
   }
+
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not create canvas context");
 
-  const FONT = fontStack();
+  const font = fontStack();
+  const subtitle = normalizeCopy(p.subtitle);
   const mainCopy = normalizeCopy(p.mainCopy);
-  const appDownloadCopy = normalizeCopy(p.appDownloadCopy);
-  const disclosure = buildAdDisclosure(p.dspName, p.gacha);
+  const disclosure = buildKakaoDisclosure(p.gacha);
 
-  // Thumbnail (center-cropped, right side)
   const thumb = await loadImage(p.thumbnailUrl);
   const { sx, sy, sw, sh } = centerCropParams(
-    thumb.naturalWidth, thumb.naturalHeight, THUMB_W, THUMB_H,
+    thumb.naturalWidth,
+    thumb.naturalHeight,
+    THUMB_W,
+    THUMB_H,
   );
   ctx.save();
   ctx.beginPath();
@@ -211,7 +226,6 @@ export async function composeKakaoBizboard(p: KakaoCompositeParams): Promise<Blo
   ctx.drawImage(thumb, sx, sy, sw, sh, THUMB_X, THUMB_Y, THUMB_W, THUMB_H);
   ctx.restore();
 
-  // App icon (rounded)
   if (p.appIconUrl) {
     const icon = await loadImage(p.appIconUrl);
     ctx.save();
@@ -222,35 +236,31 @@ export async function composeKakaoBizboard(p: KakaoCompositeParams): Promise<Blo
     ctx.restore();
   }
 
-  // App download copy (inline with icon)
-  ctx.font = `26px ${FONT}`;
+  ctx.font = `26px ${font}`;
   ctx.fillStyle = "#777777";
-  ctx.fillText(appDownloadCopy, APP_DL_X, APP_DL_Y);
+  ctx.fillText(subtitle, SUBTITLE_X, SUBTITLE_Y);
 
-  // Main copy (bold)
-  ctx.font = `700 48px ${FONT}`;
+  ctx.font = `700 48px ${font}`;
   ctx.fillStyle = "#4C4C4C";
   ctx.fillText(mainCopy, SAFE_L, MAIN_COPY_Y);
 
-  // AD pill
   ctx.fillStyle = "#AAAAAA";
   ctx.beginPath();
   ctx.roundRect(AD_PILL_X, AD_PILL_Y, 28, 20, 4);
   ctx.fill();
-  ctx.font = `700 11px ${FONT}`;
+  ctx.font = `700 11px ${font}`;
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "center";
   ctx.fillText("AD", AD_PILL_X + 14, AD_PILL_Y + 14);
   ctx.textAlign = "left";
 
-  // AD text
-  ctx.font = `22px ${FONT}`;
+  ctx.font = `22px ${font}`;
   ctx.fillStyle = "#777777";
   ctx.fillText(disclosure, AD_COPY_X, AD_COPY_Y);
 
   return new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
-      b => (b ? resolve(b) : reject(new Error("canvas.toBlob failed"))),
+      (blob) => (blob ? resolve(blob) : reject(new Error("canvas.toBlob failed"))),
       "image/png",
     ),
   );

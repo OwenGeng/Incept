@@ -51,6 +51,12 @@ class ThemeCreateMode(str, Enum):
     asset_text_replace = "asset_text_replace"
 
 
+class ThemeCreatePresetVisibility(str, Enum):
+    private = "private"
+    team = "team"
+    global_ = "global"
+
+
 class ThreadMessage(BaseModel):
     role: Literal["user", "assistant"]
     text: str
@@ -177,6 +183,107 @@ class GenerationRequest(BaseModel):
     theme_create_new_text: str | None = None
     theme_create_font_style: str | None = None
     # output_sizes length is validated in the endpoint against settings.max_output_sizes
+
+
+class ThemeCreateStyleReport(BaseModel):
+    report_id: str
+    workspace_id: str
+    title: str
+    summary: str
+    theme_create_mode: ThemeCreateMode
+    prompt_template: str
+    source_asset_id: str | None = None
+    reference_asset_ids: list[str] = Field(default_factory=list)
+    source_job_id: str | None = None
+    recommended_preset_name: str | None = None
+    visual_dna: list[str] = Field(default_factory=list)
+    composition_rules: list[str] = Field(default_factory=list)
+    do_not_copy: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    taxonomy: dict[str, list[str]] = Field(default_factory=dict)
+    created_by: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ThemeCreateStyleReportCreateRequest(BaseModel):
+    workspace_id: str
+    title: str
+    summary: str
+    theme_create_mode: ThemeCreateMode
+    prompt_template: str
+    source_asset_id: str | None = None
+    reference_asset_ids: list[str] = Field(default_factory=list)
+    source_job_id: str | None = None
+    recommended_preset_name: str | None = None
+    visual_dna: list[str] = Field(default_factory=list)
+    composition_rules: list[str] = Field(default_factory=list)
+    do_not_copy: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    taxonomy: dict[str, list[str]] = Field(default_factory=dict)
+    created_by: str = "usr_jane"
+
+
+class ThemeCreateStyleReportDraftRequest(BaseModel):
+    workspace_id: str
+    theme_create_mode: ThemeCreateMode
+    prompt_template: str
+    source_asset_id: str
+    reference_asset_ids: list[str] = Field(default_factory=list)
+    style_name: str | None = None
+    style_details: str | None = None
+    logo_position: str | None = None
+    element_position: str | None = None
+    old_text: str | None = None
+    new_text: str | None = None
+    font_style: str | None = None
+
+
+class ThemeCreatePreset(BaseModel):
+    preset_id: str
+    name: str
+    description: str
+    theme_create_mode: ThemeCreateMode
+    visibility: ThemeCreatePresetVisibility = ThemeCreatePresetVisibility.team
+    prompt_template: str
+    style_name: str | None = None
+    style_details: str | None = None
+    workspace_id: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    taxonomy: dict[str, list[str]] = Field(default_factory=dict)
+    source_report_id: str | None = None
+    source_job_id: str | None = None
+    source_asset_id: str | None = None
+    created_by: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    usage_count: int = 0
+    is_official: bool = False
+
+
+class ThemeCreatePresetCreateRequest(BaseModel):
+    name: str
+    description: str
+    theme_create_mode: ThemeCreateMode
+    visibility: ThemeCreatePresetVisibility = ThemeCreatePresetVisibility.team
+    prompt_template: str
+    style_name: str | None = None
+    style_details: str | None = None
+    workspace_id: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    taxonomy: dict[str, list[str]] = Field(default_factory=dict)
+    source_report_id: str | None = None
+    source_job_id: str | None = None
+    source_asset_id: str | None = None
+    created_by: str = "usr_jane"
+
+
+class ThemeCreatePresetFromReportRequest(BaseModel):
+    name: str
+    description: str
+    visibility: ThemeCreatePresetVisibility = ThemeCreatePresetVisibility.team
+    style_name: str | None = None
+    style_details: str | None = None
 
 
 # ── Session / conversation models ─────────────────────────────────────────────

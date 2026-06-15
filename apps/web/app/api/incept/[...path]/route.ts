@@ -14,6 +14,7 @@
  *   INCEPT_API_BASE_URL (explicit override) → API_BASE_URL → localhost:8000
  */
 
+import http from "node:http";
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { isAuthDevSkipped } from "@/lib/auth-mode";
@@ -37,6 +38,31 @@ const FORWARDED_RES_HEADERS = [
 
 type Ctx = { params: Promise<{ path: string[] }> };
 
+async function getCloudRunIdentityToken(audience: string): Promise<string | null> {
+  if (!process.env.K_SERVICE) return null;
+  return new Promise((resolve) => {
+    const metaUrl =
+      `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity` +
+      `?audience=${encodeURIComponent(audience)}`;
+    const request = http.get(metaUrl, { headers: { "Metadata-Flavor": "Google" } }, (response) => {
+      if (response.statusCode !== 200) {
+        resolve(null);
+        return;
+      }
+      let data = "";
+      response.on("data", (chunk: unknown) => {
+        data += String(chunk);
+      });
+      response.on("end", () => resolve(data.trim() || null));
+    });
+    request.on("error", () => resolve(null));
+    request.setTimeout(2000, () => {
+      request.destroy();
+      resolve(null);
+    });
+  });
+}
+
 async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
   // ── 1. Auth ──────────────────────────────────────────────────────────────
   const session = isAuthDevSkipped() ? null : await auth();
@@ -47,6 +73,7 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
   // ── 2. Target URL ─────────────────────────────────────────────────────────
   const { path } = await ctx.params;
   const target = `${INCEPT_BASE}/${path.join("/")}${req.nextUrl.search}`;
+  const identityToken = await getCloudRunIdentityToken(INCEPT_BASE);
 
   // ── 3. Request headers ────────────────────────────────────────────────────
   const fwd: Record<string, string> = {
@@ -54,6 +81,9 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
     "x-user-email":       session?.user?.email ?? "",
     "x-user-role":        session?.user?.role  ?? "user",
   };
+  if (identityToken) {
+    fwd.authorization = `Bearer ${identityToken}`;
+  }
   // Preserve Content-Type so multipart uploads and JSON reach the backend intact
   const ct = req.headers.get("content-type");
   if (ct) fwd["content-type"] = ct;

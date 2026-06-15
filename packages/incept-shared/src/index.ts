@@ -22,6 +22,7 @@ export type AssetRole =
 
 export type GenerationMode = "free_create" | "style_match" | "theme_create" | "resize";
 export type ThemeCreateMode = "style_modify" | "style_transfer" | "asset_text_replace";
+export type ThemeCreatePresetVisibility = "private" | "team" | "global";
 
 export interface CreativeThreadSummary {
   id: string;
@@ -195,4 +196,47 @@ export interface UsageEvent {
   inputTokens?: number;
   outputTokens?: number;
   createdAt: string;
+}
+
+export interface ThemeCreateStyleReportSummary {
+  id: string;
+  workspaceId: string;
+  title: string;
+  summary: string;
+  themeCreateMode: ThemeCreateMode;
+  promptTemplate: string;
+  sourceAssetId?: string;
+  referenceAssetIds: string[];
+  sourceJobId?: string;
+  recommendedPresetName?: string;
+  visualDna: string[];
+  compositionRules: string[];
+  doNotCopy: string[];
+  tags: string[];
+  taxonomy: Record<string, string[]>;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ThemeCreatePresetSummary {
+  id: string;
+  workspaceId?: string;
+  name: string;
+  description: string;
+  themeCreateMode: ThemeCreateMode;
+  visibility: ThemeCreatePresetVisibility;
+  promptTemplate: string;
+  styleName?: string;
+  styleDetails?: string;
+  tags: string[];
+  taxonomy: Record<string, string[]>;
+  sourceReportId?: string;
+  sourceJobId?: string;
+  sourceAssetId?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  usageCount: number;
+  isOfficial: boolean;
 }

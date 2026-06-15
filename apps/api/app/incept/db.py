@@ -12,7 +12,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from app.incept.models import Asset, CreativeThread, GenerationJob
+from app.incept.models import Asset, CreativeThread, GenerationJob, ThemeCreatePreset, ThemeCreateStyleReport
 
 _DB_PATH = Path(__file__).parent.parent.parent / "data" / "incept.db"
 
@@ -80,6 +80,49 @@ def init_db() -> None:
                 parent_asset_id TEXT,
                 root_asset_id   TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS theme_create_reports (
+                report_id        TEXT PRIMARY KEY,
+                workspace_id     TEXT NOT NULL DEFAULT '',
+                title            TEXT DEFAULT '',
+                summary          TEXT DEFAULT '',
+                theme_create_mode TEXT DEFAULT 'style_modify',
+                prompt_template  TEXT DEFAULT '',
+                source_asset_id  TEXT,
+                reference_asset_ids TEXT DEFAULT '[]',
+                source_job_id    TEXT,
+                recommended_preset_name TEXT,
+                visual_dna_json  TEXT DEFAULT '[]',
+                composition_rules_json TEXT DEFAULT '[]',
+                do_not_copy_json TEXT DEFAULT '[]',
+                tags_json        TEXT DEFAULT '[]',
+                taxonomy_json    TEXT DEFAULT '{}',
+                created_by       TEXT DEFAULT '',
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS theme_create_presets (
+                preset_id        TEXT PRIMARY KEY,
+                name             TEXT DEFAULT '',
+                description      TEXT DEFAULT '',
+                theme_create_mode TEXT DEFAULT 'style_modify',
+                visibility       TEXT DEFAULT 'team',
+                prompt_template  TEXT DEFAULT '',
+                style_name       TEXT,
+                style_details    TEXT,
+                workspace_id     TEXT,
+                tags_json        TEXT DEFAULT '[]',
+                taxonomy_json    TEXT DEFAULT '{}',
+                source_report_id TEXT,
+                source_job_id    TEXT,
+                source_asset_id  TEXT,
+                created_by       TEXT DEFAULT '',
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                usage_count      INTEGER DEFAULT 0,
+                is_official      INTEGER DEFAULT 0
+            );
         """)
         _ensure_column(con, "assets", "asset_role", "TEXT DEFAULT 'generated'")
         _ensure_column(con, "assets", "analysis_json", "TEXT")
@@ -95,6 +138,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_jobs_workspace   ON jobs(workspace_id);
             CREATE INDEX IF NOT EXISTS idx_jobs_thread      ON jobs(thread_id);
             CREATE INDEX IF NOT EXISTS idx_threads_workspace ON threads(workspace_id);
+            CREATE INDEX IF NOT EXISTS idx_theme_reports_workspace ON theme_create_reports(workspace_id);
+            CREATE INDEX IF NOT EXISTS idx_theme_presets_mode ON theme_create_presets(theme_create_mode);
         """)
 
 
@@ -193,6 +238,71 @@ def upsert_asset(asset: Asset) -> None:
         )
 
 
+def upsert_theme_create_report(report: ThemeCreateStyleReport) -> None:
+    with _connect() as con:
+        con.execute(
+            """INSERT OR REPLACE INTO theme_create_reports
+               (report_id, workspace_id, title, summary, theme_create_mode,
+                prompt_template, source_asset_id, reference_asset_ids, source_job_id,
+                recommended_preset_name, visual_dna_json, composition_rules_json,
+                do_not_copy_json, tags_json, taxonomy_json, created_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                report.report_id,
+                report.workspace_id,
+                report.title,
+                report.summary,
+                report.theme_create_mode.value,
+                report.prompt_template,
+                report.source_asset_id,
+                json.dumps(report.reference_asset_ids),
+                report.source_job_id,
+                report.recommended_preset_name,
+                json.dumps(report.visual_dna),
+                json.dumps(report.composition_rules),
+                json.dumps(report.do_not_copy),
+                json.dumps(report.tags),
+                json.dumps(report.taxonomy),
+                report.created_by,
+                report.created_at.isoformat(),
+                report.updated_at.isoformat(),
+            ),
+        )
+
+
+def upsert_theme_create_preset(preset: ThemeCreatePreset) -> None:
+    with _connect() as con:
+        con.execute(
+            """INSERT OR REPLACE INTO theme_create_presets
+               (preset_id, name, description, theme_create_mode, visibility,
+                prompt_template, style_name, style_details, workspace_id,
+                tags_json, taxonomy_json, source_report_id, source_job_id, source_asset_id,
+                created_by, created_at, updated_at, usage_count, is_official)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                preset.preset_id,
+                preset.name,
+                preset.description,
+                preset.theme_create_mode.value,
+                preset.visibility.value,
+                preset.prompt_template,
+                preset.style_name,
+                preset.style_details,
+                preset.workspace_id,
+                json.dumps(preset.tags),
+                json.dumps(preset.taxonomy),
+                preset.source_report_id,
+                preset.source_job_id,
+                preset.source_asset_id,
+                preset.created_by,
+                preset.created_at.isoformat(),
+                preset.updated_at.isoformat(),
+                preset.usage_count,
+                1 if preset.is_official else 0,
+            ),
+        )
+
+
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 def delete_asset(asset_id: str) -> None:
@@ -238,5 +348,25 @@ def load_assets() -> list[dict]:
             dict(r)
             for r in con.execute(
                 "SELECT * FROM assets ORDER BY created_at DESC"
+            ).fetchall()
+        ]
+
+
+def load_theme_create_reports() -> list[dict]:
+    with _connect() as con:
+        return [
+            dict(r)
+            for r in con.execute(
+                "SELECT * FROM theme_create_reports ORDER BY updated_at DESC"
+            ).fetchall()
+        ]
+
+
+def load_theme_create_presets() -> list[dict]:
+    with _connect() as con:
+        return [
+            dict(r)
+            for r in con.execute(
+                "SELECT * FROM theme_create_presets ORDER BY is_official DESC, updated_at DESC"
             ).fetchall()
         ]

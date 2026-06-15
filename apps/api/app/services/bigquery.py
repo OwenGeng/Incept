@@ -41,17 +41,21 @@ class BigQueryService:
             or settings.google_cloud_project
         )
 
+    def _write_dataset(self) -> str:
+        return settings.bq_dataset_supply_smb_write or "intersight"
+
     def ensure_intersight_tables(self) -> None:
         """Create the intersight dataset and required tables if they don't exist."""
         if self._tables_ready:
             return
         project = self._write_project()
+        dataset_name = self._write_dataset()
         if not project:
             logger.warning("No write project configured — skipping intersight table setup.")
             return
 
         # Ensure dataset exists
-        dataset_ref = bigquery.DatasetReference(project, "intersight")
+        dataset_ref = bigquery.DatasetReference(project, dataset_name)
         try:
             self.client.get_dataset(dataset_ref)
         except Exception:
@@ -65,7 +69,7 @@ class BigQueryService:
         # Ensure tables exist via DDL
         ddl_statements = [
             f"""
-            CREATE TABLE IF NOT EXISTS `{project}.intersight.supply_smb_snapshot`
+            CREATE TABLE IF NOT EXISTS `{project}.{dataset_name}.supply_smb_snapshot`
             (
               week_start_date DATE NOT NULL,
               created_at      TIMESTAMP NOT NULL,
@@ -83,7 +87,7 @@ class BigQueryService:
             PARTITION BY week_start_date
             """,
             f"""
-            CREATE TABLE IF NOT EXISTS `{project}.intersight.lead_tracking`
+            CREATE TABLE IF NOT EXISTS `{project}.{dataset_name}.lead_tracking`
             (
               lead_id        STRING NOT NULL,
               company_name   STRING,
@@ -101,7 +105,7 @@ class BigQueryService:
             PARTITION BY activated_date
             """,
             f"""
-            CREATE TABLE IF NOT EXISTS `{project}.intersight.feedback`
+            CREATE TABLE IF NOT EXISTS `{project}.{dataset_name}.feedback`
             (
               feedback_id  STRING NOT NULL,
               created_at   TIMESTAMP NOT NULL,
@@ -209,11 +213,12 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
     def write_feedback(self, feedback: dict[str, Any]) -> None:
         """Insert a user feedback row into intersight.feedback."""
         project = self._write_project()
+        dataset_name = self._write_dataset()
         if not project:
             logger.warning("No write project — feedback not saved.")
             return
         sql = f"""
-        INSERT INTO `{project}.intersight.feedback`
+        INSERT INTO `{project}.{dataset_name}.feedback`
           (feedback_id, created_at, user_email, content)
         VALUES (@feedback_id, CURRENT_TIMESTAMP(), @user_email, @content)
         """
@@ -231,8 +236,9 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
     def write_snapshot(self, week_start_date: str, snapshot: dict[str, Any]) -> None:
         """Insert a weekly snapshot row into supply_smb_snapshot."""
         project = self._write_project()
+        dataset_name = self._write_dataset()
         sql = f"""
-        INSERT INTO `{project}.intersight.supply_smb_snapshot`
+        INSERT INTO `{project}.{dataset_name}.supply_smb_snapshot`
           (week_start_date, created_at, total_companies, total_apps,
            p1_count, p2_count, p3_count, p4_count,
            team_routing_json, genre_mix_json, monetization_mix_json, top_companies_json)
@@ -272,6 +278,7 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
     ) -> list[dict[str, Any]]:
         """Read the last n_weeks snapshots, optionally before a given date. Oldest first."""
         project = self._write_project()
+        dataset_name = self._write_dataset()
         if not project:
             return []
         where = "WHERE week_start_date < @before_date" if before_date else ""
@@ -281,7 +288,7 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
         params.append(bigquery.ScalarQueryParameter("n_weeks", "INT64", n_weeks))
         sql = f"""
         SELECT *
-        FROM `{project}.intersight.supply_smb_snapshot`
+        FROM `{project}.{dataset_name}.supply_smb_snapshot`
         {where}
         ORDER BY week_start_date DESC
         LIMIT @n_weeks
@@ -305,11 +312,12 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
     def snapshot_exists_for_week(self, week_start_date: str) -> bool:
         """Return True if a snapshot for this exact week already exists."""
         project = self._write_project()
+        dataset_name = self._write_dataset()
         if not project:
             return False
         sql = f"""
         SELECT COUNT(*) AS cnt
-        FROM `{project}.intersight.supply_smb_snapshot`
+        FROM `{project}.{dataset_name}.supply_smb_snapshot`
         WHERE week_start_date = @week_start_date
         """
         job_config = bigquery.QueryJobConfig(
@@ -328,8 +336,9 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
     def insert_lead(self, lead: dict[str, Any]) -> None:
         """Insert a new lead into lead_tracking."""
         project = self._write_project()
+        dataset_name = self._write_dataset()
         sql = f"""
-        INSERT INTO `{project}.intersight.lead_tracking`
+        INSERT INTO `{project}.{dataset_name}.lead_tracking`
           (lead_id, company_name, list_source, team_routing, sent_to_team,
            notes, activated_by, status, activated_date, last_updated)
         VALUES (
@@ -356,7 +365,7 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
         project = self._write_project()
         # Copy all fields from the latest row, override status + notes + last_updated
         sql = f"""
-        INSERT INTO `{project}.intersight.lead_tracking`
+        INSERT INTO `{project}.{self._write_dataset()}.lead_tracking`
           (lead_id, company_name, list_source, team_routing, sent_to_team,
            notes, activated_by, status, activated_date, last_updated)
         SELECT
@@ -367,7 +376,7 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
           activated_date,
           CURRENT_TIMESTAMP()
         FROM (
-          SELECT * FROM `{project}.intersight.lead_tracking`
+          SELECT * FROM `{project}.{self._write_dataset()}.lead_tracking`
           WHERE lead_id = @lead_id
           ORDER BY last_updated DESC
           LIMIT 1
@@ -392,7 +401,7 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
         WITH ranked AS (
           SELECT *,
             ROW_NUMBER() OVER (PARTITION BY lead_id ORDER BY last_updated DESC) AS rn
-          FROM `{project}.intersight.lead_tracking`
+          FROM `{project}.{self._write_dataset()}.lead_tracking`
           WHERE TRUE {email_clause}
         )
         SELECT * EXCEPT(rn) FROM ranked WHERE rn = 1
@@ -413,7 +422,7 @@ LEFT JOIN gtm_hq    g ON m.company_name = g.company_name
         WITH latest_leads AS (
           SELECT *,
             ROW_NUMBER() OVER (PARTITION BY lead_id ORDER BY last_updated DESC) AS rn
-          FROM `{project}.intersight.lead_tracking`
+          FROM `{project}.{self._write_dataset()}.lead_tracking`
           WHERE TRUE {email_clause}
         ),
         active_leads AS (

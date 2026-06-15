@@ -226,15 +226,16 @@ Negative Constraint: Do not alter the baseline composition, pose of people, or l
 
 
 def build_theme_create_style_transfer_prompt() -> str:
-    return """You are tasked with a high-fidelity image style transfer. You are provided with two images: [Image 1] (the content anchor) and [Image 2] (the style reference).
+    return """You are an advanced AI creative director executing a zero-loss style transfer. You are provided with two images: [Image 1] (the core content layout) and [Image 2] (the visual style inspiration).
 
-Instructions:
-1. The output image must inherit 100% of the content, layout, object positions, and composition from [Image 1].
-2. Completely ignore the actual objects or subjects inside [Image 2]. Instead, extract ONLY its artistic DNA, including its unique color palette, brushstrokes, lighting style, textures, gradients, and overall visual mood.
-3. Render the scene from [Image 1] using the exact artistic execution extracted from [Image 2].
-4. The final result must look like the specific environment/objects of [Image 1] were created by the artist or medium of [Image 2].
+Your goal is to re-render [Image 1] so that it looks exactly as if it was created in the visual universe of [Image 2].
 
-Negative Constraint: Do not blend the subjects of [Image 2] into [Image 1]. Keep the geometry of [Image 1] pristine."""
+Strict Execution Instructions:
+1. **Content & Structure (From Image 1):** You must 100% preserve the composition, spatial layout, camera angle, perspective, and the exact placement/pose of all subjects/objects from [Image 1]. Do not introduce new objects from Image 2's content.
+2. **Artistic Style & Aesthetics (From Image 2):** Analyze [Image 2] and completely extract its visual DNA. This includes the color palette, lighting scheme (e.g., volumetric, high-key, neon, cinematic shadow), textures (e.g., matte, glossy, metallic, 3D clay, hand-drawn), brushstrokes, atmospheric effects, and grading.
+3. **Seamless Synthesis:** Map the extracted style from [Image 2] directly onto the structure of [Image 1]. The output must look cohesive, intentional, and high-fidelity, without any artifacts or blurry borders.
+
+Negative Constraint: Do not copy the physical subjects, characters, or text content from [Image 2] into the final image. Only copy the *how*, not the *what*."""
 
 
 def build_theme_create_asset_text_replace_prompt(

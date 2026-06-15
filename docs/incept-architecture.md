@@ -379,7 +379,7 @@ BQ_READ_PROJECT=ads-bpd-guard-china
 GOOGLE_CLOUD_PROJECT=ads-bpd-guard-sandbox
 GOOGLE_CLOUD_LOCATION=global
 GOOGLE_GENAI_USE_ENTERPRISE=True
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.1-flash-lite
 
 # Agent (Dify) — to be added
 DIFY_BASE_URL=https://your-dify-domain

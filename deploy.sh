@@ -98,8 +98,9 @@ GOOGLE_GENAI_USE_ENTERPRISE=true,\
 GEMINI_MODEL=gemini-2.5-flash,\
 BQ_WRITE_PROJECT=${BQ_WRITE_PROJECT},\
 BQ_READ_PROJECT=${BQ_READ_PROJECT},\
+BQ_DATASET_SUPPLY_SMB_WRITE=${BQ_DATASET_SUPPLY_SMB_WRITE},\
 GCP_PROJECT_DATA=${GCP_PROJECT_DATA},\
-INCEPT_PROJECT_ROOT=/app,\
+INCEPT_ASSET_BUCKET=${INCEPT_ASSET_BUCKET},\
 INCEPT_INTERNAL_API_KEY=${INCEPT_INTERNAL_API_KEY},\
 CORS_ALLOW_ORIGINS=http://localhost:3000"
 
@@ -110,6 +111,11 @@ CORS_ALLOW_ORIGINS=http://localhost:3000"
     --member="allUsers" --role="roles/run.invoker" \
     --quiet 2>/dev/null || \
     echo "   ℹ  Could not set allUsers invoker — org policy may block it. API still works via internal key."
+
+  gcloud run services add-iam-policy-binding "${API_SERVICE}" \
+    --project="${PROJECT_ID}" --region="${REGION}" \
+    --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/run.invoker" \
+    --quiet
 
   API_URL="$(gcloud run services describe "${API_SERVICE}" \
     --project="${PROJECT_ID}" --region="${REGION}" \

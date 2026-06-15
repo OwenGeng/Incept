@@ -36,6 +36,12 @@ from app.incept.models import (
     RemoveBGRequest,
     Role,
     Session,
+    ThemeCreatePreset,
+    ThemeCreatePresetCreateRequest,
+    ThemeCreatePresetFromReportRequest,
+    ThemeCreateStyleReport,
+    ThemeCreateStyleReportCreateRequest,
+    ThemeCreateStyleReportDraftRequest,
     ToolDefinition,
     ToolStatusUpdate,
     UsageEvent,
@@ -54,6 +60,10 @@ from app.incept.store import (
     create_image_generation_job,
     create_kakao_bizboard_job,
     create_kakao_clean_job,
+    create_theme_create_preset,
+    create_theme_create_preset_from_report,
+    create_theme_create_report,
+    draft_theme_create_report,
     create_outpaint_job,
     create_remove_bg_job,
     delete_asset,
@@ -61,6 +71,8 @@ from app.incept.store import (
     list_assets,
     list_jobs,
     list_threads,
+    list_theme_create_presets,
+    list_theme_create_reports,
     list_usage_events,
     list_workspaces,
     run_add_text_background,
@@ -306,6 +318,68 @@ def usage(
 ) -> list[UsageEvent]:
     require_role(user, Role.manager)
     return list_usage_events(workspace_id)
+
+
+@router.get("/theme-create/reports", response_model=list[ThemeCreateStyleReport])
+def theme_create_reports(
+    workspace_id: str | None = None,
+    mode: str | None = None,
+    user: User = Depends(get_current_user),
+) -> list[ThemeCreateStyleReport]:
+    require_role(user, Role.manager)
+    return list_theme_create_reports(workspace_id, mode)
+
+
+@router.post("/theme-create/reports", response_model=ThemeCreateStyleReport)
+def create_theme_create_report_endpoint(
+    body: ThemeCreateStyleReportCreateRequest,
+    user: User = Depends(get_current_user),
+) -> ThemeCreateStyleReport:
+    require_role(user, Role.manager)
+    payload = body.model_copy(update={"created_by": user.id})
+    return create_theme_create_report(payload)
+
+
+@router.post("/theme-create/reports/draft", response_model=ThemeCreateStyleReportCreateRequest)
+def draft_theme_create_report_endpoint(
+    body: ThemeCreateStyleReportDraftRequest,
+    user: User = Depends(get_current_user),
+) -> ThemeCreateStyleReportCreateRequest:
+    require_role(user, Role.manager)
+    return draft_theme_create_report(body, user.id)
+
+
+@router.get("/theme-create/presets", response_model=list[ThemeCreatePreset])
+def theme_create_presets(
+    workspace_id: str | None = None,
+    mode: str | None = None,
+    user: User = Depends(get_current_user),
+) -> list[ThemeCreatePreset]:
+    require_role(user, Role.manager)
+    return list_theme_create_presets(workspace_id, mode)
+
+
+@router.post("/theme-create/presets", response_model=ThemeCreatePreset)
+def create_theme_create_preset_endpoint(
+    body: ThemeCreatePresetCreateRequest,
+    user: User = Depends(get_current_user),
+) -> ThemeCreatePreset:
+    require_role(user, Role.manager)
+    payload = body.model_copy(update={"created_by": user.id})
+    return create_theme_create_preset(payload)
+
+
+@router.post("/theme-create/reports/{report_id}/save-as-preset", response_model=ThemeCreatePreset)
+def save_theme_create_report_as_preset(
+    report_id: str,
+    body: ThemeCreatePresetFromReportRequest,
+    user: User = Depends(get_current_user),
+) -> ThemeCreatePreset:
+    require_role(user, Role.manager)
+    preset = create_theme_create_preset_from_report(report_id, body, user.id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Theme create report not found")
+    return preset
 
 
 # ── Workflow endpoints ────────────────────────────────────────────────────────

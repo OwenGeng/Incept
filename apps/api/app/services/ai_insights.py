@@ -371,7 +371,7 @@ class AiInsightsService:
                 name="Supply Expert Agent",
                 status="live" if self._analysis_cache else "warming",
                 detail=f"Analyzes weekly data with {self._analysis_cache.weeks_of_history if self._analysis_cache else 0} weeks of historical memory. {history_note}",
-                badge="gemini-2.5-flash",
+                badge="gemini-3.1-flash-lite",
             ),
             AgentStatus(
                 name="Dataset Cache Agent",

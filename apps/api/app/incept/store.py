@@ -1,6 +1,8 @@
 ﻿import base64
+import json
 import logging
 import math
+import mimetypes
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -8,8 +10,8 @@ from uuid import uuid4
 
 from app.incept.bigquery_store import persist_generation
 from app.incept.config import get_settings
-from app.incept.db import delete_asset as db_delete_asset, init_db, load_assets, load_jobs, upsert_asset, upsert_job
-from app.incept.models import Asset, AssetRole, AddTextRequest, CreativeThread, GenerateGifRequest, GenerationJob, GenerationMode, GenerationRequest, ImageEditRequest, JobStatus, KakaoBizboardComposeRequest, OutpaintRequest, RemoveBGRequest, UsageEvent, User, Workspace
+from app.incept.db import delete_asset as db_delete_asset, init_db, load_assets, load_jobs, load_theme_create_presets, load_theme_create_reports, upsert_asset, upsert_job, upsert_theme_create_preset, upsert_theme_create_report
+from app.incept.models import Asset, AssetRole, AddTextRequest, CreativeThread, GenerateGifRequest, GenerationJob, GenerationMode, GenerationRequest, ImageEditRequest, JobStatus, KakaoBizboardComposeRequest, OutpaintRequest, RemoveBGRequest, ThemeCreatePreset, ThemeCreatePresetCreateRequest, ThemeCreatePresetFromReportRequest, ThemeCreateStyleReport, ThemeCreateStyleReportCreateRequest, ThemeCreateStyleReportDraftRequest, UsageEvent, User, Workspace
 from app.incept.prompt_builder import (
     build_generation_prompt,
     build_reference_generation_prompt,
@@ -28,6 +30,7 @@ KAKAO_CLEAN_PROMPT = "\n".join([
 
 STATIC_DIR = Path(__file__).parent.parent.parent / "static" / "generated"
 UPLOAD_DIR = Path(__file__).parent.parent.parent / "static" / "uploads"
+_GCS_CLIENT = None
 
 # ── Projects (formerly "workspaces") ─────────────────────────────────────────
 WORKSPACES: dict[str, Workspace] = {
@@ -55,6 +58,8 @@ JOBS: dict[str, GenerationJob] = {}
 ASSETS: dict[str, Asset] = {}
 USAGE_EVENTS: dict[str, UsageEvent] = {}
 SOURCE_ASSETS: dict[str, Asset] = {}
+THEME_CREATE_REPORTS: dict[str, ThemeCreateStyleReport] = {}
+THEME_CREATE_PRESETS: dict[str, ThemeCreatePreset] = {}
 
 _LEGACY_ASSET_ROLES = {role.value for role in AssetRole}
 
@@ -128,6 +133,59 @@ def _bootstrap() -> None:
         except Exception:
             logger.warning("Skipping corrupt asset row: %s", row.get("id"))
 
+    for row in load_theme_create_reports():
+        try:
+            report = ThemeCreateStyleReport(
+                report_id=row["report_id"],
+                workspace_id=row["workspace_id"] or "",
+                title=row["title"] or "",
+                summary=row["summary"] or "",
+                theme_create_mode=row["theme_create_mode"] or "style_modify",
+                prompt_template=row["prompt_template"] or "",
+                source_asset_id=row["source_asset_id"],
+                reference_asset_ids=__import__("json").loads(row["reference_asset_ids"] or "[]"),
+                source_job_id=row["source_job_id"],
+                recommended_preset_name=row["recommended_preset_name"],
+                visual_dna=__import__("json").loads(row["visual_dna_json"] or "[]"),
+                composition_rules=__import__("json").loads(row["composition_rules_json"] or "[]"),
+                do_not_copy=__import__("json").loads(row["do_not_copy_json"] or "[]"),
+                tags=__import__("json").loads(row["tags_json"] or "[]"),
+                taxonomy=__import__("json").loads(row["taxonomy_json"] or "{}"),
+                created_by=row["created_by"] or "",
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+            THEME_CREATE_REPORTS[report.report_id] = report
+        except Exception:
+            logger.warning("Skipping corrupt theme report row: %s", row.get("report_id"))
+
+    for row in load_theme_create_presets():
+        try:
+            preset = ThemeCreatePreset(
+                preset_id=row["preset_id"],
+                name=row["name"] or "",
+                description=row["description"] or "",
+                theme_create_mode=row["theme_create_mode"] or "style_modify",
+                visibility=row["visibility"] or "team",
+                prompt_template=row["prompt_template"] or "",
+                style_name=row["style_name"],
+                style_details=row["style_details"],
+                workspace_id=row["workspace_id"],
+                tags=__import__("json").loads(row["tags_json"] or "[]"),
+                taxonomy=__import__("json").loads(row["taxonomy_json"] or "{}"),
+                source_report_id=row["source_report_id"],
+                source_job_id=row["source_job_id"],
+                source_asset_id=row["source_asset_id"],
+                created_by=row["created_by"] or "",
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+                usage_count=int(row["usage_count"] or 0),
+                is_official=bool(row["is_official"]),
+            )
+            THEME_CREATE_PRESETS[preset.preset_id] = preset
+        except Exception:
+            logger.warning("Skipping corrupt theme preset row: %s", row.get("preset_id"))
+
     thread_store.backfill_legacy_threads(list(JOBS.values()), list(ASSETS.values()) + list(SOURCE_ASSETS.values()))
     for job in JOBS.values():
         if job.thread_id:
@@ -137,6 +195,224 @@ def _bootstrap() -> None:
             upsert_asset(asset)
 
 _bootstrap()
+
+
+def list_theme_create_reports(
+    workspace_id: str | None = None,
+    mode: str | None = None,
+) -> list[ThemeCreateStyleReport]:
+    reports = list(THEME_CREATE_REPORTS.values())
+    if workspace_id:
+        reports = [report for report in reports if report.workspace_id == workspace_id]
+    if mode:
+        reports = [report for report in reports if report.theme_create_mode.value == mode]
+    return sorted(reports, key=lambda report: report.updated_at, reverse=True)
+
+
+def create_theme_create_report(request: ThemeCreateStyleReportCreateRequest) -> ThemeCreateStyleReport:
+    now = datetime.utcnow()
+    report = ThemeCreateStyleReport(
+        report_id=f"tcr_{uuid4().hex[:12]}",
+        workspace_id=request.workspace_id,
+        title=request.title.strip() or "Untitled style report",
+        summary=request.summary.strip(),
+        theme_create_mode=request.theme_create_mode,
+        prompt_template=request.prompt_template.strip(),
+        source_asset_id=request.source_asset_id,
+        reference_asset_ids=[asset_id for asset_id in request.reference_asset_ids if asset_id],
+        source_job_id=request.source_job_id,
+        recommended_preset_name=(request.recommended_preset_name or "").strip() or None,
+        visual_dna=[item.strip() for item in request.visual_dna if item.strip()],
+        composition_rules=[item.strip() for item in request.composition_rules if item.strip()],
+        do_not_copy=[item.strip() for item in request.do_not_copy if item.strip()],
+        tags=[item.strip() for item in request.tags if item.strip()],
+        taxonomy={key: [item.strip() for item in values if item.strip()] for key, values in request.taxonomy.items() if key.strip()},
+        created_by=request.created_by,
+        created_at=now,
+        updated_at=now,
+    )
+    THEME_CREATE_REPORTS[report.report_id] = report
+    upsert_theme_create_report(report)
+    return report
+
+
+def list_theme_create_presets(
+    workspace_id: str | None = None,
+    mode: str | None = None,
+) -> list[ThemeCreatePreset]:
+    presets = list(THEME_CREATE_PRESETS.values())
+    if workspace_id:
+        presets = [
+            preset for preset in presets
+            if preset.workspace_id in (None, "", workspace_id)
+        ]
+    if mode:
+        presets = [preset for preset in presets if preset.theme_create_mode.value == mode]
+    return sorted(
+        presets,
+        key=lambda preset: (preset.is_official, preset.updated_at),
+        reverse=True,
+    )
+
+
+def create_theme_create_preset(request: ThemeCreatePresetCreateRequest) -> ThemeCreatePreset:
+    now = datetime.utcnow()
+    preset = ThemeCreatePreset(
+        preset_id=f"tcp_{uuid4().hex[:12]}",
+        name=request.name.strip() or "Untitled preset",
+        description=request.description.strip(),
+        theme_create_mode=request.theme_create_mode,
+        visibility=request.visibility,
+        prompt_template=request.prompt_template.strip(),
+        style_name=(request.style_name or "").strip() or None,
+        style_details=(request.style_details or "").strip() or None,
+        workspace_id=(request.workspace_id or "").strip() or None,
+        tags=[item.strip() for item in request.tags if item.strip()],
+        taxonomy={key: [item.strip() for item in values if item.strip()] for key, values in request.taxonomy.items() if key.strip()},
+        source_report_id=request.source_report_id,
+        source_job_id=request.source_job_id,
+        source_asset_id=request.source_asset_id,
+        created_by=request.created_by,
+        created_at=now,
+        updated_at=now,
+    )
+    THEME_CREATE_PRESETS[preset.preset_id] = preset
+    upsert_theme_create_preset(preset)
+    return preset
+
+
+def create_theme_create_preset_from_report(
+    report_id: str,
+    request: ThemeCreatePresetFromReportRequest,
+    created_by: str,
+) -> ThemeCreatePreset | None:
+    report = THEME_CREATE_REPORTS.get(report_id)
+    if not report:
+        return None
+    preset_request = ThemeCreatePresetCreateRequest(
+        name=request.name,
+        description=request.description,
+        theme_create_mode=report.theme_create_mode,
+        visibility=request.visibility,
+        prompt_template=report.prompt_template,
+        style_name=request.style_name or report.recommended_preset_name,
+        style_details=request.style_details or report.summary,
+        workspace_id=report.workspace_id,
+        tags=report.tags,
+        taxonomy=report.taxonomy,
+        source_report_id=report.report_id,
+        source_job_id=report.source_job_id,
+        source_asset_id=report.source_asset_id,
+        created_by=created_by,
+    )
+    return create_theme_create_preset(preset_request)
+
+
+def draft_theme_create_report(
+    request: ThemeCreateStyleReportDraftRequest,
+    created_by: str,
+) -> ThemeCreateStyleReportCreateRequest:
+    from google import genai
+    from google.genai import types as genai_types
+
+    settings = get_settings()
+    client = genai.Client(
+        vertexai=True,
+        project=settings.gcp_project_id,
+        location=settings.gcp_location,
+    )
+
+    source_asset = ASSETS.get(request.source_asset_id) or SOURCE_ASSETS.get(request.source_asset_id)
+    if not source_asset:
+        raise RuntimeError("Source asset not found for report draft")
+
+    source_bytes = _load_asset_bytes(source_asset)
+    if not source_bytes:
+        raise RuntimeError("Could not read source asset bytes for report draft")
+
+    parts: list[genai_types.Part] = [
+        genai_types.Part.from_text(text=(
+            "You are a creative strategist helping a GM convert a successful creative workflow into a reusable preset.\n"
+            "Analyze the supplied image set and workflow metadata.\n"
+            "Return only valid JSON.\n\n"
+            f"theme_create_mode: {request.theme_create_mode.value}\n"
+            f"prompt_template: {request.prompt_template}\n"
+            f"style_name: {request.style_name or ''}\n"
+            f"style_details: {request.style_details or ''}\n"
+            f"logo_position: {request.logo_position or ''}\n"
+            f"element_position: {request.element_position or ''}\n"
+            f"old_text: {request.old_text or ''}\n"
+            f"new_text: {request.new_text or ''}\n"
+            f"font_style: {request.font_style or ''}\n\n"
+            "Summarize reusable visual DNA, composition rules, and anti-copy constraints.\n"
+            "Taxonomy keys must be limited to: vertical, medium, campaign, workflow.\n"
+        )),
+        genai_types.Part.from_bytes(data=source_bytes, mime_type="image/png"),
+    ]
+
+    for asset_id in request.reference_asset_ids[:3]:
+        asset = ASSETS.get(asset_id) or SOURCE_ASSETS.get(asset_id)
+        if not asset:
+            continue
+        image_bytes = _load_asset_bytes(asset)
+        if not image_bytes:
+            continue
+        parts.append(genai_types.Part.from_bytes(data=image_bytes, mime_type="image/png"))
+
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "summary": {"type": "string"},
+            "recommended_preset_name": {"type": "string"},
+            "visual_dna": {"type": "array", "items": {"type": "string"}},
+            "composition_rules": {"type": "array", "items": {"type": "string"}},
+            "do_not_copy": {"type": "array", "items": {"type": "string"}},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "taxonomy": {
+                "type": "object",
+                "properties": {
+                    "vertical": {"type": "array", "items": {"type": "string"}},
+                    "medium": {"type": "array", "items": {"type": "string"}},
+                    "campaign": {"type": "array", "items": {"type": "string"}},
+                    "workflow": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+        "required": ["title", "summary", "recommended_preset_name", "visual_dna", "composition_rules", "do_not_copy", "tags", "taxonomy"],
+    }
+
+    response = client.models.generate_content(
+        model=settings.vertex_gemini_model,
+        contents=[genai_types.Content(role="user", parts=parts)],
+        config=genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=response_schema,
+            temperature=0.3,
+        ),
+    )
+
+    data = json.loads(response.text or "{}")
+    return ThemeCreateStyleReportCreateRequest(
+        workspace_id=request.workspace_id,
+        title=(data.get("title") or request.style_name or "Theme Create Style Report").strip(),
+        summary=(data.get("summary") or "").strip(),
+        theme_create_mode=request.theme_create_mode,
+        prompt_template=request.prompt_template.strip(),
+        source_asset_id=request.source_asset_id,
+        reference_asset_ids=request.reference_asset_ids,
+        recommended_preset_name=(data.get("recommended_preset_name") or request.style_name or "").strip() or None,
+        visual_dna=[item.strip() for item in data.get("visual_dna", []) if isinstance(item, str) and item.strip()],
+        composition_rules=[item.strip() for item in data.get("composition_rules", []) if isinstance(item, str) and item.strip()],
+        do_not_copy=[item.strip() for item in data.get("do_not_copy", []) if isinstance(item, str) and item.strip()],
+        tags=[item.strip() for item in data.get("tags", []) if isinstance(item, str) and item.strip()],
+        taxonomy={
+            key: [item.strip() for item in values if isinstance(item, str) and item.strip()]
+            for key, values in (data.get("taxonomy", {}) or {}).items()
+            if isinstance(key, str) and isinstance(values, list)
+        },
+        created_by=created_by,
+    )
 
 
 def _parse_size(size: str) -> tuple[int | None, int | None]:
@@ -172,6 +448,76 @@ def _load_asset_bytes(asset: Asset) -> bytes | None:
     except Exception:
         logger.warning("Could not read bytes for asset %s", asset.id)
         return None
+
+
+def _get_asset_bucket_name() -> str | None:
+    bucket = (get_settings().incept_asset_bucket or "").strip()
+    if not bucket or bucket == "INCEPT_ASSET_BUCKET":
+        return None
+    return bucket
+
+
+def _get_gcs_client():
+    global _GCS_CLIENT
+    if _GCS_CLIENT is not None:
+        return _GCS_CLIENT
+    bucket = _get_asset_bucket_name()
+    if not bucket:
+        return None
+    try:
+        from google.cloud import storage
+
+        settings = get_settings()
+        _GCS_CLIENT = storage.Client(project=settings.gcp_project_id or None)
+        return _GCS_CLIENT
+    except Exception:
+        logger.warning("Could not initialize Google Cloud Storage client", exc_info=True)
+        return None
+
+
+def _guess_content_type(filename: str, fallback: str = "application/octet-stream") -> str:
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed or fallback
+
+
+def _build_gcs_object_path(
+    *,
+    category: str,
+    workspace_id: str,
+    created_at: datetime,
+    filename: str,
+    job_id: str | None = None,
+) -> str:
+    parts = [
+        category,
+        workspace_id,
+        created_at.strftime("%Y"),
+        created_at.strftime("%m"),
+        created_at.strftime("%d"),
+    ]
+    if job_id:
+        parts.append(job_id)
+    parts.append(filename)
+    return "/".join(parts)
+
+
+def _upload_bytes_to_gcs(
+    *,
+    content: bytes,
+    object_path: str,
+    content_type: str,
+) -> str:
+    bucket_name = _get_asset_bucket_name()
+    client = _get_gcs_client()
+    if not bucket_name or client is None:
+        return ""
+    try:
+        blob = client.bucket(bucket_name).blob(object_path)
+        blob.upload_from_string(content, content_type=content_type)
+        return f"gs://{bucket_name}/{object_path}"
+    except Exception:
+        logger.warning("Could not upload asset to GCS path %s", object_path, exc_info=True)
+        return ""
 
 
 def _effective_output_sizes(
@@ -241,7 +587,7 @@ async def _export_master_images_to_assets(
                 id=asset_id,
                 title=f"{label} {size} v{idx + 1}",
                 type="image",
-                gcs_uri=f"gs://incept-assets/generated/{workspace_id}/{job.job_id}/{asset_id}.png",
+                gcs_uri="",
                 preview_url=preview_url,
                 provider=provider,
                 model=model,
@@ -258,6 +604,17 @@ async def _export_master_images_to_assets(
                 thread_id=job.thread_id,
                 parent_asset_id=source_asset.id if source_asset else None,
                 root_asset_id=_inherit_root_asset_id(source_asset, asset_id),
+            )
+            asset.gcs_uri = _upload_bytes_to_gcs(
+                content=output_bytes,
+                object_path=_build_gcs_object_path(
+                    category="generated",
+                    workspace_id=workspace_id,
+                    created_at=now,
+                    job_id=job.job_id,
+                    filename=f"{asset_id}.png",
+                ),
+                content_type="image/png",
             )
             ASSETS[asset_id] = asset
             upsert_asset(asset)
@@ -296,7 +653,7 @@ async def _export_oversampled_728x180_resize_assets(
                 id=asset_id,
                 title=f"{label} 728x90 from 728x180 {crop_label} v{idx + 1}",
                 type="image",
-                gcs_uri=f"gs://incept-assets/generated/{workspace_id}/{job.job_id}/{asset_id}.png",
+                gcs_uri="",
                 preview_url=preview_url,
                 provider=provider,
                 model=model,
@@ -320,6 +677,17 @@ async def _export_oversampled_728x180_resize_assets(
                 thread_id=job.thread_id,
                 parent_asset_id=source_asset.id if source_asset else None,
                 root_asset_id=_inherit_root_asset_id(source_asset, asset_id),
+            )
+            asset.gcs_uri = _upload_bytes_to_gcs(
+                content=output_bytes,
+                object_path=_build_gcs_object_path(
+                    category="generated",
+                    workspace_id=workspace_id,
+                    created_at=now,
+                    job_id=job.job_id,
+                    filename=f"{asset_id}.png",
+                ),
+                content_type="image/png",
             )
             ASSETS[asset_id] = asset
             upsert_asset(asset)
@@ -438,6 +806,7 @@ def save_uploaded_asset(
     ext = Path(filename).suffix or ".png"
     dest = UPLOAD_DIR / f"{asset_id}{ext}"
     dest.write_bytes(content)
+    created_at = datetime.utcnow()
 
     # Read actual pixel dimensions so they're available for all downstream ops
     img_w, img_h = _read_image_size(content)
@@ -446,7 +815,7 @@ def save_uploaded_asset(
         id=asset_id,
         title=filename,
         type="image",
-        gcs_uri=f"local://uploads/{asset_id}{ext}",
+        gcs_uri="",
         preview_url=f"/static/uploads/{asset_id}{ext}",
         provider="upload",
         model="",
@@ -454,12 +823,23 @@ def save_uploaded_asset(
         job_id="",
         prompt_hash="",
         created_by=user_id,
-        created_at=datetime.utcnow(),
+        created_at=created_at,
         width=img_w,
         height=img_h,
         theme=None,
         asset_role=_coerce_asset_role(asset_role, provider="upload"),
     )
+    object_path = _build_gcs_object_path(
+        category="uploads",
+        workspace_id=workspace_id,
+        created_at=created_at,
+        filename=f"{asset_id}{ext}",
+    )
+    asset.gcs_uri = _upload_bytes_to_gcs(
+        content=content,
+        object_path=object_path,
+        content_type=_guess_content_type(filename, "image/png"),
+    ) or f"local://uploads/{asset_id}{ext}"
     SOURCE_ASSETS[asset_id] = asset
     upsert_asset(asset)
     return asset
@@ -1214,7 +1594,7 @@ def _fill_mock_assets(
                     id=asset_id,
                     title=f"{request.theme} {size} v{idx + 1}",
                     type=output_type,
-                    gcs_uri=f"gs://incept-assets/generated/{request.workspace_id}/{job.job_id}/{asset_id}.png",
+                    gcs_uri="",
                     preview_url="/static/placeholder.png",
                     provider=request.provider,
                     model=model,
@@ -1572,7 +1952,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                             id=gif_asset_id,
                             title=f"{asset_obj.title} (GIF)",
                             type="gif",
-                            gcs_uri=f"gs://incept-assets/generated/{request.workspace_id}/{job_id}/{gif_asset_id}.gif",
+                            gcs_uri="",
                             preview_url=gif_preview_url,
                             provider=request.provider,
                             model=model,
@@ -1588,6 +1968,17 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                             thread_id=job.thread_id,
                             parent_asset_id=asset_id,
                             root_asset_id=asset_id,
+                        )
+                        gif_asset.gcs_uri = _upload_bytes_to_gcs(
+                            content=gif_bytes,
+                            object_path=_build_gcs_object_path(
+                                category="gifs",
+                                workspace_id=request.workspace_id,
+                                created_at=now,
+                                job_id=job_id,
+                                filename=f"{gif_asset_id}.gif",
+                            ),
+                            content_type="image/gif",
                         )
                         ASSETS[gif_asset_id] = gif_asset
                         upsert_asset(gif_asset)
@@ -2153,7 +2544,7 @@ async def run_generate_gif_background(
             id=gif_asset_id,
             title=f"{source_asset.title} (GIF)",
             type="gif",
-            gcs_uri=f"gs://incept-assets/generated/{request.workspace_id}/{job.job_id}/{gif_asset_id}.gif",
+            gcs_uri="",
             preview_url=gif_preview_url,
             provider="internal",
             model="cta-pulse-gif",
@@ -2174,6 +2565,17 @@ async def run_generate_gif_background(
             thread_id=job.thread_id,
             parent_asset_id=source_asset.id,
             root_asset_id=_inherit_root_asset_id(source_asset, gif_asset_id),
+        )
+        gif_asset.gcs_uri = _upload_bytes_to_gcs(
+            content=gif_bytes,
+            object_path=_build_gcs_object_path(
+                category="gifs",
+                workspace_id=request.workspace_id,
+                created_at=now,
+                job_id=job.job_id,
+                filename=f"{gif_asset_id}.gif",
+            ),
+            content_type="image/gif",
         )
         ASSETS[gif_asset_id] = gif_asset
         upsert_asset(gif_asset)
@@ -2563,7 +2965,7 @@ def _save_output_asset(
         id=asset_id,
         title=label,
         type="image",
-        gcs_uri=f"gs://incept-assets/{workspace_id}/{job.job_id}/{asset_id}.png",
+        gcs_uri="",
         preview_url=preview_url,
         provider=provider,
         model=model,
@@ -2579,6 +2981,18 @@ def _save_output_asset(
         thread_id=job.thread_id,
         parent_asset_id=parent_asset_id,
         root_asset_id=root_asset_id or asset_id,
+    )
+    raw = base64.b64decode(b64)
+    asset.gcs_uri = _upload_bytes_to_gcs(
+        content=raw,
+        object_path=_build_gcs_object_path(
+            category="generated",
+            workspace_id=workspace_id,
+            created_at=now,
+            job_id=job.job_id,
+            filename=f"{asset_id}.png",
+        ),
+        content_type="image/png",
     )
     ASSETS[asset_id] = asset
     upsert_asset(asset)

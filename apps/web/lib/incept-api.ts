@@ -6,6 +6,8 @@ import type {
   InceptUser,
   JobSummary,
   ProviderConfig,
+  ThemeCreatePresetSummary,
+  ThemeCreateStyleReportSummary,
   UsageEvent,
   WorkspaceSummary
 } from "@incept/shared";
@@ -285,6 +287,49 @@ interface ApiUsageEvent {
   created_at: string;
 }
 
+interface ApiThemeCreateStyleReport {
+  report_id: string;
+  workspace_id: string;
+  title: string;
+  summary: string;
+  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  prompt_template: string;
+  source_asset_id?: string | null;
+  reference_asset_ids: string[];
+  source_job_id?: string | null;
+  recommended_preset_name?: string | null;
+  visual_dna: string[];
+  composition_rules: string[];
+  do_not_copy: string[];
+  tags: string[];
+  taxonomy: Record<string, string[]>;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ApiThemeCreatePreset {
+  preset_id: string;
+  workspace_id?: string | null;
+  name: string;
+  description: string;
+  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  visibility: import("@incept/shared").ThemeCreatePresetVisibility;
+  prompt_template: string;
+  style_name?: string | null;
+  style_details?: string | null;
+  tags: string[];
+  taxonomy: Record<string, string[]>;
+  source_report_id?: string | null;
+  source_job_id?: string | null;
+  source_asset_id?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  usage_count: number;
+  is_official: boolean;
+}
+
 export async function getCurrentUser(): Promise<InceptUser | null> {
   if (!API_BASE_URL) {
     return null;
@@ -346,7 +391,10 @@ export async function uploadAsset(
     method: "POST",
     body: form
   });
-  if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Upload failed: ${response.status}${detail ? ` ${detail}` : ""}`);
+  }
   const asset = (await response.json()) as { id: string; preview_url: string };
   return { id: asset.id, url: resolveAssetUrl(asset.preview_url) };
 }
@@ -672,4 +720,169 @@ export async function listUsageEvents(workspaceId?: string): Promise<UsageEvent[
     outputTokens: event.output_tokens ?? undefined,
     createdAt: event.created_at
   }));
+}
+
+export async function listThemeCreatePresets(params?: {
+  workspaceId?: string;
+  mode?: import("@incept/shared").ThemeCreateMode;
+}): Promise<ThemeCreatePresetSummary[]> {
+  if (!API_BASE_URL) return [];
+  const query = new URLSearchParams();
+  if (params?.workspaceId) query.set("workspace_id", params.workspaceId);
+  if (params?.mode) query.set("mode", params.mode);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const presets = await fetchJson<ApiThemeCreatePreset[]>(`/theme-create/presets${suffix}`);
+  return presets.map((preset) => ({
+    id: preset.preset_id,
+    workspaceId: preset.workspace_id ?? undefined,
+    name: preset.name,
+    description: preset.description,
+    themeCreateMode: preset.theme_create_mode,
+    visibility: preset.visibility,
+    promptTemplate: preset.prompt_template,
+    styleName: preset.style_name ?? undefined,
+    styleDetails: preset.style_details ?? undefined,
+    tags: preset.tags,
+    taxonomy: preset.taxonomy,
+    sourceReportId: preset.source_report_id ?? undefined,
+    sourceJobId: preset.source_job_id ?? undefined,
+    sourceAssetId: preset.source_asset_id ?? undefined,
+    createdBy: preset.created_by,
+    createdAt: preset.created_at,
+    updatedAt: preset.updated_at,
+    usageCount: preset.usage_count,
+    isOfficial: preset.is_official,
+  }));
+}
+
+export async function createThemeCreateReport(payload: {
+  workspace_id: string;
+  title: string;
+  summary: string;
+  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  prompt_template: string;
+  source_asset_id?: string;
+  reference_asset_ids?: string[];
+  source_job_id?: string;
+  recommended_preset_name?: string;
+  visual_dna?: string[];
+  composition_rules?: string[];
+  do_not_copy?: string[];
+  tags?: string[];
+  taxonomy?: Record<string, string[]>;
+}): Promise<ThemeCreateStyleReportSummary> {
+  if (!API_BASE_URL) throw new Error("API not configured");
+  const response = await fetch(`${API_BASE_URL}/theme-create/reports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`createThemeCreateReport failed: ${response.status}`);
+  const report = (await response.json()) as ApiThemeCreateStyleReport;
+  return {
+    id: report.report_id,
+    workspaceId: report.workspace_id,
+    title: report.title,
+    summary: report.summary,
+    themeCreateMode: report.theme_create_mode,
+    promptTemplate: report.prompt_template,
+    sourceAssetId: report.source_asset_id ?? undefined,
+    referenceAssetIds: report.reference_asset_ids,
+    sourceJobId: report.source_job_id ?? undefined,
+    recommendedPresetName: report.recommended_preset_name ?? undefined,
+    visualDna: report.visual_dna,
+    compositionRules: report.composition_rules,
+    doNotCopy: report.do_not_copy,
+    tags: report.tags,
+    taxonomy: report.taxonomy,
+    createdBy: report.created_by,
+    createdAt: report.created_at,
+    updatedAt: report.updated_at,
+  };
+}
+
+export async function draftThemeCreateReport(payload: {
+  workspace_id: string;
+  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  prompt_template: string;
+  source_asset_id: string;
+  reference_asset_ids?: string[];
+  style_name?: string;
+  style_details?: string;
+  logo_position?: string;
+  element_position?: string;
+  old_text?: string;
+  new_text?: string;
+  font_style?: string;
+}): Promise<{
+  title: string;
+  summary: string;
+  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  prompt_template: string;
+  source_asset_id?: string;
+  reference_asset_ids: string[];
+  recommended_preset_name?: string;
+  visual_dna: string[];
+  composition_rules: string[];
+  do_not_copy: string[];
+  tags: string[];
+  taxonomy: Record<string, string[]>;
+}> {
+  if (!API_BASE_URL) throw new Error("API not configured");
+  const response = await fetch(`${API_BASE_URL}/theme-create/reports/draft`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`draftThemeCreateReport failed: ${response.status}${detail ? ` ${detail}` : ""}`);
+  }
+  return response.json();
+}
+
+export async function createThemeCreatePreset(payload: {
+  workspace_id?: string;
+  name: string;
+  description: string;
+  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  visibility?: import("@incept/shared").ThemeCreatePresetVisibility;
+  prompt_template: string;
+  style_name?: string;
+  style_details?: string;
+  tags?: string[];
+  taxonomy?: Record<string, string[]>;
+  source_report_id?: string;
+  source_job_id?: string;
+  source_asset_id?: string;
+}): Promise<ThemeCreatePresetSummary> {
+  if (!API_BASE_URL) throw new Error("API not configured");
+  const response = await fetch(`${API_BASE_URL}/theme-create/presets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`createThemeCreatePreset failed: ${response.status}`);
+  const preset = (await response.json()) as ApiThemeCreatePreset;
+  return {
+    id: preset.preset_id,
+    workspaceId: preset.workspace_id ?? undefined,
+    name: preset.name,
+    description: preset.description,
+    themeCreateMode: preset.theme_create_mode,
+    visibility: preset.visibility,
+    promptTemplate: preset.prompt_template,
+    styleName: preset.style_name ?? undefined,
+    styleDetails: preset.style_details ?? undefined,
+    tags: preset.tags,
+    taxonomy: preset.taxonomy,
+    sourceReportId: preset.source_report_id ?? undefined,
+    sourceJobId: preset.source_job_id ?? undefined,
+    sourceAssetId: preset.source_asset_id ?? undefined,
+    createdBy: preset.created_by,
+    createdAt: preset.created_at,
+    updatedAt: preset.updated_at,
+    usageCount: preset.usage_count,
+    isOfficial: preset.is_official,
+  };
 }
