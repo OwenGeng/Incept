@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import logging
+import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,27 @@ _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
 ]
+_KAKAO_GACHA_DISCLOSURE = "확률형 아이템 포함"
+
+
+def _load_kakao_font(size: int):
+    """Load the bundled Spoqa font so Korean disclosure text renders reliably."""
+    from PIL import ImageFont
+
+    font_dir = os.getenv("KAKAO_FONT_DIR")
+    candidates = []
+    if font_dir:
+        candidates.append(Path(font_dir) / "SpoqaHanSansNeo-Regular.ttf")
+    candidates.append(
+        Path(__file__).resolve().parents[3]
+        / "web/public/SpoqaHanSansNeo_all/SpoqaHanSansNeo_TTF_original/SpoqaHanSansNeo-Regular.ttf"
+    )
+    for path in candidates:
+        try:
+            return ImageFont.truetype(str(path), size)
+        except (IOError, OSError):
+            continue
+    return _load_font(size)
 
 
 def create_outpaint_inputs(
@@ -109,6 +132,34 @@ def add_text_overlay(
     draw.text(((w - text_w) // 2, strip_y + pad), text, font=font, fill=(*color, 255))
 
     return _to_png(Image.alpha_composite(img, overlay))
+
+
+def add_kakao_gacha_disclosure(image_bytes: bytes) -> bytes:
+    """Add the required gacha disclosure as unobtrusive text on a Kakao source creative."""
+    from PIL import Image, ImageDraw
+
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    width, height = image.size
+    font_size = max(18, round(height * 0.035))
+    font = _load_kakao_font(font_size)
+
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    text_box = draw.textbbox((0, 0), _KAKAO_GACHA_DISCLOSURE, font=font)
+    text_width = text_box[2] - text_box[0]
+    text_height = text_box[3] - text_box[1]
+    margin = max(20, round(width * 0.025))
+    left = margin
+    top = height - margin - text_height
+    draw.text(
+        (left, top - text_box[1]),
+        _KAKAO_GACHA_DISCLOSURE,
+        font=font,
+        fill=(255, 255, 255, 255),
+        stroke_width=max(1, round(font_size * 0.08)),
+        stroke_fill=(0, 0, 0, 190),
+    )
+    return _to_png(Image.alpha_composite(image, overlay))
 
 
 def composite_logo(

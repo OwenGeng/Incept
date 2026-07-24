@@ -25,6 +25,10 @@ set -a; source "${ENV_FILE}"; set +a
 : "${GOOGLE_CLIENT_ID:?}"
 : "${GOOGLE_CLIENT_SECRET:?}"
 : "${AUTH_SECRET:?}"
+: "${CREATIVE_CORE_BUILD_CONTEXT:?Set CREATIVE_CORE_BUILD_CONTEXT in .env.deploy}"
+[[ -f "${CREATIVE_CORE_BUILD_CONTEXT}/package.json" ]] || { echo "✗ CREATIVE_CORE_BUILD_CONTEXT must point to a prepared Creative Core installation" >&2; exit 1; }
+[[ -f "${CREATIVE_CORE_BUILD_CONTEXT}/scripts/cr-agent-core.sh" ]] || { echo "✗ CREATIVE_CORE_BUILD_CONTEXT is missing scripts/cr-agent-core.sh" >&2; exit 1; }
+[[ -f "${CREATIVE_CORE_BUILD_CONTEXT}/pnpm-lock.yaml" ]] || { echo "✗ CREATIVE_CORE_BUILD_CONTEXT is missing pnpm-lock.yaml" >&2; exit 1; }
 
 # ── Derived config ────────────────────────────────────────────────────────────
 PROJECT_ID="${GCP_PROJECT_DEPLOY}"
@@ -67,6 +71,7 @@ deploy_api() {
   log "Building API image (context: repo root, Dockerfile: Dockerfile.api)…"
   docker build \
     --platform linux/amd64 \
+    --build-context creative-core="${CREATIVE_CORE_BUILD_CONTEXT}" \
     -f "${SCRIPT_DIR}/Dockerfile.api" \
     -t "${API_IMAGE}:latest" \
     "${SCRIPT_DIR}"
@@ -83,25 +88,41 @@ deploy_api() {
     --service-account="${DEPLOY_SA_EMAIL}" \
     --no-allow-unauthenticated \
     --min-instances=1 \
-    --max-instances=3 \
-    --memory=1Gi \
-    --cpu=1 \
-    --timeout=120 \
-    --concurrency=80 \
+    --max-instances=1 \
+    --memory=4Gi \
+    --cpu=2 \
+    --timeout=900 \
+    --concurrency=1 \
+    --no-cpu-throttling \
     --set-env-vars="\
 INCEPT_ENV=production,\
 INCEPT_API_MODE=live,\
+AUTH_MODE=production,\
 GCP_PROJECT_DEPLOY=${PROJECT_ID},\
 GOOGLE_CLOUD_PROJECT=${PROJECT_ID},\
 GOOGLE_CLOUD_LOCATION=global,\
+GCP_LOCATION=global,\
 GOOGLE_GENAI_USE_ENTERPRISE=true,\
-GEMINI_MODEL=gemini-2.5-flash,\
+GEMINI_MODEL=gemini-3.1-flash-lite,\
+VERTEX_VEO_FAST_MODEL=${VERTEX_VEO_FAST_MODEL:-veo-3.1-fast-generate-001},\
+VERTEX_VEO_LOCATION=${VERTEX_VEO_LOCATION:-us-central1},\
+VERTEX_PLAYABLE_MODEL=${VERTEX_PLAYABLE_MODEL:-gemini-3.6-flash},\
+STUDIO_USER_BUDGET_USD=${STUDIO_USER_BUDGET_USD:-500},\
+VEO_FAST_ESTIMATED_COST_PER_SECOND_USD=${VEO_FAST_ESTIMATED_COST_PER_SECOND_USD:-0.08},\
+CREATIVE_CORE_HOME=/opt/creative-core,\
+PLAYABLE_CAPTURE_CHROME_PATH=/usr/local/bin/incept-chromium,\
+PLAYABLE_CAPTURE_FFMPEG_PATH=/usr/bin/ffmpeg,\
 BQ_WRITE_PROJECT=${BQ_WRITE_PROJECT},\
 BQ_READ_PROJECT=${BQ_READ_PROJECT},\
 BQ_DATASET_SUPPLY_SMB_WRITE=${BQ_DATASET_SUPPLY_SMB_WRITE},\
+BQ_DATASET_CONFIG=${BQ_DATASET_CONFIG},\
+BIGQUERY_DATASET=${BIGQUERY_DATASET},\
+BIGQUERY_ENABLED=${BIGQUERY_ENABLED:-true},\
 GCP_PROJECT_DATA=${GCP_PROJECT_DATA},\
 INCEPT_ASSET_BUCKET=${INCEPT_ASSET_BUCKET},\
+INCEPT_REQUIRE_GCS_UPLOAD=${INCEPT_REQUIRE_GCS_UPLOAD:-false},\
 INCEPT_INTERNAL_API_KEY=${INCEPT_INTERNAL_API_KEY},\
+INCEPT_ADMIN_EMAILS=${INCEPT_ADMIN_EMAILS},\
 CORS_ALLOW_ORIGINS=http://localhost:3000"
 
   # Grant public access (may fail if org policy blocks allUsers — OK to ignore,
@@ -179,6 +200,11 @@ NEXTAUTH_URL=https://placeholder.example.com"
 
   ok "Web deployed (first pass) → ${WEB_URL}"
 
+  # If a custom domain is mapped (e.g. linglonglab.moloco.cloud), use it for
+  # NEXTAUTH_URL / CORS instead of the raw .run.app URL — otherwise every
+  # deploy resets auth redirects back to the .run.app address.
+  PUBLIC_WEB_URL="${CUSTOM_DOMAIN:-${WEB_URL}}"
+
   # ── Grant public access to web service ───────────────────────────────────
   gcloud run services add-iam-policy-binding "${WEB_SERVICE}" \
     --project="${PROJECT_ID}" --region="${REGION}" \
@@ -187,11 +213,11 @@ NEXTAUTH_URL=https://placeholder.example.com"
     echo "   ℹ  Could not set allUsers invoker — will need manual IAM grant (see deploy notes)."
 
   # ── Patch NEXTAUTH_URL now that we know the real URL ──────────────────────
-  log "Patching NEXTAUTH_URL to real URL…"
+  log "Patching NEXTAUTH_URL to ${PUBLIC_WEB_URL}…"
   gcloud run services update "${WEB_SERVICE}" \
     --project="${PROJECT_ID}" \
     --region="${REGION}" \
-    --update-env-vars="NEXTAUTH_URL=${WEB_URL}" \
+    --update-env-vars="NEXTAUTH_URL=${PUBLIC_WEB_URL}" \
     --quiet
 
   # ── Patch API CORS to allow web origin ───────────────────────────────────
@@ -200,11 +226,11 @@ NEXTAUTH_URL=https://placeholder.example.com"
   gcloud run services update "${API_SERVICE}" \
     --project="${PROJECT_ID}" \
     --region="${REGION}" \
-    --update-env-vars="^|^CORS_ALLOW_ORIGINS=${WEB_URL},http://localhost:3000" \
+    --update-env-vars="^|^CORS_ALLOW_ORIGINS=${PUBLIC_WEB_URL},${WEB_URL},http://localhost:3000" \
     --quiet
 
   # ── Persist URLs to .env.deploy for future re-deploys ────────────────────
-  sed -i.bak "s|NEXTAUTH_URL=.*|NEXTAUTH_URL=${WEB_URL}|" "${ENV_FILE}"
+  sed -i.bak "s|NEXTAUTH_URL=.*|NEXTAUTH_URL=${PUBLIC_WEB_URL}|" "${ENV_FILE}"
   rm -f "${SCRIPT_DIR}/.api-url.tmp" "${ENV_FILE}.bak"
 
   echo ""

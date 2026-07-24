@@ -13,6 +13,7 @@
  */
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { Route } from "next";
 import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,12 @@ export interface AppHeaderProps {
   /** Show Feedback + Docs action buttons on the right @default true */
   showActions?: boolean;
 
+  /** Module-specific actions rendered before Feedback and Docs. */
+  trailingActions?: ReactNode;
+
+  /** Docs link target — module-specific docs page @default "/docs" */
+  docsHref?: string;
+
   /** Mobile hamburger menu callback — only relevant in "header" variant */
   onMobileMenuOpen?: () => void;
 
@@ -51,6 +58,8 @@ export function AppHeader({
   subtitle,
   variant = "header",
   showActions = true,
+  trailingActions,
+  docsHref = "/docs",
   onMobileMenuOpen,
   activeHref,
   pageTabs,
@@ -77,8 +86,9 @@ export function AppHeader({
         </div>
         {showActions && (
           <div className="flex items-center gap-2">
+            {trailingActions}
             <FeedbackButton />
-            <DocsButton />
+            <DocsButton href={docsHref} />
           </div>
         )}
       </header>
@@ -97,8 +107,9 @@ export function AppHeader({
         </div>
         {showActions && (
           <div className="flex items-center gap-2 pt-1.5 shrink-0">
+            {trailingActions}
             <FeedbackButton />
-            <DocsButton />
+            <DocsButton href={docsHref} />
           </div>
         )}
       </div>

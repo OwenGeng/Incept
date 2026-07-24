@@ -1,4 +1,4 @@
-export type PriorityTier = "P1" | "P2" | "P3" | "P4";
+export type PriorityTier = "P1" | "P2" | "P3";
 
 export interface BriefMetric {
   label: string;
@@ -61,19 +61,36 @@ export interface WeeklyBriefPayload {
   funnelSteps: FunnelStep[];
 }
 
+export interface WeeklyBriefSummaryPayload {
+  summary: string;
+  opportunity: string;
+  bigThings: string[];
+  weekChanges: string[];
+}
+
 export interface CompanyRow {
   companyName: string;
   priority: PriorityTier;
   companyProspectLabel: string;
+  hqCountry: string;
   finalHqCountry: string;
+  website: string;
   teamRouting: string;
-  monetizationTypes: string;
+  appCount: number;
   totalApps: number;
+  osMix: string;
+  genres: string;
+  totalDownloads: number;
   totalDownloadsLatestMonth: number;
-  isMolocoSupplyVisible: boolean;
-  molocoMediaCost30d: number;
+  totalMau: number;
+  maxPaidFrac: number;
+  monetizationTypes: string;
+  anyActiveUa: boolean;
+  allUaNetworks: string;
   allActiveNetworks: string;
-  appsWithOtherExchangeSdk: number;
+  isMolocoSupplyVisible: boolean;
+  anyMolocoSupply: boolean;
+  molocoMediaCost30d: number;
 }
 
 export interface AppRow {
@@ -110,17 +127,25 @@ export interface TopListsPayload {
   pageSize: number;
 }
 
+export interface AnalysisRow {
+  label: string;
+  value: string;
+  amount: number;
+  color?: string;
+}
+
+export interface AnalysisGroup {
+  label: string;
+  segments: AnalysisRow[];
+}
+
 export interface AnalysisModule {
   title: string;
   caption: string;
-  /** "bar" renders a horizontal progress bar (default). "pie" renders a donut chart. */
-  chartType?: "bar" | "pie";
-  rows: Array<{
-    label: string;
-    value: string;
-    amount: number;
-    color?: string;
-  }>;
+  /** "bar" = horizontal bar (default), "pie" = donut, "stacked_group" = grouped stacked bars */
+  chartType?: "bar" | "pie" | "stacked_group";
+  rows: AnalysisRow[];
+  groups?: AnalysisGroup[];
 }
 
 export interface MethodologySection {

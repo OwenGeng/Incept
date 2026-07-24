@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LayoutPanelTop, Sparkles, Settings, Smartphone, MessageSquare } from "lucide-react";
+import { LayoutPanelTop, Sparkles, MessageSquare } from "lucide-react";
 import { AppSidebar, type SidebarNavItem } from "@/components/ui/app-sidebar";
 import type { UserRole } from "@/types/next-auth";
 
@@ -39,16 +39,7 @@ const ALL_NAV_ITEMS: RoledNavItem[] = [
     children: [
       { key: "no-sdk-no-ua", label: "No SDK + No UA", href: "/supply-smb/no-sdk-no-ua/weekly-brief" },
       { key: "sdk-no-ua",    label: "SDK + No UA",    href: "/supply-smb/sdk-no-ua/list-1/top-lists" },
-      { key: "ua-no-sdk",    label: "UA + No SDK",    href: "/supply-smb/ua-no-sdk/top-lists" },
     ],
-  },
-  {
-    kind: "simple",
-    key: "xiaomi",
-    label: "Xiaomi",
-    href: "/xiaomi",
-    icon: Smartphone,
-    roles: ALL_MOLOCO,
   },
   {
     kind: "simple",
@@ -80,11 +71,9 @@ const ALL_NAV_ITEMS: RoledNavItem[] = [
 function useIsActive(pathname: string) {
   return useCallback((key: string) => {
     switch (key) {
-      case "no-sdk-no-ua": return pathname.startsWith("/supply-smb/no-sdk-no-ua") || pathname.startsWith("/supply-smb/leads");
+      case "no-sdk-no-ua": return pathname.startsWith("/supply-smb/no-sdk-no-ua");
       case "sdk-no-ua":    return pathname.startsWith("/supply-smb/sdk-no-ua");
-      case "ua-no-sdk":    return pathname.startsWith("/supply-smb/ua-no-sdk");
-      case "supply-smb":   return pathname.startsWith("/supply-smb") || pathname.startsWith("/supply-smb/leads");
-      case "xiaomi":        return pathname.startsWith("/xiaomi");
+      case "supply-smb":   return pathname.startsWith("/supply-smb");
       case "ai-insights":  return pathname.startsWith("/ai-insights");
       case "ask-ai":        return pathname.startsWith("/ask-ai");
       default:             return false;
@@ -114,7 +103,9 @@ export function Sidebar({
 
   return (
     <AppSidebar
-      productName="Supply"
+      productName=""
+      brandTitle="Linglong"
+      brandSubtitle="Lab"
       logo="/logo.png"
       storageKey="supply"
       items={items}

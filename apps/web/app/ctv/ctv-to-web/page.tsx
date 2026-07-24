@@ -5,7 +5,7 @@ import { Globe } from "lucide-react";
 export default function CtvToWebPage() {
   return (
     <>
-      <Topbar title="CTV to Web" subtitle="Cross-screen analytics for CTV-to-web conversion." />
+      <Topbar title="CTV to Web" subtitle="Cross-screen analytics for CTV-to-web conversion." docsHref="/docs" />
       <Card className="p-10 text-center">
         <div className="mx-auto mb-5 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#3a86ff] to-[#356fec] shadow-lg">
           <Globe className="size-8 text-white" />

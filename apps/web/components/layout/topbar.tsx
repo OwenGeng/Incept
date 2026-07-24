@@ -18,6 +18,7 @@ export function Topbar({
   activeScopeHref,
   datasetTabs,
   activeDatasetHref,
+  docsHref = "/docs/intelligence",
 }: {
   activeHref?: string;
   title: string;
@@ -27,6 +28,8 @@ export function Topbar({
   activeScopeHref?: string;
   datasetTabs?: NavTab[];
   activeDatasetHref?: string;
+  /** Docs link target @default "/docs/intelligence" — override for non-Intelligence pages (e.g. CTV) */
+  docsHref?: string;
 }) {
   return (
     <AppHeader
@@ -40,6 +43,7 @@ export function Topbar({
       activeScopeHref={activeScopeHref}
       datasetTabs={datasetTabs}
       activeDatasetHref={activeDatasetHref}
+      docsHref={docsHref}
     />
   );
 }

@@ -13,7 +13,7 @@ COPY apps/incept-api/pyproject.toml ./
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir uv \
-    && uv pip install --system --no-cache-dir fastapi uvicorn google-auth google-cloud-bigquery \
+    && uv pip install --system --no-cache-dir fastapi uvicorn google-auth google-cloud-bigquery google-cloud-storage \
        google-genai openai pillow python-multipart rembg pydantic
 
 COPY apps/incept-api/app/ ./app/

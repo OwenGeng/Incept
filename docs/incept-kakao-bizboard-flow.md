@@ -53,7 +53,6 @@ User fills fixed Bizboard fields:
 - `App Icon`
 - `Main Copy`
 - `App Download Copy`
-- `DSP Name`
 - `Gacha toggle`
 
 The system then generates a fixed `1029x258` transparent PNG.
@@ -133,14 +132,27 @@ Default value:
 
 Rules currently enforced:
 
-- DSP name required
 - final disclosure line must fit the fixed slot
 - emoji is rejected
 
 Output line:
 
-- default: `{DSP_NAME} 광고입니다.`
-- gacha mode: `{DSP_NAME} 광고 · 확률형 아이템 포함`
+- default: `Moloco 광고입니다.`
+- gacha mode: `Moloco 광고 · 확률형 아이템 포함`
+
+## Batch Modal UX
+
+Current batch compose modal behavior:
+
+- white background
+- smaller max height with internal scrolling
+- no separate `App Name` field
+- no visible `Moloco Disclosure` field
+- `App Download Copy` is directly editable
+- `Main Copy` is directly editable
+- both editable fields open with default values, but users can fully replace or clear them
+
+The disclosure line is still rendered in the final Bizboard template, but it is not exposed as an editable batch field in the modal.
 
 ## App Icon
 

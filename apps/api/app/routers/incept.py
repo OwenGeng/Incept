@@ -12,6 +12,7 @@ import io
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -33,6 +34,8 @@ from app.incept.models import (
     KakaoCleanRequest,
     OutpaintRequest,
     ProviderConfig,
+    RemediationAnalysisRequest,
+    RemediationAnalysisResponse,
     RemoveBGRequest,
     Role,
     Session,
@@ -46,14 +49,26 @@ from app.incept.models import (
     ToolStatusUpdate,
     UsageEvent,
     User,
+    VideoBudgetStatus,
+    VideoGenerationMode,
+    VideoGenerationRequest,
+    VideoPlanRequest,
+    VideoPlanResponse,
+    VideoProduction,
+    VideoProductionAgentRequest,
+    VideoProductionCreateRequest,
+    VideoProductionDesignSheetSelectionRequest,
+    VideoProductionShotOrderRequest,
+    VideoProductionRenderRequest,
+    VideoProductionShotRenderRequest,
+    VideoProductionShotUpdateRequest,
+    VideoProductionUpdateRequest,
     Workspace,
 )
 from app.incept.store import (
     ASSETS,
     JOBS,
     SOURCE_ASSETS,
-    STATIC_DIR,
-    UPLOAD_DIR,
     create_add_text_job,
     create_edit_job,
     create_generate_gif_job,
@@ -64,9 +79,14 @@ from app.incept.store import (
     create_theme_create_preset_from_report,
     create_theme_create_report,
     draft_theme_create_report,
+    analyze_remediation_assets,
+    assert_image_budget_available,
+    build_asset_content_path,
     create_outpaint_job,
     create_remove_bg_job,
     delete_asset,
+    guess_asset_extension,
+    read_asset_bytes,
     get_job,
     list_assets,
     list_jobs,
@@ -84,12 +104,80 @@ from app.incept.store import (
     run_outpaint_background,
     run_remove_bg_background,
     save_uploaded_asset,
+    stream_asset_bytes,
 )
 from app.incept import session_store, thread_store
 from app.incept.tool_registry import get_tools, update_tool_status
+from app.incept.video_store import (
+    assert_video_budget_available,
+    confirm_video_generation_plan_for_request,
+    create_or_update_video_plan,
+    create_video_generation_job,
+    get_video_budget_status,
+    list_video_generation_plans,
+    run_video_generation_background,
+)
+from app.incept.video_production_store import (
+    create_production_audio_job,
+    create_design_sheet_job,
+    create_keyframe_job,
+    create_production_render_job,
+    create_shot_video_job,
+    create_video_production,
+    get_video_production,
+    list_video_productions,
+    lock_script_and_create_storyboard,
+    reorder_video_production_shots,
+    run_creative_director,
+    run_audio_producer,
+    run_director_agent,
+    run_design_sheet_background,
+    select_design_sheet_panel,
+    run_keyframe_background,
+    run_production_designer,
+    run_production_audio_background,
+    run_production_render_background,
+    run_shot_video_background,
+    run_script_agent,
+    update_video_production,
+    update_video_production_shot,
+)
 
 router = APIRouter(tags=["incept"])
 settings = get_settings()
+
+
+def _scope_owner(scope: str, user: User) -> str | None:
+    normalized = (scope or "mine").strip().lower()
+    if normalized == "all":
+        if user.role not in (Role.manager, Role.admin):
+            raise HTTPException(status_code=403, detail="Manager or admin role required for all-content scope")
+        return None
+    return user.id
+
+
+def _asset_response(asset: Asset) -> Asset:
+    return asset.model_copy(update={"preview_url": build_asset_content_path(asset.id)})
+
+
+def _guess_response_media_type(asset: Asset) -> str:
+    if asset.type == "playable":
+        return "text/html; charset=utf-8"
+    if asset.type == "gif":
+        return "image/gif"
+    if asset.type == "video":
+        suffix = guess_asset_extension(asset).lower()
+        if suffix == ".webm":
+            return "video/webm"
+        if suffix == ".mov":
+            return "video/quicktime"
+        return "video/mp4"
+    suffix = guess_asset_extension(asset).lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".webp":
+        return "image/webp"
+    return "image/png"
 
 # Ensure static dirs exist (idempotent — safe to call every startup)
 _static_root = Path(__file__).parent.parent.parent / "static"
@@ -120,6 +208,8 @@ def provider_config(user: User = Depends(get_current_user)) -> ProviderConfig:
         default_image_provider=settings.default_image_provider,
         openai_image_model=settings.openai_image_model,
         vertex_imagen_model=settings.vertex_imagen_model,
+        vertex_veo_fast_model=settings.vertex_veo_fast_model or None,
+        vertex_veo_model=settings.vertex_veo_model or None,
         vertex_ai_enabled=settings.vertex_ai_enabled,
         gcp_project_id=settings.gcp_project_id,
         gcp_location=settings.gcp_location,
@@ -155,8 +245,12 @@ def workspaces(user: User = Depends(get_current_user)) -> list[Workspace]:
 
 
 @router.get("/jobs", response_model=list[GenerationJob])
-def jobs(user: User = Depends(get_current_user)) -> list[GenerationJob]:
-    return list_jobs()
+def jobs(
+    workspace_id: str | None = None,
+    scope: str = "mine",
+    user: User = Depends(get_current_user),
+) -> list[GenerationJob]:
+    return list_jobs(workspace_id=workspace_id, created_by=_scope_owner(scope, user))
 
 
 @router.get("/jobs/{job_id}", response_model=GenerationJob)
@@ -185,8 +279,12 @@ def cancel_job(job_id: str, user: User = Depends(get_current_user)) -> Generatio
 
 
 @router.get("/assets", response_model=list[Asset])
-def assets(workspace_id: str | None = None, user: User = Depends(get_current_user)) -> list[Asset]:
-    return list_assets(workspace_id)
+def assets(
+    workspace_id: str | None = None,
+    scope: str = "mine",
+    user: User = Depends(get_current_user),
+) -> list[Asset]:
+    return [_asset_response(asset) for asset in list_assets(workspace_id, created_by=_scope_owner(scope, user))]
 
 
 @router.delete("/assets/{asset_id}", status_code=204)
@@ -204,21 +302,35 @@ async def upload_asset(
     file: UploadFile = File(...),
     workspace_id: str = Form(...),
     asset_role: str = Form(default="source"),
+    thread_id: str | None = Form(default=None),
     user: User = Depends(get_current_user),
 ) -> Asset:
     content = await file.read()
-    return save_uploaded_asset(
+    asset = save_uploaded_asset(
         workspace_id=workspace_id,
         filename=file.filename or "upload.png",
         content=content,
         asset_role=asset_role,
         user_id=user.id,
+        thread_id=thread_id,
+        content_type=file.content_type,
+    )
+    return _asset_response(asset)
+
+
+@router.get("/assets/{asset_id}/content")
+def asset_content(asset_id: str, user: User = Depends(get_current_user)) -> StreamingResponse:
+    asset = ASSETS.get(asset_id) or SOURCE_ASSETS.get(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return StreamingResponse(
+        stream_asset_bytes(asset),
+        media_type=_guess_response_media_type(asset),
     )
 
 
 class DownloadZipRequest(BaseModel):
     asset_ids: list[str]
-    prefix: str = "incept"
 
 
 @router.post("/assets/download-zip")
@@ -226,11 +338,10 @@ async def download_assets_zip(
     body: DownloadZipRequest,
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    """Package requested assets as a zip file with dimension-based naming."""
-    prefix = (body.prefix.strip().replace(" ", "_") or "incept")[:64]
+    """Package requested assets as a zip file using each asset's own title."""
 
     buf = io.BytesIO()
-    size_count: dict[str, int] = {}
+    filename_count: dict[str, int] = {}
     added = 0
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -238,45 +349,57 @@ async def download_assets_zip(
             asset = ASSETS.get(asset_id)
             if not asset:
                 continue
-            if asset.width and asset.height:
-                size_key = f"{asset.width}x{asset.height}"
-            else:
-                size_key = "unknown"
-            size_count[size_key] = size_count.get(size_key, 0) + 1
-            n = size_count[size_key]
-            ext = "gif" if asset.type == "gif" else "png"
+            ext = guess_asset_extension(asset).lstrip(".") or ("gif" if asset.type == "gif" else "png")
+            base_name = Path(asset.title or asset.id).stem.strip() or asset.id
+            filename_count[base_name] = filename_count.get(base_name, 0) + 1
+            variant_index = filename_count[base_name]
             filename = (
-                f"{prefix}_{size_key}.{ext}" if n == 1 else f"{prefix}_{size_key}_v{n}.{ext}"
+                f"{base_name}.{ext}"
+                if variant_index == 1
+                else f"{base_name}_v{variant_index}.{ext}"
             )
-            url = asset.preview_url
-            if url.startswith("/static/generated/"):
-                file_path = STATIC_DIR / url[len("/static/generated/"):]
-            elif url.startswith("/static/uploads/"):
-                file_path = UPLOAD_DIR / url[len("/static/uploads/"):]
-            else:
+            content = read_asset_bytes(asset)
+            if content is None:
                 continue
-            if file_path.exists():
-                zf.write(str(file_path), filename)
-                added += 1
+            zf.writestr(filename, content)
+            added += 1
 
     if added == 0:
         raise HTTPException(status_code=404, detail="No downloadable files found for the given asset IDs.")
 
     buf.seek(0)
     zip_bytes = buf.read()
+    download_name = "assets.zip"
     return StreamingResponse(
         io.BytesIO(zip_bytes),
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="{prefix}_assets.zip"',
+            "Content-Disposition": (
+                'attachment; filename="assets.zip"; '
+                f"filename*=UTF-8''{quote(download_name)}"
+            ),
             "Content-Length": str(len(zip_bytes)),
         },
     )
 
 
 @router.get("/threads", response_model=list[CreativeThread])
-def threads(workspace_id: str | None = None, user: User = Depends(get_current_user)) -> list[CreativeThread]:
-    return list_threads(workspace_id)
+def threads(
+    workspace_id: str | None = None,
+    scope: str = "mine",
+    user: User = Depends(get_current_user),
+) -> list[CreativeThread]:
+    items = list_threads(workspace_id, created_by=_scope_owner(scope, user))
+    return [
+        thread.model_copy(
+            update={
+                "preview_url": build_asset_content_path(thread.cover_asset_id)
+                if thread.cover_asset_id
+                else thread.preview_url
+            }
+        )
+        for thread in items
+    ]
 
 
 @router.delete("/threads/{thread_id}", status_code=204)
@@ -318,6 +441,330 @@ def usage(
 ) -> list[UsageEvent]:
     require_role(user, Role.manager)
     return list_usage_events(workspace_id)
+
+
+@router.get("/video-budget-status", response_model=VideoBudgetStatus)
+def video_budget_status(
+    duration_seconds: int | None = None,
+    variants: int | None = None,
+    user: User = Depends(get_current_user),
+) -> VideoBudgetStatus:
+    return get_video_budget_status(
+        user,
+        duration_seconds=duration_seconds,
+        variants=variants,
+    )
+
+
+@router.get("/usage-summary")
+def usage_summary(user: User = Depends(get_current_user)) -> dict:
+    """Return personal Studio usage; admins additionally receive all-user totals."""
+    from collections import defaultdict
+
+    def summarize(events: list[UsageEvent], email: str = "") -> dict:
+        summary = {
+            "email": email,
+            "generation_count": 0,
+            "asset_count": 0,
+            "estimated_cost_usd": 0.0,
+            "image_generation_count": 0,
+            "image_asset_count": 0,
+            "image_estimated_cost_usd": 0.0,
+            "video_generation_count": 0,
+            "video_asset_count": 0,
+            "video_estimated_cost_usd": 0.0,
+        }
+        for event in events:
+            cost = event.actual_cost_usd if event.actual_cost_usd is not None else event.estimated_cost_usd
+            summary["generation_count"] += 1
+            summary["asset_count"] += event.output_asset_count
+            summary["estimated_cost_usd"] += cost
+            if event.operation == "video_generation":
+                summary["video_generation_count"] += 1
+                summary["video_asset_count"] += event.output_asset_count
+                summary["video_estimated_cost_usd"] += cost
+            elif event.operation == "image_generation":
+                summary["image_generation_count"] += 1
+                summary["image_asset_count"] += event.output_asset_count
+                summary["image_estimated_cost_usd"] += cost
+        for key in ("estimated_cost_usd", "image_estimated_cost_usd", "video_estimated_cost_usd"):
+            summary[key] = round(float(summary[key]), 4)
+        return summary
+
+    events = list_usage_events()
+    mine = [event for event in events if event.user_id == user.id]
+    summaries: list[dict] = []
+    if user.role == Role.admin:
+        grouped: dict[str, list[UsageEvent]] = defaultdict(list)
+        for event in events:
+            grouped[event.user_email or event.user_id].append(event)
+        summaries = [summarize(group, email) for email, group in grouped.items()]
+
+    return {
+        "budget_usd": max(0.0, settings.studio_user_budget_usd),
+        "my_summary": summarize(mine, user.email),
+        "user_summaries": summaries,
+    }
+
+
+# ── Independent Video Production Workspace ───────────────────────────────────
+
+@router.get("/video-productions", response_model=list[VideoProduction])
+def video_productions(
+    workspace_id: str,
+    user: User = Depends(get_current_user),
+) -> list[VideoProduction]:
+    return list_video_productions(workspace_id, user)
+
+
+@router.post("/video-productions", response_model=VideoProduction)
+def create_video_production_endpoint(
+    request: VideoProductionCreateRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    return create_video_production(request, user)
+
+
+@router.get("/video-productions/{production_id}", response_model=VideoProduction)
+def video_production(
+    production_id: str,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        production = get_video_production(production_id, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not production:
+        raise HTTPException(status_code=404, detail="Video production not found")
+    return production
+
+
+@router.patch("/video-productions/{production_id}", response_model=VideoProduction)
+def update_video_production_endpoint(
+    production_id: str,
+    request: VideoProductionUpdateRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return update_video_production(production_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/script-agent", response_model=VideoProduction)
+def video_production_script_agent(
+    production_id: str,
+    request: VideoProductionAgentRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return run_script_agent(production_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/creative-director", response_model=VideoProduction)
+def video_production_creative_director(
+    production_id: str,
+    request: VideoProductionAgentRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return run_creative_director(production_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/production-designer", response_model=VideoProduction)
+def video_production_designer(
+    production_id: str,
+    request: VideoProductionAgentRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return run_production_designer(production_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/director", response_model=VideoProduction)
+def video_production_director(
+    production_id: str,
+    request: VideoProductionAgentRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return run_director_agent(production_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/lock-script", response_model=VideoProduction)
+def lock_video_production_script(
+    production_id: str,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return lock_script_and_create_storyboard(production_id, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/video-productions/{production_id}/shots/{shot_id}", response_model=VideoProduction)
+def update_video_production_shot_endpoint(
+    production_id: str,
+    shot_id: str,
+    request: VideoProductionShotUpdateRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return update_video_production_shot(production_id, shot_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/shots/reorder", response_model=VideoProduction)
+def reorder_video_production_shots_endpoint(
+    production_id: str,
+    request: VideoProductionShotOrderRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return reorder_video_production_shots(production_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/shots/{shot_id}/keyframe", response_model=GenerationJob)
+def generate_video_production_keyframe(
+    production_id: str,
+    shot_id: str,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    try:
+        job = create_keyframe_job(production_id, shot_id, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(run_keyframe_background, production_id, shot_id, job.job_id, user)
+    return job
+
+
+@router.post("/video-productions/{production_id}/design-sheets/{sheet_id}/generate", response_model=GenerationJob)
+def generate_video_production_design_sheet(
+    production_id: str,
+    sheet_id: str,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    try:
+        job = create_design_sheet_job(production_id, sheet_id, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(run_design_sheet_background, production_id, sheet_id, job.job_id, user)
+    return job
+
+
+@router.post("/video-productions/{production_id}/design-sheets/{sheet_id}/select", response_model=VideoProduction)
+async def select_video_production_design_sheet_panel(
+    production_id: str,
+    sheet_id: str,
+    request: VideoProductionDesignSheetSelectionRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return await select_design_sheet_panel(production_id, sheet_id, request.panel, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/shots/{shot_id}/generate", response_model=GenerationJob)
+def generate_video_production_shot(
+    production_id: str,
+    shot_id: str,
+    background_tasks: BackgroundTasks,
+    _request: VideoProductionShotRenderRequest,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    try:
+        job = create_shot_video_job(production_id, shot_id, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(run_shot_video_background, production_id, shot_id, job.job_id, user)
+    return job
+
+
+@router.post("/video-productions/{production_id}/audio-producer", response_model=VideoProduction)
+def run_video_production_audio_producer_endpoint(
+    production_id: str,
+    request: VideoProductionAgentRequest,
+    user: User = Depends(get_current_user),
+) -> VideoProduction:
+    try:
+        return run_audio_producer(production_id, request, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/video-productions/{production_id}/audio/generate", response_model=GenerationJob)
+def generate_video_production_soundtrack(
+    production_id: str,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    try:
+        job = create_production_audio_job(production_id, user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(run_production_audio_background, production_id, job.job_id, user)
+    return job
+
+
+@router.post("/video-productions/{production_id}/render", response_model=GenerationJob)
+def render_video_production_first_cut(
+    production_id: str,
+    background_tasks: BackgroundTasks,
+    _request: VideoProductionRenderRequest,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    try:
+        job = create_production_render_job(production_id, user, include_audio=_request.include_audio)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(run_production_render_background, production_id, job.job_id, user, _request.include_audio)
+    return job
 
 
 @router.get("/theme-create/reports", response_model=list[ThemeCreateStyleReport])
@@ -395,6 +842,10 @@ async def create_image_generation_job_endpoint(
             status_code=400,
             detail=f"variants cannot exceed {settings.max_image_variants}",
         )
+    try:
+        assert_image_budget_available(request, user)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     job = create_image_generation_job(request, user)
     if job.status.value == "running":
         background_tasks.add_task(run_generation_background, job.job_id, request, user)
@@ -405,6 +856,81 @@ async def create_image_generation_job_endpoint(
             reference_asset_ids=request.reference_asset_ids + request.client_asset_ids + request.source_asset_ids,
         )
     return job
+
+
+@router.post("/workflows/remediation-analyze", response_model=RemediationAnalysisResponse)
+def remediation_analyze_endpoint(
+    request: RemediationAnalysisRequest,
+    user: User = Depends(get_current_user),
+) -> RemediationAnalysisResponse:
+    require_role(user, Role.manager)
+    return analyze_remediation_assets(request, user.id)
+
+
+@router.post("/workflows/video-generation", response_model=GenerationJob)
+async def create_video_generation_job_endpoint(
+    request: VideoGenerationRequest,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+) -> GenerationJob:
+    if request.video_generation_mode in {
+        VideoGenerationMode.image_to_video,
+        VideoGenerationMode.competitor_style_transfer,
+    } and request.duration_seconds not in {4, 6, 8, 15, 30, 60}:
+        raise HTTPException(status_code=400, detail="Veo supports 4, 6, or 8 second shots; longer targets are assembled through Veo Extend.")
+    request = request.model_copy(update={"include_audio": False})
+    try:
+        request = confirm_video_generation_plan_for_request(request, user)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reference_asset_ids = [
+        asset_id
+        for asset_id in [request.source_asset_id, request.end_frame_asset_id, *request.reference_asset_ids]
+        if asset_id
+    ]
+    for asset_id in reference_asset_ids:
+        if asset_id not in ASSETS and asset_id not in SOURCE_ASSETS:
+            raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+    try:
+        assert_video_budget_available(request, user)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+
+    job = create_video_generation_job(request, user)
+    background_tasks.add_task(run_video_generation_background, job.job_id, request, user)
+    if job.thread_id and not request.plan_id:
+        thread_store.add_user_message(
+            job.thread_id,
+            text=request.prompt or f"[Video] {request.video_generation_mode.value}",
+            reference_asset_ids=reference_asset_ids,
+        )
+    elif job.thread_id:
+        thread_store.add_assistant_message(
+            job.thread_id,
+            text="Starting video generation from the agreed plan.",
+            asset_ids=[],
+            job_id=job.job_id,
+        )
+    return job
+
+
+@router.post("/workflows/video-plan", response_model=VideoPlanResponse)
+def video_plan_endpoint(
+    request: VideoPlanRequest,
+    user: User = Depends(get_current_user),
+) -> VideoPlanResponse:
+    try:
+        return create_or_update_video_plan(request, user)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/workflows/video-plan", response_model=list[VideoPlanResponse])
+def list_video_plan_endpoint(
+    thread_id: str,
+    user: User = Depends(get_current_user),
+) -> list[VideoPlanResponse]:
+    return [VideoPlanResponse(plan=plan) for plan in list_video_generation_plans(thread_id, user)]
 
 
 @router.post("/workflows/image-edit", response_model=GenerationJob)
@@ -540,6 +1066,40 @@ async def add_text_endpoint(
         )
     background_tasks.add_task(run_add_text_background, job.job_id, request, user)
     return job
+
+
+# ── Admin usage endpoint ──────────────────────────────────────────────────────
+
+@router.get("/admin/usage")
+def get_admin_usage(user: User = Depends(get_current_user)) -> dict:
+    """Return per-user generation stats and recent generated assets. Admin only."""
+    if user.role != Role.admin:
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    from collections import defaultdict
+    stats: dict[str, dict] = defaultdict(lambda: {
+        "email": "",
+        "generation_count": 0,
+        "asset_count": 0,
+        "estimated_cost_usd": 0.0,
+    })
+    for event in list_usage_events():
+        s = stats[event.user_email]
+        s["email"] = event.user_email
+        s["generation_count"] += 1
+        s["asset_count"] += event.output_asset_count
+        s["estimated_cost_usd"] = round(s["estimated_cost_usd"] + event.estimated_cost_usd, 4)
+
+    recent_assets = sorted(
+        [a for a in ASSETS.values()],
+        key=lambda a: a.created_at,
+        reverse=True,
+    )[:300]
+
+    return {
+        "user_summaries": list(stats.values()),
+        "recent_assets": [_asset_response(a) for a in recent_assets],
+    }
 
 
 # ── Session endpoints ─────────────────────────────────────────────────────────

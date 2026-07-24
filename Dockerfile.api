@@ -1,13 +1,62 @@
 # =============================================================================
-# InterSight API -- Cloud Run Dockerfile
-# Build context: repo root  (docker build -f Dockerfile.api .)
+# Incept API -- Cloud Run Dockerfile
+#
+# Build context: repo root, plus a named `creative-core` context:
+# docker build --build-context creative-core=/path/to/creative-core ...
 # =============================================================================
-FROM python:3.12-slim
+FROM node:24-bookworm-slim AS node_runtime
+
+# This named build context keeps Creative Core versioned with the deployed
+# renderer without copying a developer's home directory into the repo.
+FROM creative-core AS creative_core_source
+
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    chromium \
+    ffmpeg \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-noto-core \
+    fonts-noto-cjk \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
+
+# Cloud Run containers execute as root by default. Route Creative Core through
+# this wrapper so Chromium can start its headless CDP session safely there.
+RUN printf '%s\n' '#!/bin/sh' 'exec /usr/bin/chromium --no-sandbox --disable-setuid-sandbox "$@"' \
+    > /usr/local/bin/incept-chromium \
+    && chmod 755 /usr/local/bin/incept-chromium
+
+# Creative Core invokes Node/tsx through pnpm for browser video exports.
+COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node_runtime /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node_runtime /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node_runtime /usr/local/bin/corepack /usr/local/bin/corepack
+COPY --from=node_runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
+
+# Copy only the versioned Creative Core source. Installing its dependencies in
+# this Linux image avoids bringing macOS-native binaries into Cloud Run.
+COPY --from=creative_core_source /package.json /pnpm-lock.yaml /pnpm-workspace.yaml /tsconfig.base.json /opt/creative-core/
+COPY --from=creative_core_source /.adforge-creative-core-manifest.json /.adforge-creative-core-templates-version /.adforge-creative-core-version /opt/creative-core/
+COPY --from=creative_core_source /packages /opt/creative-core/packages
+COPY --from=creative_core_source /apps /opt/creative-core/apps
+COPY --from=creative_core_source /catalog /opt/creative-core/catalog
+COPY --from=creative_core_source /scripts /opt/creative-core/scripts
+COPY --from=creative_core_source /templates /opt/creative-core/templates
+RUN mkdir -p /opt/creative-core/playables \
+    && pnpm install --dir /opt/creative-core --frozen-lockfile
+RUN test -f /opt/creative-core/package.json \
+    && test -f /opt/creative-core/scripts/cr-agent-core.sh \
+    && test -d /opt/creative-core/node_modules \
+    && node --version \
+    && pnpm --version \
+    && /usr/local/bin/incept-chromium --version \
+    && ffmpeg -version | head -n 1
 
 # Install Python dependencies
 COPY apps/api/requirements.txt .
@@ -20,10 +69,21 @@ COPY apps/api/app/ ./app/
 # SQL query files are loaded at runtime by supply_smb_live.py
 COPY sql/ ./sql/
 
+# Fonts + template for server-side Kakao Bizboard image generation (Pillow/FreeType)
+COPY apps/web/public/SpoqaHanSansNeo_all/SpoqaHanSansNeo_TTF_original/ ./fonts/kakao/
+COPY apps/web/public/kakao-bizboard-template.png ./fonts/kakao/kakao-bizboard-template.png
+
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 # Tells _project_root() exactly where to look -- no directory traversal needed
 ENV INCEPT_PROJECT_ROOT=/app
+# Kakao font/template paths inside the container
+ENV KAKAO_FONT_DIR=/app/fonts/kakao
+ENV KAKAO_TEMPLATE_PATH=/app/fonts/kakao/kakao-bizboard-template.png
+# Browser capture dependencies for Playable -> Video.
+ENV CREATIVE_CORE_HOME=/opt/creative-core
+ENV PLAYABLE_CAPTURE_CHROME_PATH=/usr/local/bin/incept-chromium
+ENV PLAYABLE_CAPTURE_FFMPEG_PATH=/usr/bin/ffmpeg
 
 EXPOSE 8080
 

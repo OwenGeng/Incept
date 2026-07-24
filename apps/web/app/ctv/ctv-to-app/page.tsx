@@ -5,7 +5,7 @@ import { Smartphone } from "lucide-react";
 export default function CtvToAppPage() {
   return (
     <>
-      <Topbar title="CTV to App" subtitle="Cross-screen attribution for CTV-to-app installs and engagement." />
+      <Topbar title="CTV to App" subtitle="Cross-screen attribution for CTV-to-app installs and engagement." docsHref="/docs" />
       <Card className="p-10 text-center">
         <div className="mx-auto mb-5 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#8338ec] to-[#6d28d9] shadow-lg">
           <Smartphone className="size-8 text-white" />

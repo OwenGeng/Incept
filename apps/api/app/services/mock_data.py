@@ -33,7 +33,7 @@ weekly_brief_mock = WeeklyBriefPayload.model_validate(
             {
                 "title": "Step 4",
                 "subtitle": "Priority routing",
-                "detail": "Rank into P1-P4 using Moloco media cost, downloads, momentum, and routing logic.",
+                "detail": "Rank into P1-P3 using UA SDK presence, paid download fraction, and active UA network signals.",
             },
         ],
         "priorities": [
@@ -64,12 +64,12 @@ weekly_brief_mock = WeeklyBriefPayload.model_validate(
                 "route": "Agency batch",
             },
             {
-                "tier": "P4",
+                "tier": "P3",
                 "label": "Cold",
                 "companies": 232,
                 "delta": "-4 WoW",
-                "note": "Longer-horizon pipeline without Moloco visibility.",
-                "route": "Monitor",
+                "note": "No UA SDK or insufficient paid fraction — broad outreach pool.",
+                "route": "Agency batch",
             },
         ],
         "highlights": [
@@ -340,7 +340,7 @@ detailed_analysis_mock = DetailedAnalysisPayload.model_validate(
                 "rows": [
                     {"label": "P1 + P2", "value": "119 apps", "amount": 90},
                     {"label": "P3 visible", "value": "622 companies", "amount": 72},
-                    {"label": "P4 cold", "value": "232 companies", "amount": 28},
+                    {"label": "P3 cold", "value": "232 companies", "amount": 28},
                 ],
             },
             {

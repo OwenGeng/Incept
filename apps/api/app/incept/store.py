@@ -3,6 +3,8 @@ import json
 import logging
 import math
 import mimetypes
+import re
+from collections.abc import Iterator
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -10,13 +12,13 @@ from uuid import uuid4
 
 from app.incept.bigquery_store import persist_generation
 from app.incept.config import get_settings
-from app.incept.db import delete_asset as db_delete_asset, init_db, load_assets, load_jobs, load_theme_create_presets, load_theme_create_reports, upsert_asset, upsert_job, upsert_theme_create_preset, upsert_theme_create_report
-from app.incept.models import Asset, AssetRole, AddTextRequest, CreativeThread, GenerateGifRequest, GenerationJob, GenerationMode, GenerationRequest, ImageEditRequest, JobStatus, KakaoBizboardComposeRequest, OutpaintRequest, RemoveBGRequest, ThemeCreatePreset, ThemeCreatePresetCreateRequest, ThemeCreatePresetFromReportRequest, ThemeCreateStyleReport, ThemeCreateStyleReportCreateRequest, ThemeCreateStyleReportDraftRequest, UsageEvent, User, Workspace
+from app.incept.db import delete_asset as db_delete_asset, init_db, load_assets, load_job, load_jobs, load_theme_create_presets, load_theme_create_reports, load_usage_events, upsert_asset, upsert_job, upsert_theme_create_preset, upsert_theme_create_report, upsert_usage_event
+from app.incept.models import Asset, AssetRole, AddTextRequest, CreativeThread, GenerateGifRequest, GenerationJob, GenerationMode, GenerationRequest, ImageEditRequest, JobStatus, KakaoBizboardComposeRequest, OutpaintRequest, RemediationAnalysisRequest, RemediationAnalysisResponse, RemediationAnalysisResult, RemediationViolation, RemoveBGRequest, ThemeCreatePreset, ThemeCreatePresetCreateRequest, ThemeCreatePresetFromReportRequest, ThemeCreateStyleReport, ThemeCreateStyleReportCreateRequest, ThemeCreateStyleReportDraftRequest, UsageEvent, User, Workspace
 from app.incept.prompt_builder import (
     build_generation_prompt,
+    build_image_remediation_prompt,
     build_reference_generation_prompt,
     build_resize_prompt,
-    build_theme_create_asset_text_replace_prompt,
     build_theme_create_style_modify_prompt,
     build_theme_create_style_transfer_prompt,
 )
@@ -28,9 +30,26 @@ KAKAO_CLEAN_PROMPT = "\n".join([
     "Please remove the text and UI elements from this image and fill the background naturally.",
 ])
 
-STATIC_DIR = Path(__file__).parent.parent.parent / "static" / "generated"
-UPLOAD_DIR = Path(__file__).parent.parent.parent / "static" / "uploads"
+STATIC_ROOT = Path(__file__).parent.parent.parent / "static"
+STATIC_DIR = STATIC_ROOT / "generated"
+UPLOAD_DIR = STATIC_ROOT / "uploads"
 _GCS_CLIENT = None
+_UPLOAD_SAFE_JPEG_SIZES = {"1200x628", "1200x600", "720x720"}
+_UPLOAD_SAFE_JPEG_MAX_BYTES = 500 * 1024
+_GENERATED_TITLE_SUFFIX_PATTERNS = (
+    re.compile(r"\s*-\s*resize\b.*$", re.IGNORECASE),
+    re.compile(r"\s*-\s*theme create\b.*$", re.IGNORECASE),
+    re.compile(r"\s*-\s*image remediation\b.*$", re.IGNORECASE),
+    re.compile(r"\s*-\s*kakao bizboard\b.*$", re.IGNORECASE),
+    re.compile(r"\s*-\s*kakao clean\b.*$", re.IGNORECASE),
+    re.compile(r"[_\-\s]?kakao_clean\d+$", re.IGNORECASE),
+    re.compile(r"[_\-\s]?kakao\d+$", re.IGNORECASE),
+    re.compile(r"[_\-\s]?remediation\d+$", re.IGNORECASE),
+    re.compile(r"[_\-\s]?gif\d+$", re.IGNORECASE),
+    re.compile(r"[_\-\s]?video\d+$", re.IGNORECASE),
+    re.compile(r"[_\-\s]?\d+x\d+v\d+$", re.IGNORECASE),
+    re.compile(r"[_\-\s]?v\d+$", re.IGNORECASE),
+)
 
 # ── Projects (formerly "workspaces") ─────────────────────────────────────────
 WORKSPACES: dict[str, Workspace] = {
@@ -77,26 +96,47 @@ def _coerce_asset_role(value: str | None, provider: str = "", theme: str | None 
         return AssetRole.upload
     return AssetRole.generated
 
+
+def _normalized_source_title(title: str | None) -> str:
+    base_title = Path(title or "").stem.strip()
+    if not base_title:
+        return ""
+
+    cleaned = base_title
+    previous = None
+    while cleaned and cleaned != previous:
+        previous = cleaned
+        for pattern in _GENERATED_TITLE_SUFFIX_PATTERNS:
+            cleaned = pattern.sub("", cleaned).strip(" _-")
+
+    return cleaned or base_title
+
 # ── Bootstrap: init DB and load persisted data into memory ───────────────────
+def _job_from_row(row: dict) -> GenerationJob:
+    return GenerationJob(
+        job_id=row["job_id"],
+        workspace_id=row["workspace_id"],
+        status=JobStatus(row["status"]),
+        progress=row["progress"],
+        lineage_key=row["lineage_key"] or "",
+        message=row["message"] or "",
+        tool_id=row["tool_id"] or "",
+        title=row["title"] or "",
+        output_asset_ids=json.loads(row["output_asset_ids"] or "[]"),
+        thread_id=row.get("thread_id"),
+        source_asset_id=row.get("source_asset_id"),
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
+
+
 def _bootstrap() -> None:
+    from app.incept.db import restore_db_from_gcs
+    restore_db_from_gcs()
     init_db()
     for row in load_jobs():
         try:
-            job = GenerationJob(
-                job_id=row["job_id"],
-                workspace_id=row["workspace_id"],
-                status=JobStatus(row["status"]),
-                progress=row["progress"],
-                lineage_key=row["lineage_key"] or "",
-                message=row["message"] or "",
-                tool_id=row["tool_id"] or "",
-                title=row["title"] or "",
-                output_asset_ids=__import__("json").loads(row["output_asset_ids"] or "[]"),
-                thread_id=row.get("thread_id"),
-                source_asset_id=row.get("source_asset_id"),
-                created_at=datetime.fromisoformat(row["created_at"]),
-                updated_at=datetime.fromisoformat(row["updated_at"]),
-            )
+            job = _job_from_row(row)
             JOBS[job.job_id] = job
         except Exception:
             logger.warning("Skipping corrupt job row: %s", row.get("job_id"))
@@ -185,6 +225,33 @@ def _bootstrap() -> None:
             THEME_CREATE_PRESETS[preset.preset_id] = preset
         except Exception:
             logger.warning("Skipping corrupt theme preset row: %s", row.get("preset_id"))
+
+    for row in load_usage_events():
+        try:
+            event = UsageEvent(
+                id=row["id"],
+                job_id=row["job_id"] or "",
+                workspace_id=row["workspace_id"] or "",
+                user_id=row["user_id"] or "",
+                user_email=row["user_email"] or "",
+                provider=row["provider"] or "",
+                model=row["model"] or "",
+                operation=row["operation"] or "",
+                prompt_hash=row["prompt_hash"] or "",
+                variants=row["variants"] or 0,
+                output_size_count=row["output_size_count"] or 0,
+                output_format=row["output_format"] or "",
+                estimated_provider_generations=row["estimated_provider_generations"] or 0,
+                output_asset_count=row["output_asset_count"] or 0,
+                estimated_cost_usd=row["estimated_cost_usd"] or 0.0,
+                actual_cost_usd=row["actual_cost_usd"],
+                input_tokens=row["input_tokens"],
+                output_tokens=row["output_tokens"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            USAGE_EVENTS[event.id] = event
+        except Exception:
+            logger.warning("Skipping corrupt usage_event row: %s", row.get("id"))
 
     thread_store.backfill_legacy_threads(list(JOBS.values()), list(ASSETS.values()) + list(SOURCE_ASSETS.values()))
     for job in JOBS.values():
@@ -415,6 +482,158 @@ def draft_theme_create_report(
     )
 
 
+def _guess_asset_mime_type(asset: Asset) -> str:
+    suffix = guess_asset_extension(asset).lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".webp":
+        return "image/webp"
+    return "image/png"
+
+
+def _build_remediation_analysis_summary(result: RemediationAnalysisResult) -> str:
+    lines = [
+        f"- Asset summary: {result.summary}",
+        f"- Overall risk: {result.overall_risk}",
+    ]
+    if result.preserve_instructions:
+        lines.append("- Preserve instructions:")
+        lines.extend(f"  - {item}" for item in result.preserve_instructions)
+    if result.violations:
+        lines.append("- Violations to fix:")
+        for violation in result.violations:
+            lines.extend([
+                f"  - Category: {violation.category}",
+                f"    Severity: {violation.severity}",
+                f"    Target: {violation.target}",
+                f"    Reason: {violation.reason}",
+                f"    Fix: {violation.fix_instruction}",
+            ])
+    if result.remediation_prompt.strip():
+        lines.append(f"- Consolidated remediation instruction: {result.remediation_prompt.strip()}")
+    return "\n".join(lines)
+
+
+def analyze_remediation_assets(
+    request: RemediationAnalysisRequest,
+    created_by: str,
+) -> RemediationAnalysisResponse:
+    from google import genai
+    from google.genai import types as genai_types
+
+    settings = get_settings()
+    client = genai.Client(
+        vertexai=True,
+        project=settings.gcp_project_id,
+        location=settings.gcp_location,
+    )
+
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "overall_risk": {"type": "string"},
+            "summary": {"type": "string"},
+            "preserve_instructions": {"type": "array", "items": {"type": "string"}},
+            "violations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string"},
+                        "severity": {"type": "string"},
+                        "target": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "fix_instruction": {"type": "string"},
+                    },
+                    "required": ["category", "severity", "target", "reason", "fix_instruction"],
+                },
+            },
+            "remediation_prompt": {"type": "string"},
+        },
+        "required": ["overall_risk", "summary", "preserve_instructions", "violations", "remediation_prompt"],
+    }
+
+    results: list[RemediationAnalysisResult] = []
+    for asset_id in request.source_asset_ids:
+        asset = ASSETS.get(asset_id) or SOURCE_ASSETS.get(asset_id)
+        if not asset:
+            raise RuntimeError(f"Source asset not found: {asset_id}")
+
+        source_bytes = _load_asset_bytes(asset)
+        if not source_bytes:
+            raise RuntimeError(f"Could not read source asset bytes: {asset_id}")
+
+        parts: list[genai_types.Part] = [
+            genai_types.Part.from_text(text=(
+                "You are a commercial advertising compliance analyst.\n"
+                "Inspect the supplied image and identify ONLY policy-relevant violations that require visual remediation.\n"
+                "Return only valid JSON.\n\n"
+                "Goals:\n"
+                "1. Detect impersonation / personality-rights risk when a person resembles a real celebrity, athlete, influencer, or public figure.\n"
+                "2. Detect IP infringement such as protected trophies, official team identity cues, copyrighted characters, or trademarked branded visual assets that should not remain.\n"
+                "3. Detect adult or sexualized presentation.\n"
+                "4. Detect deceptive UI overlays such as fake play buttons or fake close buttons.\n"
+                "5. Preserve valid brand copy, CTA, layout, logo placement, and all non-violating regions.\n\n"
+                "Important constraints for your output:\n"
+                "- Be specific about which regions must change.\n"
+                "- Be equally specific about what must remain untouched.\n"
+                "- If a celebrity athlete appears, require a full synthetic replacement of face, hair, beard, jersey identity cues, body silhouette cues, and iconic styling markers.\n"
+                "- If a protected trophy appears, require replacement with an original generic trophy while preserving placement and scale.\n"
+                "- The remediation prompt will be sent directly to an image-editing model, so write it as a complete direct editing instruction, not as notes.\n"
+                "- The remediation prompt must explicitly describe both: (a) what to change, and (b) what to keep unchanged.\n"
+                "- The remediation prompt must preserve the original full canvas, original aspect ratio, all valid copy, CTA, logos, and non-violating layout regions unless they are themselves violations.\n"
+                "- For personality-rights or impersonation violations, the remediation prompt must demand a strong full-character de-identification, not a light face retouch.\n"
+                "- For personality-rights or impersonation violations, the remediation prompt must instruct the image model to change face, hair, facial hair, jersey identity cues, body silhouette cues, and iconic styling markers enough to eliminate resemblance.\n"
+                "- The remediation prompt must be decisive and executable by an image-editing model, not vague.\n"
+                f"- User note: {(request.prompt or '').strip() or 'No extra user note.'}"
+            )),
+            genai_types.Part.from_bytes(data=source_bytes, mime_type=_guess_asset_mime_type(asset)),
+        ]
+
+        response = client.models.generate_content(
+            model=settings.vertex_gemini_model,
+            contents=[genai_types.Content(role="user", parts=parts)],
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=response_schema,
+                temperature=0.1,
+            ),
+        )
+
+        data = json.loads(response.text or "{}")
+        result = RemediationAnalysisResult(
+            asset_id=asset.id,
+            asset_title=asset.title,
+            overall_risk=(data.get("overall_risk") or "unknown").strip(),
+            summary=(data.get("summary") or "").strip(),
+            preserve_instructions=[item.strip() for item in data.get("preserve_instructions", []) if isinstance(item, str) and item.strip()],
+            violations=[
+                RemediationViolation(
+                    category=(item.get("category") or "").strip(),
+                    severity=(item.get("severity") or "").strip(),
+                    target=(item.get("target") or "").strip(),
+                    reason=(item.get("reason") or "").strip(),
+                    fix_instruction=(item.get("fix_instruction") or "").strip(),
+                )
+                for item in data.get("violations", [])
+                if isinstance(item, dict)
+            ],
+            remediation_prompt=(data.get("remediation_prompt") or "").strip(),
+        )
+
+        asset.analysis = {
+            **(asset.analysis or {}),
+            "remediation_analysis": result.model_dump(),
+            "remediation_analysis_version": "v2_scan_then_fix",
+            "remediation_analyzed_at": datetime.utcnow().isoformat(),
+            "remediation_analyzed_by": created_by,
+        }
+        upsert_asset(asset)
+        results.append(result)
+
+    return RemediationAnalysisResponse(results=results)
+
+
 def _parse_size(size: str) -> tuple[int | None, int | None]:
     try:
         width, height = size.lower().split("x", 1)
@@ -440,14 +659,7 @@ def _mark_generation_progress(
 
 
 def _load_asset_bytes(asset: Asset) -> bytes | None:
-    path = _resolve_asset_path(asset)
-    if not path or not path.exists():
-        return None
-    try:
-        return path.read_bytes()
-    except Exception:
-        logger.warning("Could not read bytes for asset %s", asset.id)
-        return None
+    return read_asset_bytes(asset)
 
 
 def _get_asset_bucket_name() -> str | None:
@@ -455,6 +667,10 @@ def _get_asset_bucket_name() -> str | None:
     if not bucket or bucket == "INCEPT_ASSET_BUCKET":
         return None
     return bucket
+
+
+def _require_gcs_upload() -> bool:
+    return bool(get_settings().incept_require_gcs_upload)
 
 
 def _get_gcs_client():
@@ -508,16 +724,219 @@ def _upload_bytes_to_gcs(
     content_type: str,
 ) -> str:
     bucket_name = _get_asset_bucket_name()
+    if not bucket_name:
+        return ""
     client = _get_gcs_client()
-    if not bucket_name or client is None:
+    if client is None:
+        message = (
+            "Google Cloud Storage client could not be initialized for configured "
+            f"bucket {bucket_name}. Check runtime credentials / ADC configuration."
+        )
+        if _require_gcs_upload():
+            raise RuntimeError(message)
+        logger.warning("%s Falling back to local temp storage.", message)
         return ""
     try:
         blob = client.bucket(bucket_name).blob(object_path)
         blob.upload_from_string(content, content_type=content_type)
         return f"gs://{bucket_name}/{object_path}"
-    except Exception:
+    except Exception as exc:
         logger.warning("Could not upload asset to GCS path %s", object_path, exc_info=True)
+        if _require_gcs_upload():
+            raise RuntimeError(
+                f"GCS upload failed for gs://{bucket_name}/{object_path}: {exc}"
+            ) from exc
+        logger.warning(
+            "Falling back to local temp storage because GCS upload failed "
+            "[bucket=%s object=%s error=%s]",
+            bucket_name,
+            object_path,
+            exc,
+        )
         return ""
+
+
+def _record_asset_storage_status(asset: Asset, *, category: str) -> None:
+    bucket_name = _get_asset_bucket_name()
+    bucket_configured = bool(bucket_name)
+    uploaded_to_gcs = bool(asset.gcs_uri and asset.gcs_uri.startswith("gs://"))
+    storage_mode = "gcs+local-cache" if uploaded_to_gcs else "local-temp"
+    storage_status = {
+        "category": category,
+        "uploaded_to_gcs": uploaded_to_gcs,
+        "bucket_configured": bucket_configured,
+        "bucket": bucket_name,
+        "gcs_uri": asset.gcs_uri or None,
+        "preview_url": asset.preview_url,
+        "storage_mode": storage_mode,
+    }
+    asset.analysis = {
+        **(asset.analysis or {}),
+        "storage": storage_status,
+    }
+    if uploaded_to_gcs:
+        logger.info(
+            "Asset %s uploaded to GCS successfully [category=%s bucket=%s gcs_uri=%s]",
+            asset.id,
+            category,
+            bucket_name,
+            asset.gcs_uri,
+        )
+    else:
+        if bucket_configured:
+            logger.warning(
+                "Asset %s stored in local temp mode because GCS upload was unavailable "
+                "[category=%s bucket=%s preview_url=%s]",
+                asset.id,
+                category,
+                bucket_name,
+                asset.preview_url,
+            )
+        else:
+            logger.info(
+                "Asset %s stored in local temp mode because no GCS bucket is configured "
+                "[category=%s preview_url=%s]",
+                asset.id,
+                category,
+                asset.preview_url,
+            )
+
+
+def _parse_gcs_uri(gcs_uri: str) -> tuple[str, str] | None:
+    text = (gcs_uri or "").strip()
+    if not text.startswith("gs://"):
+        return None
+    remainder = text[len("gs://"):]
+    if "/" not in remainder:
+        return None
+    bucket_name, object_path = remainder.split("/", 1)
+    if not bucket_name or not object_path:
+        return None
+    return bucket_name, object_path
+
+
+def _download_bytes_from_gcs(gcs_uri: str) -> bytes | None:
+    parsed = _parse_gcs_uri(gcs_uri)
+    if not parsed:
+        return None
+    bucket_name, object_path = parsed
+    client = _get_gcs_client()
+    if client is None:
+        return None
+    try:
+        blob = client.bucket(bucket_name).blob(object_path)
+        return blob.download_as_bytes()
+    except Exception:
+        logger.warning("Could not download asset from GCS uri %s", gcs_uri, exc_info=True)
+        return None
+
+
+def _delete_gcs_object(gcs_uri: str) -> None:
+    parsed = _parse_gcs_uri(gcs_uri)
+    if not parsed:
+        return
+    bucket_name, object_path = parsed
+    client = _get_gcs_client()
+    if client is None:
+        return
+    try:
+        client.bucket(bucket_name).blob(object_path).delete()
+    except Exception:
+        logger.warning("Could not delete asset from GCS uri %s", gcs_uri, exc_info=True)
+
+
+def guess_asset_extension(asset: Asset) -> str:
+    for raw in (asset.preview_url, asset.gcs_uri, asset.title):
+        suffix = Path((raw or "").split("?")[0]).suffix
+        if suffix:
+            return suffix
+    if asset.type == "gif":
+        return ".gif"
+    return ".png"
+
+
+def _derive_upload_safe_jpeg(image_bytes: bytes) -> bytes | None:
+    try:
+        from io import BytesIO
+        from PIL import Image
+
+        with Image.open(BytesIO(image_bytes)) as img:
+            rgb = img.convert("RGB")
+            smallest: bytes | None = None
+            for quality in (90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25):
+                buf = BytesIO()
+                rgb.save(
+                    buf,
+                    format="JPEG",
+                    quality=quality,
+                    optimize=True,
+                )
+                encoded = buf.getvalue()
+                smallest = encoded
+                if len(encoded) <= _UPLOAD_SAFE_JPEG_MAX_BYTES:
+                    return encoded
+            return smallest
+    except Exception:
+        logger.warning("Could not derive upload-safe JPEG", exc_info=True)
+        return None
+
+
+def _cache_asset_bytes_locally(asset: Asset, content: bytes) -> None:
+    path = _resolve_asset_path(asset)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_bytes(content)
+    except Exception:
+        logger.warning("Could not cache asset %s locally", asset.id, exc_info=True)
+
+
+def read_asset_bytes(asset: Asset) -> bytes | None:
+    path = _resolve_asset_path(asset)
+    if path and path.exists():
+        try:
+            return path.read_bytes()
+        except Exception:
+            logger.warning("Could not read local bytes for asset %s", asset.id, exc_info=True)
+
+    gcs_bytes = _download_bytes_from_gcs(asset.gcs_uri)
+    if gcs_bytes is not None:
+        _cache_asset_bytes_locally(asset, gcs_bytes)
+        return gcs_bytes
+    return None
+
+
+def stream_asset_bytes(asset: Asset, *, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+    """Stream large local or GCS-backed assets without buffering the full file in memory."""
+    path = _resolve_asset_path(asset)
+    if path and path.exists():
+        with path.open("rb") as file:
+            while chunk := file.read(chunk_size):
+                yield chunk
+        return
+
+    parsed = _parse_gcs_uri(asset.gcs_uri)
+    if parsed:
+        bucket_name, object_path = parsed
+        client = _get_gcs_client()
+        if client is not None:
+            blob = client.bucket(bucket_name).blob(object_path)
+            with blob.open("rb") as file:
+                while chunk := file.read(chunk_size):
+                    yield chunk
+            return
+
+    # Preserve the existing fallback for legacy assets whose bytes can still be resolved.
+    content = read_asset_bytes(asset)
+    if content is None:
+        raise FileNotFoundError(f"Asset content not found: {asset.id}")
+    yield content
+
+
+def build_asset_content_path(asset_id: str) -> str:
+    return f"/assets/{asset_id}/content"
 
 
 def _effective_output_sizes(
@@ -551,8 +970,28 @@ async def _export_master_images_to_assets(
     source_asset: Asset | None,
     context_assets: list[Asset] | None = None,
     created_at: datetime | None = None,
+    include_kakao_gacha_disclosure: bool = False,
 ) -> list[Asset]:
-    from app.incept.composite import resize_to_exact
+    from app.incept.composite import add_kakao_gacha_disclosure, resize_to_exact
+
+    def _display_label(size_value: str, variant_index: int) -> str:
+        base_source_title = ""
+        if source_asset and source_asset.title:
+            base_source_title = _normalized_source_title(source_asset.title)
+        cleaned_label = (label or "Generated").strip()
+        if cleaned_label.lower().startswith("resize") and base_source_title:
+            return f"{base_source_title}_{size_value}v{variant_index}"
+        if cleaned_label.lower() == "theme create" and base_source_title:
+            return f"{base_source_title}_v{variant_index}"
+        if cleaned_label.lower() == "image remediation" and base_source_title:
+            return f"{base_source_title}_remediation{variant_index}"
+        if cleaned_label.lower() == "kakao bizboard" and base_source_title:
+            return f"{base_source_title}_kakao{variant_index}"
+        if cleaned_label.lower() == "kakao clean" and base_source_title:
+            return base_source_title
+        if base_source_title:
+            return f"{base_source_title} - {cleaned_label} {size_value} v{variant_index}"
+        return f"{cleaned_label} {size_value} v{variant_index}"
 
     target_sizes = _effective_output_sizes(requested_sizes, source_asset)
 
@@ -581,11 +1020,40 @@ async def _export_master_images_to_assets(
             if not width or not height:
                 width, height = _read_image_size(output_bytes)
 
+            if include_kakao_gacha_disclosure and size == "1200x600":
+                output_bytes = add_kakao_gacha_disclosure(output_bytes)
+                analysis = {
+                    **(analysis or {}),
+                    "kakao_gacha_disclosure": True,
+                }
+
             asset_id = f"{job.lineage_key}_{size}_{idx + 1}_img"
-            preview_url = _save_image_file(asset_id, base64.b64encode(output_bytes).decode())
+            asset_bytes = output_bytes
+            asset_extension = ".png"
+            content_type = "image/png"
+            asset_analysis = dict(analysis or {})
+
+            if size in _UPLOAD_SAFE_JPEG_SIZES:
+                jpg_bytes = _derive_upload_safe_jpeg(output_bytes)
+                if jpg_bytes:
+                    asset_bytes = jpg_bytes
+                    asset_extension = ".jpg"
+                    content_type = "image/jpeg"
+                    asset_analysis.update({
+                        "derived_format": "jpg",
+                        "upload_safe": True,
+                        "upload_safe_target_bytes": _UPLOAD_SAFE_JPEG_MAX_BYTES,
+                        "upload_safe_actual_bytes": len(jpg_bytes),
+                    })
+
+            preview_url = _save_image_file(
+                asset_id,
+                base64.b64encode(asset_bytes).decode(),
+                asset_extension,
+            )
             asset = Asset(
                 id=asset_id,
-                title=f"{label} {size} v{idx + 1}",
+                title=_display_label(size, idx + 1),
                 type="image",
                 gcs_uri="",
                 preview_url=preview_url,
@@ -600,22 +1068,23 @@ async def _export_master_images_to_assets(
                 height=height,
                 theme=theme,
                 asset_role=AssetRole.generated,
-                analysis=analysis,
+                analysis=asset_analysis,
                 thread_id=job.thread_id,
                 parent_asset_id=source_asset.id if source_asset else None,
                 root_asset_id=_inherit_root_asset_id(source_asset, asset_id),
             )
             asset.gcs_uri = _upload_bytes_to_gcs(
-                content=output_bytes,
+                content=asset_bytes,
                 object_path=_build_gcs_object_path(
                     category="generated",
                     workspace_id=workspace_id,
                     created_at=now,
                     job_id=job.job_id,
-                    filename=f"{asset_id}.png",
+                    filename=f"{asset_id}{asset_extension}",
                 ),
-                content_type="image/png",
+                content_type=content_type,
             )
+            _record_asset_storage_status(asset, category="generated")
             ASSETS[asset_id] = asset
             upsert_asset(asset)
             created_assets.append(asset)
@@ -640,18 +1109,25 @@ async def _export_oversampled_728x180_resize_assets(
 
     created_assets: list[Asset] = []
     now = created_at or datetime.utcnow()
+    base_source_title = _normalized_source_title(source_asset.title) if source_asset and source_asset.title else ""
 
+    output_counter = 0
     for idx, raw in enumerate(raw_outputs):
         top_bytes, bottom_bytes = split_728x180_into_two_728x90(raw)
         for crop_index, (crop_label, output_bytes) in enumerate(
             (("top", top_bytes), ("bottom", bottom_bytes)),
             start=1,
         ):
+            output_counter += 1
             asset_id = f"{job.lineage_key}_728x90_from_728x180_{idx + 1}_{crop_index}_img"
             preview_url = _save_image_file(asset_id, base64.b64encode(output_bytes).decode())
+            if base_source_title:
+                asset_title = f"{base_source_title}_728x90v{output_counter}"
+            else:
+                asset_title = f"Resize_728x90v{output_counter}"
             asset = Asset(
                 id=asset_id,
-                title=f"{label} 728x90 from 728x180 {crop_label} v{idx + 1}",
+                title=asset_title,
                 type="image",
                 gcs_uri="",
                 preview_url=preview_url,
@@ -689,6 +1165,7 @@ async def _export_oversampled_728x180_resize_assets(
                 ),
                 content_type="image/png",
             )
+            _record_asset_storage_status(asset, category="generated")
             ASSETS[asset_id] = asset
             upsert_asset(asset)
             created_assets.append(asset)
@@ -737,25 +1214,66 @@ def list_workspaces() -> list[Workspace]:
     return sorted(WORKSPACES.values(), key=lambda item: item.updated_at, reverse=True)
 
 
-def list_threads(workspace_id: str | None = None) -> list[CreativeThread]:
+def list_threads(workspace_id: str | None = None, created_by: str | None = None) -> list[CreativeThread]:
     assets = list(ASSETS.values()) + list(SOURCE_ASSETS.values())
     jobs = list(JOBS.values())
     threads = thread_store.hydrate_thread_summaries(assets=assets, jobs=jobs)
     if workspace_id:
         threads = [thread for thread in threads if thread.workspace_id == workspace_id]
+    if created_by:
+        threads = [thread for thread in threads if thread.created_by == created_by]
     return threads
 
 
-def list_jobs() -> list[GenerationJob]:
-    return sorted(JOBS.values(), key=lambda item: item.created_at, reverse=True)
+def list_jobs(
+    workspace_id: str | None = None,
+    created_by: str | None = None,
+) -> list[GenerationJob]:
+    jobs = list(JOBS.values())
+    if workspace_id:
+        jobs = [job for job in jobs if job.workspace_id == workspace_id]
+    if created_by:
+        owned_thread_ids = {
+            thread.thread_id
+            for thread in thread_store.list_threads(workspace_id)
+            if thread.created_by == created_by
+        }
+        owned_asset_ids = {
+            asset.id
+            for asset in list(ASSETS.values()) + list(SOURCE_ASSETS.values())
+            if asset.created_by == created_by and (not workspace_id or asset.workspace_id == workspace_id)
+        }
+        jobs = [
+            job
+            for job in jobs
+            if (
+                (job.thread_id and job.thread_id in owned_thread_ids)
+                or (job.source_asset_id and job.source_asset_id in owned_asset_ids)
+                or any(asset_id in owned_asset_ids for asset_id in job.output_asset_ids)
+            )
+        ]
+    return sorted(jobs, key=lambda item: item.created_at, reverse=True)
 
 
 def get_job(job_id: str) -> GenerationJob | None:
-    return JOBS.get(job_id)
+    cached_job = JOBS.get(job_id)
+    try:
+        persisted_row = load_job(job_id)
+        persisted_job = _job_from_row(persisted_row) if persisted_row else None
+    except Exception:
+        logger.warning("Could not refresh persisted job %s", job_id, exc_info=True)
+        return cached_job
+
+    if not persisted_job:
+        return cached_job
+    if not cached_job or persisted_job.updated_at >= cached_job.updated_at:
+        JOBS[job_id] = persisted_job
+        return persisted_job
+    return cached_job
 
 
 def delete_asset(asset_id: str) -> bool:
-    """Remove asset from memory, disk, and SQLite. Returns True if found."""
+    """Remove asset from memory, local cache, GCS, and SQLite. Returns True if found."""
     asset = ASSETS.pop(asset_id, None)
     if not asset:
         # also check SOURCE_ASSETS (uploads)
@@ -776,14 +1294,19 @@ def delete_asset(asset_id: str) -> bool:
     except Exception:
         logger.warning("Could not delete file for asset %s", asset_id)
 
+    if asset.gcs_uri:
+        _delete_gcs_object(asset.gcs_uri)
+
     db_delete_asset(asset_id)
     return True
 
 
-def list_assets(workspace_id: str | None = None) -> list[Asset]:
+def list_assets(workspace_id: str | None = None, created_by: str | None = None) -> list[Asset]:
     values = list(ASSETS.values()) + list(SOURCE_ASSETS.values())
     if workspace_id:
         values = [asset for asset in values if asset.workspace_id == workspace_id]
+    if created_by:
+        values = [asset for asset in values if asset.created_by == created_by]
     return sorted(values, key=lambda item: item.created_at, reverse=True)
 
 
@@ -794,13 +1317,39 @@ def list_usage_events(workspace_id: str | None = None) -> list[UsageEvent]:
     return sorted(values, key=lambda item: item.created_at, reverse=True)
 
 
+def _maybe_convert_psd(content: bytes, filename: str) -> tuple[bytes, str, str]:
+    """If content is a PSD file, flatten and return PNG bytes. Otherwise pass through."""
+    if not filename.lower().endswith(".psd"):
+        return content, filename, ""
+    try:
+        from psd_tools import PSDImage
+        import io as _io
+        psd = PSDImage.open(_io.BytesIO(content))
+        buf = _io.BytesIO()
+        psd.composite().save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+        png_filename = Path(filename).stem + ".png"
+        logger.info("PSD converted to PNG: %s → %s (%d MB → %d MB)",
+                    filename, png_filename, len(content) // 1_000_000, len(png_bytes) // 1_000_000)
+        return png_bytes, png_filename, "image/png"
+    except Exception as exc:
+        logger.warning("PSD conversion failed for %s: %s — uploading as-is", filename, exc)
+        return content, filename, ""
+
+
 def save_uploaded_asset(
     workspace_id: str,
     filename: str,
     content: bytes,
     asset_role: str,
     user_id: str,
+    thread_id: str | None = None,
+    content_type: str | None = None,
 ) -> Asset:
+    content, filename, converted_mime = _maybe_convert_psd(content, filename)
+    if converted_mime:
+        content_type = converted_mime
+
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     asset_id = f"asset_upload_{uuid4().hex[:12]}"
     ext = Path(filename).suffix or ".png"
@@ -808,13 +1357,25 @@ def save_uploaded_asset(
     dest.write_bytes(content)
     created_at = datetime.utcnow()
 
-    # Read actual pixel dimensions so they're available for all downstream ops
-    img_w, img_h = _read_image_size(content)
+    inferred_mime = (content_type or _guess_content_type(filename, "application/octet-stream")).lower()
+    if inferred_mime.startswith("video/"):
+        asset_type = "video"
+    elif inferred_mime == "text/html" or Path(filename).suffix.lower() in {".html", ".htm"}:
+        asset_type = "playable"
+    elif inferred_mime in {"application/zip", "application/x-zip-compressed"} or Path(filename).suffix.lower() == ".zip":
+        asset_type = "report"
+    else:
+        asset_type = "image"
+
+    img_w, img_h = (None, None)
+    if asset_type == "image":
+        # Read actual pixel dimensions so they're available for downstream image ops.
+        img_w, img_h = _read_image_size(content)
 
     asset = Asset(
         id=asset_id,
         title=filename,
-        type="image",
+        type=asset_type,
         gcs_uri="",
         preview_url=f"/static/uploads/{asset_id}{ext}",
         provider="upload",
@@ -828,6 +1389,7 @@ def save_uploaded_asset(
         height=img_h,
         theme=None,
         asset_role=_coerce_asset_role(asset_role, provider="upload"),
+        thread_id=thread_id,
     )
     object_path = _build_gcs_object_path(
         category="uploads",
@@ -838,8 +1400,9 @@ def save_uploaded_asset(
     asset.gcs_uri = _upload_bytes_to_gcs(
         content=content,
         object_path=object_path,
-        content_type=_guess_content_type(filename, "image/png"),
+        content_type=inferred_mime,
     ) or f"local://uploads/{asset_id}{ext}"
+    _record_asset_storage_status(asset, category="uploads")
     SOURCE_ASSETS[asset_id] = asset
     upsert_asset(asset)
     return asset
@@ -907,6 +1470,26 @@ def _estimate_cost_usd(request: GenerationRequest, provider_generations: int) ->
     if request.provider == "gemini":
         return round(provider_generations * 0.04, 4)
     return 0.0
+
+
+def assert_image_budget_available(request: GenerationRequest, user: User) -> None:
+    """Enforce the shared per-user Studio budget before image generation."""
+    settings = get_settings()
+    budget_limit = max(0.0, settings.studio_user_budget_usd)
+    if budget_limit <= 0:
+        return
+    current_spend = sum(
+        event.actual_cost_usd if event.actual_cost_usd is not None else event.estimated_cost_usd
+        for event in USAGE_EVENTS.values()
+        if event.user_id == user.id and event.operation in {"image_generation", "video_generation"}
+    )
+    estimated_request_cost = _estimate_cost_usd(request, _estimate_provider_generations(request))
+    if current_spend + estimated_request_cost > budget_limit:
+        raise RuntimeError(
+            "Studio budget exceeded. "
+            f"User budget: ${budget_limit:.2f}. Current estimated spend: ${current_spend:.2f}. "
+            f"This request would add about ${estimated_request_cost:.2f}."
+        )
 
 
 _SUPPORTED_OPENAI_MODELS = frozenset(
@@ -1099,6 +1682,9 @@ async def _generate_images_gemini(
     prompt: str,
     model: str,
     variants: int,
+    *,
+    target_size: str | None = None,
+    image_size: str | None = None,
 ) -> list[str]:
     """
     Call Gemini via generate_content() for text-to-image generation.
@@ -1116,16 +1702,23 @@ async def _generate_images_gemini(
         project=settings.gcp_project_id,
         location=settings.gcp_location,
     )
+    aspect_ratio = _vertex_aspect_ratio_for_size(target_size)
 
     import concurrent.futures as _cf
 
     def _call_once() -> str | None:
         try:
+            image_config_kwargs: dict[str, str] = {}
+            if aspect_ratio:
+                image_config_kwargs["aspect_ratio"] = aspect_ratio
+            if image_size:
+                image_config_kwargs["image_size"] = image_size
             response = client.models.generate_content(
                 model=model,
                 contents=prompt[:4000],
                 config=genai_types.GenerateContentConfig(
                     response_modalities=["IMAGE", "TEXT"],
+                    image_config=genai_types.ImageConfig(**image_config_kwargs) if image_config_kwargs else None,
                 ),
             )
             for candidate in (response.candidates or []):
@@ -1157,6 +1750,7 @@ async def _generate_images_gemini_from_references(
     model: str,
     variants: int,
     target_size: str | None = None,
+    image_size: str | None = None,
 ) -> list[str]:
     """
     Call Gemini via generate_content() for image editing with reference images.
@@ -1169,7 +1763,13 @@ async def _generate_images_gemini_from_references(
     from google.genai import types as genai_types
 
     if not reference_images:
-        return await _generate_images_gemini(prompt, model, variants)
+        return await _generate_images_gemini(
+            prompt,
+            model,
+            variants,
+            target_size=target_size,
+            image_size=image_size,
+        )
 
     settings = get_settings()
     client = genai.Client(
@@ -1191,17 +1791,30 @@ async def _generate_images_gemini_from_references(
 
     if len(parts) < 2:
         logger.warning("No valid reference images; falling back to text-only Gemini generation")
-        return await _generate_images_gemini(prompt, model, variants)
+        return await _generate_images_gemini(
+            prompt,
+            model,
+            variants,
+            target_size=target_size,
+            image_size=image_size,
+        )
 
     contents = [genai_types.Content(role="user", parts=parts)]
+    aspect_ratio = _vertex_aspect_ratio_for_size(target_size)
 
     def _call_once() -> tuple[str | None, str | None]:
         try:
+            image_config_kwargs: dict[str, str] = {}
+            if aspect_ratio:
+                image_config_kwargs["aspect_ratio"] = aspect_ratio
+            if image_size:
+                image_config_kwargs["image_size"] = image_size
             response = client.models.generate_content(
                 model=model,
                 contents=contents,
                 config=genai_types.GenerateContentConfig(
                     response_modalities=["IMAGE", "TEXT"],
+                    image_config=genai_types.ImageConfig(**image_config_kwargs) if image_config_kwargs else None,
                 ),
             )
             text_parts: list[str] = []
@@ -1477,13 +2090,14 @@ async def _generate_images_vertex_from_references(
     return await loop.run_in_executor(None, _sync_edit)
 
 
-def _save_image_file(asset_id: str, b64_data: str) -> str:
-    """Save base64 PNG to disk and return preview URL path."""
+def _save_image_file(asset_id: str, b64_data: str, extension: str = ".png") -> str:
+    """Save base64 image bytes to disk and return preview URL path."""
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     image_bytes = base64.b64decode(b64_data)
-    dest = STATIC_DIR / f"{asset_id}.png"
+    normalized_ext = extension if extension.startswith(".") else f".{extension}"
+    dest = STATIC_DIR / f"{asset_id}{normalized_ext}"
     dest.write_bytes(image_bytes)
-    return f"/static/generated/{asset_id}.png"
+    return f"/static/generated/{asset_id}{normalized_ext}"
 
 
 def create_image_generation_job(request: GenerationRequest, user: User) -> GenerationJob:
@@ -1583,6 +2197,8 @@ def _fill_mock_assets(
     output_types = ["image", "gif"] if request.output_format == "image_and_gif" else [request.output_format]
     asset_ids: list[str] = []
     source_asset = _get_asset(request.source_asset_id) if request.source_asset_id else None
+    base_source_title = _normalized_source_title(source_asset.title) if source_asset and source_asset.title else ""
+    cleaned_theme = (request.theme or "Generated").strip()
 
     for size in request.output_sizes:
         width, height = _parse_size(size)
@@ -1590,9 +2206,13 @@ def _fill_mock_assets(
             for output_type in output_types:
                 suffix = "gif" if output_type == "gif" else "img"
                 asset_id = f"{lineage_key}_{size}_{idx + 1}_{suffix}"
+                if base_source_title:
+                    placeholder_title = f"{base_source_title} - {cleaned_theme} {size} v{idx + 1}"
+                else:
+                    placeholder_title = f"{cleaned_theme} {size} v{idx + 1}"
                 asset = Asset(
                     id=asset_id,
-                    title=f"{request.theme} {size} v{idx + 1}",
+                    title=placeholder_title,
                     type=output_type,
                     gcs_uri="",
                     preview_url="/static/placeholder.png",
@@ -1646,6 +2266,7 @@ def _record_usage(
         created_at=now,
     )
     USAGE_EVENTS[usage_id] = usage_event
+    upsert_usage_event(usage_event)
 
     workspace = WORKSPACES.get(request.workspace_id)
     if workspace:
@@ -1681,6 +2302,7 @@ async def _dispatch_generation(
     reference_images: list[bytes],
     openai_size: str = "1024x1024",
     target_size: str | None = None,
+    image_size: str | None = None,
 ) -> list[str]:
     """
     Unified dispatch for image generation.
@@ -1700,8 +2322,15 @@ async def _dispatch_generation(
                     model=model,
                     variants=variants,
                     target_size=target_size,
+                    image_size=image_size,
                 )
-            return await _generate_images_gemini(prompt, model, variants)
+            return await _generate_images_gemini(
+                prompt,
+                model,
+                variants,
+                target_size=target_size,
+                image_size=image_size,
+            )
         else:
             # Imagen models use the Vertex Predict endpoint
             if reference_images:
@@ -1897,6 +2526,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                         source_asset=source_asset,
                         context_assets=[source_asset] if source_asset else [],
                         created_at=now,
+                        include_kakao_gacha_disclosure=request.resize_include_gacha_disclosure,
                     )
                 for asset in exported_assets:
                     asset.prompt_hash = prompt_hash
@@ -1909,6 +2539,9 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                         "resize_requested_size": size,
                         "resize_prompt_override_used": size in resize_prompt_overrides,
                         "resize_negative_prompt_override": resize_negative_prompt_override,
+                        "resize_include_gacha_disclosure": bool(
+                            request.resize_include_gacha_disclosure and size == "1200x600"
+                        ),
                         "resize_generation_canvas_size": "728x180" if size == "728x90" else size,
                         "resize_pipeline": "v2_oversampled_split_generation" if size == "728x90" else "v2_simple_per_size_generation",
                     }
@@ -1935,10 +2568,9 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                         )
                         if not is_gif_allowed_for_size(size_str):
                             continue
-                        img_path = _resolve_asset_path(asset_obj)
-                        if not img_path or not img_path.exists():
+                        img_bytes = read_asset_bytes(asset_obj)
+                        if not img_bytes:
                             continue
-                        img_bytes = img_path.read_bytes()
                         gif_bytes = generate_cta_pulse_gif(
                             image_bytes=img_bytes,
                             target_size=size_str,
@@ -1980,6 +2612,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                             ),
                             content_type="image/gif",
                         )
+                        _record_asset_storage_status(gif_asset, category="gifs")
                         ASSETS[gif_asset_id] = gif_asset
                         upsert_asset(gif_asset)
                         gif_asset_ids.append(gif_asset_id)
@@ -2039,28 +2672,16 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 enriched_prompt = build_theme_create_style_modify_prompt(
                     style_name=(request.theme_create_style_name or "").strip(),
                     style_details=(request.theme_create_style_details or "").strip(),
+                    prompt_template=(request.prompt or "").strip(),
                 )
                 reference_image_bytes = [source_bytes_list[0]]
             elif mode == "style_transfer":
                 if len(source_bytes_list) < 1 or len(reference_bytes_list) < 1:
                     raise RuntimeError("Theme Create Style Transfer requires a source image and a style reference image")
-                enriched_prompt = build_theme_create_style_transfer_prompt()
-                reference_image_bytes = [source_bytes_list[0], reference_bytes_list[0]]
-            elif mode == "asset_text_replace":
-                if len(source_bytes_list) < 1 or len(reference_bytes_list) < 2:
-                    raise RuntimeError("Theme Create Asset & Text Replace requires source, logo, and element images")
-                enriched_prompt = build_theme_create_asset_text_replace_prompt(
-                    logo_position=(request.theme_create_logo_position or "").strip(),
-                    element_position=(request.theme_create_element_position or "").strip(),
-                    old_text=(request.theme_create_old_text or "").strip(),
-                    new_text=(request.theme_create_new_text or "").strip(),
-                    font_style=(request.theme_create_font_style or "").strip(),
+                enriched_prompt = build_theme_create_style_transfer_prompt(
+                    prompt_template=(request.prompt or "").strip(),
                 )
-                reference_image_bytes = [
-                    source_bytes_list[0],
-                    reference_bytes_list[0],
-                    reference_bytes_list[1],
-                ]
+                reference_image_bytes = [source_bytes_list[0], reference_bytes_list[0]]
             else:
                 raise RuntimeError(f"Unsupported Theme Create mode: {mode}")
 
@@ -2156,6 +2777,172 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 thread_store.add_assistant_message(
                     job.thread_id,
                     text=f"Generated Theme Create images: {request.prompt}",
+                    asset_ids=asset_ids,
+                    job_id=job_id,
+                )
+
+            _record_usage(job, request, user, model, prompt_hash, now)
+            return
+
+        if request.generation_mode == GenerationMode.remediation:
+            if not _mark_generation_progress(job, 15, "Planning remediation prompt..."):
+                return
+
+            from app.incept.composite import get_openai_size
+
+            if not source_asset:
+                raise RuntimeError("Image remediation requires a source image")
+
+            source_bytes = _load_asset_bytes(source_asset)
+            if not source_bytes:
+                raise RuntimeError("Image remediation requires a readable source image")
+
+            source_width = source_asset.width
+            source_height = source_asset.height
+            if not source_width or not source_height:
+                source_width, source_height = _read_image_size(source_bytes)
+            original_size = (
+                f"{source_width}x{source_height}"
+                if source_width and source_height
+                else None
+            )
+            requested_remediation_sizes = request.output_sizes or ([original_size] if original_size else ["1200x628"])
+            if request.remediation_analysis:
+                matching_analysis = next(
+                    (item for item in request.remediation_analysis if item.asset_id == source_asset.id),
+                    request.remediation_analysis[0],
+                )
+            else:
+                matching_analysis = analyze_remediation_assets(
+                    RemediationAnalysisRequest(
+                        workspace_id=request.workspace_id,
+                        source_asset_ids=[source_asset.id],
+                        prompt=request.prompt or "",
+                        created_by=user.id,
+                    ),
+                    user.id,
+                ).results[0]
+
+            analysis_summary = _build_remediation_analysis_summary(matching_analysis)
+            direct_model_prompt = (matching_analysis.remediation_prompt or "").strip()
+            user_note = (request.prompt or "").strip()
+            if direct_model_prompt:
+                enriched_prompt = direct_model_prompt
+                if user_note:
+                    enriched_prompt = (
+                        f"{direct_model_prompt}\n\n"
+                        f"Additional user note: {user_note}"
+                    )
+            else:
+                violation_categories = {
+                    (violation.category or "").strip().lower()
+                    for violation in matching_analysis.violations
+                    if (violation.category or "").strip()
+                }
+                aggressive_personality_recast = bool(
+                    violation_categories
+                    & {
+                        "personality_rights",
+                        "impersonation",
+                        "celebrity",
+                        "celebrity_ip",
+                        "likeness",
+                    }
+                )
+                enriched_prompt = build_image_remediation_prompt(
+                    analysis_summary=analysis_summary,
+                    user_note=user_note,
+                    aggressive_personality_recast=aggressive_personality_recast,
+                )
+            generated_raw_by_size: dict[str, list[bytes]] = {}
+            total_sizes = max(1, len(requested_remediation_sizes))
+
+            for size_index, size in enumerate(requested_remediation_sizes):
+                start_progress = 20 + int((size_index / total_sizes) * 45)
+                if not _mark_generation_progress(
+                    job,
+                    start_progress,
+                    f"Generating remediation {size_index + 1}/{total_sizes}: {size}...",
+                ):
+                    return
+
+                target_w, target_h = _parse_size(size)
+                openai_size = get_openai_size(target_w or 1200, target_h or 628, model)
+                b64_images = await _dispatch_generation(
+                    enriched_prompt,
+                    provider=request.provider,
+                    model=model,
+                    variants=request.variants,
+                    reference_images=[source_bytes],
+                    openai_size=openai_size,
+                    target_size=size,
+                )
+                generated_raw_by_size[size] = [
+                    base64.b64decode(b64) for b64 in b64_images if b64
+                ]
+
+                done_progress = 20 + int(((size_index + 1) / total_sizes) * 45)
+                if not _mark_generation_progress(
+                    job,
+                    done_progress,
+                    f"Generated remediation {size_index + 1}/{total_sizes}: {size}.",
+                ):
+                    return
+
+            if not _mark_generation_progress(job, 76, "Exporting remediation outputs..."):
+                return
+
+            asset_ids: list[str] = []
+            for size_index, size in enumerate(requested_remediation_sizes):
+                export_progress = 76 + int((size_index / total_sizes) * 14)
+                if not _mark_generation_progress(
+                    job,
+                    export_progress,
+                    f"Saving remediation output {size_index + 1}/{total_sizes}: {size}...",
+                ):
+                    return
+
+                exported_assets = await _export_master_images_to_assets(
+                    job=job,
+                    raw_outputs=generated_raw_by_size.get(size, []),
+                    workspace_id=request.workspace_id,
+                    created_by=user.id,
+                    provider=request.provider,
+                    model=model,
+                    label=request.theme or "Image Remediation",
+                    theme=request.theme,
+                    requested_sizes=[size],
+                    source_asset=source_asset,
+                    context_assets=[source_asset],
+                    created_at=now,
+                )
+                for asset in exported_assets:
+                    asset.prompt_hash = prompt_hash
+                    asset.analysis = {
+                        **(asset.analysis or {}),
+                        "source_prompt": request.prompt,
+                        "request_prompt": request.prompt,
+                        "actual_remediation_prompt": enriched_prompt,
+                        "remediation_analysis": matching_analysis.model_dump(),
+                        "target_size": size,
+                        "remediation_pipeline": "v1_fixed_system_prompt",
+                    }
+                    upsert_asset(asset)
+                    asset_ids.append(asset.id)
+
+            job.output_asset_ids = asset_ids
+            job.status = JobStatus.completed
+            job.progress = 100
+            job.message = (
+                f"Generated {len(asset_ids)} remediation assets with {provider_label}: "
+                f"{request.variants} variants × {len(requested_remediation_sizes)} sizes."
+            )
+            job.updated_at = datetime.utcnow()
+
+            if job.thread_id:
+                thread_store.add_assistant_message(
+                    job.thread_id,
+                    text=f"Generated remediation images: {request.prompt or 'Auto-remediation'}",
                     asset_ids=asset_ids,
                     job_id=job_id,
                 )
@@ -2413,11 +3200,9 @@ async def run_kakao_clean_background(
         if not original_asset:
             raise ValueError(f"Asset {request.asset_id} not found")
 
-        img_path = _resolve_asset_path(original_asset)
-        if not img_path or not img_path.exists():
-            raise FileNotFoundError(f"Image file not found for {request.asset_id}")
-
-        original_bytes = img_path.read_bytes()
+        original_bytes = read_asset_bytes(original_asset)
+        if not original_bytes:
+            raise FileNotFoundError(f"Image bytes not found for {request.asset_id}")
         job.progress = 20
         job.updated_at = datetime.utcnow()
         upsert_job(job)
@@ -2507,11 +3292,9 @@ async def run_generate_gif_background(
         if not _mark_generation_progress(job, 20, "Loading source image for GIF generation..."):
             return
 
-        img_path = _resolve_asset_path(source_asset)
-        if not img_path or not img_path.exists():
-            raise FileNotFoundError(f"Image file not found for {request.asset_id}")
-
-        image_bytes = img_path.read_bytes()
+        image_bytes = read_asset_bytes(source_asset)
+        if not image_bytes:
+            raise FileNotFoundError(f"Image bytes not found for {request.asset_id}")
         width = source_asset.width
         height = source_asset.height
         if not width or not height:
@@ -2540,9 +3323,10 @@ async def run_generate_gif_background(
         gif_path.write_bytes(gif_bytes)
         gif_preview_url = f"/static/generated/{gif_asset_id}.gif"
         prompt_hash = sha256(f"generate-gif|{request.asset_id}|{size_str}".encode()).hexdigest()[:16]
+        gif_base_title = _normalized_source_title(source_asset.title) if source_asset.title else "Generated"
         gif_asset = Asset(
             id=gif_asset_id,
-            title=f"{source_asset.title} (GIF)",
+            title=f"{gif_base_title}_gif1",
             type="gif",
             gcs_uri="",
             preview_url=gif_preview_url,
@@ -2577,6 +3361,7 @@ async def run_generate_gif_background(
             ),
             content_type="image/gif",
         )
+        _record_asset_storage_status(gif_asset, category="gifs")
         ASSETS[gif_asset_id] = gif_asset
         upsert_asset(gif_asset)
 
@@ -2630,13 +3415,11 @@ async def run_kakao_bizboard_background(
         if not composed_asset:
             raise ValueError(f"Composed asset {request.composed_asset_id} not found")
 
-        composed_path = _resolve_asset_path(composed_asset)
-        if not composed_path or not composed_path.exists():
+        composed_bytes = read_asset_bytes(composed_asset)
+        if not composed_bytes:
             raise FileNotFoundError(
-                f"Composed image file not found for {request.composed_asset_id}"
+                f"Composed image bytes not found for {request.composed_asset_id}"
             )
-
-        composed_bytes = composed_path.read_bytes()
         job.progress = 40
         job.message = "Finalizing Kakao Bizboard asset..."
         job.updated_at = datetime.utcnow()
@@ -2719,16 +3502,9 @@ async def run_edit_background(
         if not original_asset:
             raise ValueError(f"Asset {request.asset_id} not found")
 
-        img_path: Path | None = None
-        if original_asset.preview_url.startswith("/static/generated/"):
-            img_path = STATIC_DIR / original_asset.preview_url[len("/static/generated/"):]
-        elif original_asset.preview_url.startswith("/static/uploads/"):
-            img_path = UPLOAD_DIR / original_asset.preview_url[len("/static/uploads/"):]
-
-        if not img_path or not img_path.exists():
-            raise FileNotFoundError(f"Image file not found for {request.asset_id}")
-
-        original_bytes = img_path.read_bytes()
+        original_bytes = read_asset_bytes(original_asset)
+        if not original_bytes:
+            raise FileNotFoundError(f"Image bytes not found for {request.asset_id}")
         mask_bytes: bytes | None = None
         if request.mask_data:
             mask_b64 = request.mask_data
@@ -2897,6 +3673,8 @@ def _get_asset(asset_id: str) -> "Asset | None":
 
 
 def _resolve_asset_path(asset: Asset) -> "Path | None":
+    if asset.preview_url == "/static/placeholder.png":
+        return STATIC_ROOT / "placeholder.png"
     if asset.preview_url.startswith("/static/generated/"):
         return STATIC_DIR / asset.preview_url[len("/static/generated/"):]
     if asset.preview_url.startswith("/static/uploads/"):
@@ -3030,16 +3808,16 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
         if not original:
             raise ValueError(f"Asset {request.asset_id} not found")
 
-        img_path = _resolve_asset_path(original)
-        if not img_path or not img_path.exists():
-            raise FileNotFoundError("Image file not found on disk")
+        original_bytes = read_asset_bytes(original)
+        if not original_bytes:
+            raise FileNotFoundError("Image bytes not found")
 
         job.progress = 15
         job.updated_at = datetime.utcnow()
 
         from app.incept.composite import create_outpaint_inputs
         expanded_bytes, mask_bytes = create_outpaint_inputs(
-            img_path.read_bytes(), request.direction, request.ratio
+            original_bytes, request.direction, request.ratio
         )
 
         job.progress = 30
@@ -3136,15 +3914,15 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
         if not original:
             raise ValueError(f"Asset {request.asset_id} not found")
 
-        img_path = _resolve_asset_path(original)
-        if not img_path or not img_path.exists():
-            raise FileNotFoundError("Image file not found on disk")
+        original_bytes = read_asset_bytes(original)
+        if not original_bytes:
+            raise FileNotFoundError("Image bytes not found")
 
         job.progress = 20
         job.updated_at = datetime.utcnow()
 
         from app.incept.composite import remove_background
-        result_bytes, used_rembg = remove_background(img_path.read_bytes())
+        result_bytes, used_rembg = remove_background(original_bytes)
 
         if not used_rembg or request.replacement_prompt:
             # Fall back to images.edit for replacement or when rembg unavailable
@@ -3153,7 +3931,7 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
                 or "Remove the background completely. Make the background fully transparent."
             )
             b64_list = await _edit_image_openai(
-                original_bytes=img_path.read_bytes(),
+                original_bytes=original_bytes,
                 mask_bytes=None,
                 prompt=prompt,
                 model=request.model,
@@ -3254,16 +4032,16 @@ async def run_add_text_background(job_id: str, request: AddTextRequest, user: Us
         if not original:
             raise ValueError(f"Asset {request.asset_id} not found")
 
-        img_path = _resolve_asset_path(original)
-        if not img_path or not img_path.exists():
-            raise FileNotFoundError("Image file not found on disk")
+        original_bytes = read_asset_bytes(original)
+        if not original_bytes:
+            raise FileNotFoundError("Image bytes not found")
 
         job.progress = 30
         job.updated_at = datetime.utcnow()
 
         from app.incept.composite import add_text_overlay
         result_bytes = add_text_overlay(
-            image_bytes=img_path.read_bytes(),
+            image_bytes=original_bytes,
             text=request.text,
             position=request.position,
             font_size_ratio=request.font_size_ratio,

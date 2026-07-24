@@ -89,7 +89,7 @@ export function CtvSidebar({
 
   return (
     <AppSidebar
-      productName="CTV"
+      productName=""
       logo="/logo.png"
       storageKey="ctv"
       items={NAV_ITEMS}

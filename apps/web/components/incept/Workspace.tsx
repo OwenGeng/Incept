@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -29,16 +30,28 @@ import {
   Video,
   X,
 } from "lucide-react";
-import type { AssetSummary, CreativeThreadSummary, InceptUser, JobSummary, WorkspaceSummary } from "@incept/shared";
+import type { AssetSummary, CreativeThreadSummary, InceptUser, JobSummary } from "@incept/shared";
 import { HomeView } from "./HomeView";
+import { CreateWorkbenchView } from "./CreateWorkbenchView";
+import { VideoProductionView } from "./VideoProductionView";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { createImageGenerationJob, deleteAssets, downloadAssetFile, downloadAssetsZip, generateGifFromAsset, listAssets, uploadAsset } from "@/lib/incept-api";
+import { createImageGenerationJob, createKakaoBizboardJob, deleteAssets, downloadAssetFile, downloadAssetsZip, generateGifFromAsset, getAssetFileExtension, listAssets, uploadAsset, type ContentScope } from "@/lib/incept-api";
+import {
+  buildKakaoDisclosure,
+  composeKakaoBizboard,
+  KAKAO_DEFAULT_DISCLOSURE,
+  KAKAO_DEFAULT_MAIN_COPY,
+  KAKAO_DEFAULT_SUBTITLE,
+  loadSpoqaFonts,
+  validateKakaoBizboardInputs,
+} from "@/lib/kakao-compositor";
 import type { AppView } from "./Sidebar";
-import { CreateImageView } from "./CreateImageView";
+import { KakaoBatchModal } from "./CreateImageView";
+import { UsageView } from "./UsageView";
 import { AppHeader } from "@/components/ui/app-header";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -77,13 +90,13 @@ interface WorkspaceProps {
   liveThreads: CreativeThreadSummary[];
   setLiveThreads: Dispatch<SetStateAction<CreativeThreadSummary[]>>;
   currentUser: InceptUser;
+  contentScope: ContentScope;
   activeWorkspaceId: string;
   activeThreadId: string | null;
   onThreadSelect: (id: string | null) => void;
-  workspaces: WorkspaceSummary[];
   onJobCreated: (job: JobSummary) => void;
   onMobileMenuOpen: () => void;
-  onThreadSelectFromHome: (workspaceId: string, threadId: string) => void;
+  onThreadSelectFromHome: (threadId: string) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -104,10 +117,8 @@ function ZoomModal({
 }) {
   const label =
     asset.width && asset.height
-      ? `${asset.width}x${asset.height} · ${asset.type === "gif" ? "GIF" : "PNG"}`
-      : asset.type === "gif"
-      ? "GIF"
-      : "PNG";
+      ? `${asset.width}x${asset.height} · ${getAssetFileExtension(asset).toUpperCase()}`
+      : getAssetFileExtension(asset).toUpperCase();
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6" onClick={onClose}>
@@ -123,7 +134,16 @@ function ZoomModal({
           <X className="size-4" />
         </button>
         <div className="flex min-h-0 flex-1 items-center justify-center bg-black/30 p-6">
-          <img src={asset.url} alt={asset.title} className="max-h-[72vh] max-w-full rounded-2xl object-contain" />
+          {asset.type === "video" ? (
+            <video
+              src={asset.url}
+              controls
+              playsInline
+              className="max-h-[72vh] max-w-full rounded-2xl object-contain"
+            />
+          ) : (
+            <img src={asset.url} alt={asset.title} className="max-h-[72vh] max-w-full rounded-2xl object-contain" />
+          )}
         </div>
         <div className="flex items-center gap-3 border-t border-white/10 bg-card px-5 py-4">
           <div className="min-w-0 flex-1">
@@ -176,7 +196,17 @@ function MiniAssetTile({ asset }: { asset: AssetSummary }) {
   return (
     <div className="relative aspect-square overflow-hidden border border-border bg-muted">
       {hasReal ? (
-        <img alt={asset.title} className="h-full w-full object-cover" src={asset.url} />
+        asset.type === "video" ? (
+          <video
+            src={asset.url}
+            className="h-full w-full object-cover"
+            muted
+            playsInline
+            preload="metadata"
+          />
+        ) : (
+          <img alt={asset.title} className="h-full w-full object-cover" src={asset.url} />
+        )
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#07111F] to-[#171A20]">
           <ImageIcon className="size-4 text-white/20" />
@@ -546,6 +576,8 @@ function LibraryView({
   setLiveJobs,
   onJobCreated,
   activeWorkspaceId,
+  contentScope,
+  activeThreadId,
 }: {
   activeView: AppView;
   liveAssets: AssetSummary[];
@@ -553,18 +585,46 @@ function LibraryView({
   setLiveJobs: Dispatch<SetStateAction<JobSummary[]>>;
   onJobCreated: (job: JobSummary) => void;
   activeWorkspaceId: string;
+  contentScope: ContentScope;
+  activeThreadId: string | null;
 }) {
   const [tab, setTab] = useState<"generated" | "assets">("generated");
+  const [mediaFilter, setMediaFilter] = useState<"all" | "image" | "video" | "gif" | "report" | "playable">("all");
+  const [videoModeFilter, setVideoModeFilter] = useState<string>("all");
+  const [videoAspectFilter, setVideoAspectFilter] = useState<string>("all");
+  const [videoDurationFilter, setVideoDurationFilter] = useState<string>("all");
+  const [videoAudioFilter, setVideoAudioFilter] = useState<"all" | "audio_on" | "audio_off">("all");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
+  const [selectMode, setSelectMode] = useState(false);
 
   // ── Multi-select ──
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [downloadPrefix, setDownloadPrefix] = useState("incept");
   const [downloading, setDownloading] = useState(false);
   const [gifGenerating, setGifGenerating] = useState(false);
+  const [kakaoBatchOpen, setKakaoBatchOpen] = useState(false);
+  const [kakaoBatchSubmitting, setKakaoBatchSubmitting] = useState(false);
+  const [kakaoBatchAppIconUrl, setKakaoBatchAppIconUrl] = useState<string | null>(null);
+  const [kakaoBatchMainCopy, setKakaoBatchMainCopy] = useState(KAKAO_DEFAULT_MAIN_COPY);
+  const [kakaoBatchAppDownloadCopy, setKakaoBatchAppDownloadCopy] = useState(KAKAO_DEFAULT_SUBTITLE);
+  const [kakaoBatchDspName, setKakaoBatchDspName] = useState(KAKAO_DEFAULT_DISCLOSURE);
+  const [kakaoBatchGacha, setKakaoBatchGacha] = useState(false);
+  const [kakaoBatchPreviewUrl, setKakaoBatchPreviewUrl] = useState<string | null>(null);
+  const [kakaoBatchPreviewAssetIndex, setKakaoBatchPreviewAssetIndex] = useState(0);
+  const [kakaoBatchValidationErrors, setKakaoBatchValidationErrors] = useState<string[]>([]);
+  const [kakaoBatchMainCopyWidthPx, setKakaoBatchMainCopyWidthPx] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [zoomedAsset, setZoomedAsset] = useState<AssetSummary | null>(null);
+  const [uploadingAssets, setUploadingAssets] = useState(false);
+  const assetUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const lastSelectionSignatureRef = useRef("");
+  const dragSelectContainerRef = useRef<HTMLDivElement | null>(null);
+  const dragSelectOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const dragSelectPointerIdRef = useRef<number | null>(null);
+  const dragSelectMovedRef = useRef(false);
+  const suppressSelectClickRef = useRef(false);
+  const suppressSelectClickTimerRef = useRef<number | null>(null);
+  const [dragSelectRect, setDragSelectRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -588,6 +648,15 @@ function LibraryView({
     }
   }
 
+  useEffect(() => {
+    setSelected(new Set());
+    setSelectMode(false);
+    setVideoModeFilter("all");
+    setVideoAspectFilter("all");
+    setVideoDurationFilter("all");
+    setVideoAudioFilter("all");
+  }, [tab, mediaFilter]);
+
   async function handleDownload() {
     const ids = Array.from(selected);
     if (!ids.length) return;
@@ -598,7 +667,7 @@ function LibraryView({
         if (!asset) throw new Error("Selected asset not found.");
         await downloadAssetFile(asset);
       } else {
-        await downloadAssetsZip(ids, downloadPrefix || "incept");
+        await downloadAssetsZip(ids);
       }
     }
     catch (e) { console.error(e); }
@@ -649,6 +718,227 @@ function LibraryView({
     }
   }
 
+  function handleOpenAssetUpload() {
+    assetUploadInputRef.current?.click();
+  }
+
+  async function handleAssetUploadChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+
+    setUploadingAssets(true);
+    try {
+      const uploadedIds: string[] = [];
+
+      for (const file of files) {
+        const uploaded = await uploadAsset(file, activeWorkspaceId, "upload", activeThreadId ?? undefined);
+        if (!uploaded) {
+          throw new Error(`Upload failed for ${file.name}`);
+        }
+        uploadedIds.push(uploaded.id);
+      }
+
+      const refreshedAssets = await listAssets(activeWorkspaceId, contentScope);
+      const uploadedBatch = refreshedAssets.filter((asset) => uploadedIds.includes(asset.id));
+      setLiveAssets((prev) => {
+        const remaining = prev.filter((asset) => !uploadedIds.includes(asset.id));
+        return [...uploadedBatch.reverse(), ...remaining];
+      });
+    } catch (error) {
+      console.error(error);
+      window.alert(error instanceof Error ? error.message : "Asset upload failed.");
+    } finally {
+      setUploadingAssets(false);
+    }
+  }
+
+  const selectedAssets = liveAssets.filter((asset) => selected.has(asset.id));
+  const selectedKakaoEligibleAssets = useMemo(
+    () => liveAssets.filter(
+      (asset) => selected.has(asset.id) && asset.type !== "gif" && asset.url && !asset.url.includes("placeholder")
+    ),
+    // liveAssets and selected are both stable refs that only change on real data updates
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [liveAssets, selected],
+  );
+
+  useEffect(() => {
+    const nextSignature = selectedAssets
+      .map((asset) => asset.id)
+      .sort()
+      .join("|");
+    if (lastSelectionSignatureRef.current === nextSignature) return;
+    lastSelectionSignatureRef.current = nextSignature;
+  }, [selectedAssets]);
+
+  useEffect(() => {
+    setKakaoBatchDspName(buildKakaoDisclosure(kakaoBatchGacha));
+  }, [kakaoBatchGacha]);
+
+  useEffect(() => {
+    if (!kakaoBatchOpen) return;
+
+    loadSpoqaFonts().catch(() => {});
+
+    const previewAsset =
+      selectedKakaoEligibleAssets[kakaoBatchPreviewAssetIndex] ?? selectedKakaoEligibleAssets[0];
+    if (!previewAsset) {
+      setKakaoBatchValidationErrors(["Select at least one image asset."]);
+      setKakaoBatchMainCopyWidthPx(0);
+      setKakaoBatchPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      return;
+    }
+
+    let cancelled = false;
+    let nextPreviewUrl: string | null = null;
+
+    async function buildPreview() {
+      const validation = await validateKakaoBizboardInputs({
+        thumbnailUrl: previewAsset.url,
+        appIconUrl: kakaoBatchAppIconUrl,
+        subtitle: kakaoBatchAppDownloadCopy,
+        mainCopy: kakaoBatchMainCopy,
+        gacha: kakaoBatchGacha,
+      });
+      if (cancelled) return;
+
+      setKakaoBatchValidationErrors(validation.errors);
+      setKakaoBatchMainCopyWidthPx(validation.mainCopyWidthPx);
+
+      if (validation.errors.length > 0) {
+        setKakaoBatchPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return null;
+        });
+        return;
+      }
+
+      const blob = await composeKakaoBizboard({
+        thumbnailUrl: previewAsset.url,
+        appIconUrl: kakaoBatchAppIconUrl,
+        subtitle: kakaoBatchAppDownloadCopy,
+        mainCopy: kakaoBatchMainCopy,
+        gacha: kakaoBatchGacha,
+      });
+      if (cancelled) return;
+
+      nextPreviewUrl = URL.createObjectURL(blob);
+      setKakaoBatchPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return nextPreviewUrl;
+      });
+    }
+
+    buildPreview().catch((err) => {
+      if (cancelled) return;
+      setKakaoBatchValidationErrors([
+        err instanceof Error ? err.message : "Kakao preview generation failed.",
+      ]);
+      setKakaoBatchPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      if (nextPreviewUrl) URL.revokeObjectURL(nextPreviewUrl);
+    };
+  }, [
+    kakaoBatchOpen,
+    kakaoBatchAppIconUrl,
+    kakaoBatchMainCopy,
+    kakaoBatchAppDownloadCopy,
+    kakaoBatchDspName,
+    kakaoBatchGacha,
+    kakaoBatchPreviewAssetIndex,
+    selectedKakaoEligibleAssets,
+  ]);
+
+  function handleOpenKakaoBatch() {
+    if (selectedKakaoEligibleAssets.length === 0) return;
+    setKakaoBatchAppDownloadCopy((prev) => prev.trim() || KAKAO_DEFAULT_SUBTITLE);
+    setKakaoBatchMainCopy((prev) => prev.trim() || KAKAO_DEFAULT_MAIN_COPY);
+    setKakaoBatchPreviewAssetIndex(0);
+    setKakaoBatchOpen(true);
+  }
+
+  function handleKakaoBatchIconChange(file: File | null) {
+    setKakaoBatchAppIconUrl((prev) => {
+      if (prev?.startsWith("blob:")) {
+        URL.revokeObjectURL(prev);
+      }
+      return file ? URL.createObjectURL(file) : null;
+    });
+  }
+
+  async function handleGenerateKakaoSelected() {
+    if (selectedKakaoEligibleAssets.length === 0) return;
+    setKakaoBatchSubmitting(true);
+    try {
+      const queuedJobs: JobSummary[] = [];
+
+      for (const asset of selectedKakaoEligibleAssets) {
+        const blob = await composeKakaoBizboard({
+          thumbnailUrl: asset.url,
+          appIconUrl: kakaoBatchAppIconUrl,
+          subtitle: kakaoBatchAppDownloadCopy,
+          mainCopy: kakaoBatchMainCopy,
+          gacha: kakaoBatchGacha,
+        });
+        const safeName = (asset.title || "kakao_asset")
+          .replace(/\.[^.]+$/, "")
+          .replace(/[^a-zA-Z0-9_-]+/g, "_");
+        const file = new File([blob], `${safeName}_kakao_bizboard_1029x258.png`, {
+          type: "image/png",
+        });
+        const uploaded = await uploadAsset(file, activeWorkspaceId, "upload", activeThreadId ?? undefined);
+        if (!uploaded) {
+          throw new Error(`Bizboard upload failed for ${asset.title}`);
+        }
+
+        const response = await createKakaoBizboardJob({
+          workspaceId: activeWorkspaceId,
+          cleanedAssetId: asset.id,
+          composedAssetId: uploaded.id,
+          mainCopy: kakaoBatchMainCopy,
+          appDownloadCopy: kakaoBatchAppDownloadCopy,
+          dspName: kakaoBatchDspName,
+          gacha: kakaoBatchGacha,
+          threadId: activeThreadId ?? undefined,
+        });
+
+        const job: JobSummary = {
+          id: response.job_id,
+          jobId: response.job_id,
+          title: response.title,
+          toolId: response.tool_id,
+          status: response.status,
+          progress: response.progress,
+          eta: response.status === "completed" ? "Completed" : "Running...",
+          lineageKey: response.lineage_key,
+        };
+        queuedJobs.push(job);
+      }
+
+      if (queuedJobs.length === 0) {
+        throw new Error("No Kakao Bizboard jobs were created.");
+      }
+
+      setLiveJobs((prev) => [...queuedJobs.reverse(), ...prev]);
+      queuedJobs.forEach((job) => onJobCreated(job));
+      setKakaoBatchOpen(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setKakaoBatchSubmitting(false);
+    }
+  }
+
   if (activeView === "Settings") {
     return (
       <Card>
@@ -667,211 +957,465 @@ function LibraryView({
     );
   }
 
-  const generatedAssets = liveAssets.filter((a) => a.provider !== "upload" && a.jobId);
-  const uploadedAssets = liveAssets.filter((a) => a.provider === "upload");
+  function readVideoMeta(asset: AssetSummary): {
+    mode: string | null;
+    aspectRatio: string | null;
+    durationSeconds: string | null;
+    includeAudio: boolean | null;
+  } {
+    const video = (asset.analysis?.video ?? null) as Record<string, unknown> | null;
+    return {
+      mode: typeof video?.mode === "string" ? video.mode : null,
+      aspectRatio: typeof video?.aspect_ratio === "string" ? video.aspect_ratio : null,
+      durationSeconds:
+        typeof video?.duration_seconds === "number" || typeof video?.duration_seconds === "string"
+          ? String(video.duration_seconds)
+          : null,
+      includeAudio: typeof video?.include_audio === "boolean" ? video.include_audio : null,
+    };
+  }
+
+  function matchesMediaFilter(asset: AssetSummary) {
+    if (mediaFilter === "all") return true;
+    return asset.type === mediaFilter;
+  }
+
+  function matchesVideoFilters(asset: AssetSummary) {
+    if (mediaFilter !== "video") return true;
+    if (asset.type !== "video") return false;
+    const meta = readVideoMeta(asset);
+    if (videoModeFilter !== "all" && meta.mode !== videoModeFilter) return false;
+    if (videoAspectFilter !== "all" && meta.aspectRatio !== videoAspectFilter) return false;
+    if (videoDurationFilter !== "all" && meta.durationSeconds !== videoDurationFilter) return false;
+    if (videoAudioFilter === "audio_on" && meta.includeAudio !== true) return false;
+    if (videoAudioFilter === "audio_off" && meta.includeAudio !== false) return false;
+    return true;
+  }
+
+  const generatedAssets = liveAssets.filter((a) => Boolean(a.jobId));
+  const uploadedAssets = liveAssets.filter((a) => !a.jobId);
+  const filteredGeneratedBase = generatedAssets.filter((asset) => matchesMediaFilter(asset) && matchesVideoFilters(asset));
+  const filteredUploadsBase = uploadedAssets.filter((asset) => matchesMediaFilter(asset) && matchesVideoFilters(asset));
   const q = search.trim().toLowerCase();
   const filteredGenerated = q
-    ? generatedAssets.filter((a) =>
-        [a.title, a.theme, a.model, a.provider]
+    ? filteredGeneratedBase.filter((a) =>
+        [a.title, a.theme, a.model, a.provider, a.type]
           .filter(Boolean).some((v) => String(v).toLowerCase().includes(q))
       )
-    : generatedAssets;
+    : filteredGeneratedBase;
   const filteredUploads = q
-    ? uploadedAssets.filter((a) => a.title.toLowerCase().includes(q))
-    : uploadedAssets;
+    ? filteredUploadsBase.filter((a) =>
+        [a.title, a.model, a.provider, a.type]
+          .filter(Boolean).some((v) => String(v).toLowerCase().includes(q))
+      )
+    : filteredUploadsBase;
+  const dragSelectableAssets = useMemo(
+    () => (tab === "generated" ? filteredGenerated : filteredUploads),
+    [filteredGenerated, filteredUploads, tab]
+  );
+  const activeTabAssets = tab === "generated" ? generatedAssets : uploadedAssets;
+  const mediaFilterCounts = {
+    all: activeTabAssets.length,
+    image: activeTabAssets.filter((asset) => asset.type === "image").length,
+    video: activeTabAssets.filter((asset) => asset.type === "video").length,
+    gif: activeTabAssets.filter((asset) => asset.type === "gif").length,
+    report: activeTabAssets.filter((asset) => asset.type === "report").length,
+    playable: activeTabAssets.filter((asset) => asset.type === "playable").length,
+  };
+  const activeVideoAssets = activeTabAssets.filter((asset) => asset.type === "video");
+  const videoModeOptions = Array.from(
+    new Set(activeVideoAssets.map((asset) => readVideoMeta(asset).mode).filter(Boolean) as string[])
+  );
+  const videoAspectOptions = Array.from(
+    new Set(activeVideoAssets.map((asset) => readVideoMeta(asset).aspectRatio).filter(Boolean) as string[])
+  );
+  const videoDurationOptions = Array.from(
+    new Set(activeVideoAssets.map((asset) => readVideoMeta(asset).durationSeconds).filter(Boolean) as string[])
+  ).sort((left, right) => Number(left) - Number(right));
+
+  useEffect(() => {
+    return () => {
+      if (suppressSelectClickTimerRef.current !== null) {
+        window.clearTimeout(suppressSelectClickTimerRef.current);
+      }
+    };
+  }, []);
+
+  function clearSuppressSelectClick() {
+    if (suppressSelectClickTimerRef.current !== null) {
+      window.clearTimeout(suppressSelectClickTimerRef.current);
+    }
+    suppressSelectClickTimerRef.current = window.setTimeout(() => {
+      suppressSelectClickRef.current = false;
+      suppressSelectClickTimerRef.current = null;
+    }, 0);
+  }
+
+  function isInteractiveSelectionTarget(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(target.closest("button, input, textarea, select, a, label, video"));
+  }
+
+  function getSelectionHits(nextRect: { left: number; top: number; width: number; height: number }) {
+    const container = dragSelectContainerRef.current;
+    if (!container) return [];
+    const selectionRight = nextRect.left + nextRect.width;
+    const selectionBottom = nextRect.top + nextRect.height;
+    return Array.from(container.querySelectorAll<HTMLElement>("[data-library-asset-id]"))
+      .filter((element) => {
+        const id = element.dataset.libraryAssetId;
+        if (!id) return false;
+        const elementRect = element.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const left = elementRect.left - containerRect.left;
+        const top = elementRect.top - containerRect.top;
+        const right = left + elementRect.width;
+        const bottom = top + elementRect.height;
+        return !(
+          right < nextRect.left ||
+          left > selectionRight ||
+          bottom < nextRect.top ||
+          top > selectionBottom
+        );
+      })
+      .map((element) => element.dataset.libraryAssetId!)
+      .filter(Boolean);
+  }
+
+  function handleDragSelectPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!selectMode || isInteractiveSelectionTarget(event.target)) return;
+    const container = dragSelectContainerRef.current;
+    if (!container) return;
+    const bounds = container.getBoundingClientRect();
+    dragSelectOriginRef.current = {
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+    };
+    dragSelectPointerIdRef.current = event.pointerId;
+    dragSelectMovedRef.current = false;
+    setDragSelectRect(null);
+    container.setPointerCapture(event.pointerId);
+  }
+
+  function handleDragSelectPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const container = dragSelectContainerRef.current;
+    const origin = dragSelectOriginRef.current;
+    if (!selectMode || !container || !origin || dragSelectPointerIdRef.current !== event.pointerId) return;
+    const bounds = container.getBoundingClientRect();
+    const currentX = Math.max(0, Math.min(event.clientX - bounds.left, bounds.width));
+    const currentY = Math.max(0, Math.min(event.clientY - bounds.top, bounds.height));
+    const left = Math.min(origin.x, currentX);
+    const top = Math.min(origin.y, currentY);
+    const width = Math.abs(currentX - origin.x);
+    const height = Math.abs(currentY - origin.y);
+    if (width < 4 && height < 4) return;
+    dragSelectMovedRef.current = true;
+    const nextRect = { left, top, width, height };
+    setDragSelectRect(nextRect);
+    const hits = getSelectionHits(nextRect);
+    setSelected(new Set(hits));
+  }
+
+  function handleDragSelectPointerEnd(event: React.PointerEvent<HTMLDivElement>) {
+    const container = dragSelectContainerRef.current;
+    if (container && dragSelectPointerIdRef.current === event.pointerId) {
+      try {
+        container.releasePointerCapture(event.pointerId);
+      } catch {}
+    }
+    const interactiveTarget = isInteractiveSelectionTarget(event.target);
+    const assetTarget = event.target instanceof HTMLElement
+      ? event.target.closest<HTMLElement>("[data-library-asset-id]")
+      : null;
+    dragSelectOriginRef.current = null;
+    dragSelectPointerIdRef.current = null;
+    setDragSelectRect(null);
+    if (!dragSelectMovedRef.current && selectMode && !interactiveTarget && assetTarget?.dataset.libraryAssetId) {
+      toggleSelect(assetTarget.dataset.libraryAssetId);
+    } else if (dragSelectMovedRef.current) {
+      suppressSelectClickRef.current = true;
+      clearSuppressSelectClick();
+    }
+    dragSelectMovedRef.current = false;
+  }
+
+  function handleLibraryTileClick(asset: AssetSummary, hasReal: boolean) {
+    if (selectMode) {
+      if (suppressSelectClickRef.current) return;
+      toggleSelect(asset.id);
+      return;
+    }
+    if (!hasReal) return;
+    setZoomedAsset(asset);
+  }
 
   return (
-    <div>
-      {/* Search bar — above tabs, filters both tabs */}
-      <div className="mb-5 flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-sm text-muted-foreground focus-within:border-accent">
-        <Search className="size-4 shrink-0" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search library…"
-          className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-        />
-        {search && (
-          <button onClick={() => setSearch("")}>
-            <X className="size-4" />
-          </button>
-        )}
-      </div>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="-mx-2 mb-4 border-b border-border bg-background px-2 pb-4 pt-1">
+        <div className="mb-5 flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-sm text-muted-foreground focus-within:border-accent">
+          <Search className="size-4 shrink-0" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search library…"
+            className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+          />
+          {search && (
+            <button onClick={() => setSearch("")}>
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
 
-      {/* Tabs + action buttons */}
-      <div className="mb-6 flex items-center gap-6 border-b border-border">
-        <div className="flex gap-6">
-          {(["generated", "assets"] as const).map((t) => (
+        <div className="mb-5 flex items-center gap-6 border-b border-border">
+          <div className="flex gap-6">
+            {(["generated", "assets"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  "relative pb-3 text-sm font-medium capitalize transition-colors",
+                  tab === t
+                    ? "text-foreground after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:rounded-full after:bg-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {t === "generated" ? "Generated" : "Assets"}
+                <span className="ml-2 text-[10px] text-muted-foreground">
+                  {t === "generated" ? generatedAssets.length : uploadedAssets.length}
+                </span>
+              </button>
+            ))}
+          </div>
+          {tab === "assets" && (
+            <div className="ml-auto flex items-center gap-2 pb-3">
+              <button
+                type="button"
+                onClick={handleOpenAssetUpload}
+                disabled={uploadingAssets}
+                className="flex items-center gap-1.5 rounded-xl bg-foreground px-3 py-1.5 text-sm font-medium text-background hover:opacity-80 disabled:opacity-50"
+              >
+                {uploadingAssets ? <Loader2 className="size-4 animate-spin" /> : <span>↑</span>}
+                Upload
+              </button>
+              <input
+                ref={assetUploadInputRef}
+                type="file"
+                multiple
+                accept="image/*,video/*,.psd,.ai,.pdf"
+                className="hidden"
+                onChange={handleAssetUploadChange}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {([
+            { id: "all", label: "All" },
+            { id: "image", label: "Images" },
+            { id: "video", label: "Videos" },
+            { id: "gif", label: "GIFs" },
+            { id: "playable", label: "Playables" },
+            { id: "report", label: "Reports" },
+          ] as const).map((option) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={option.id}
+              type="button"
+              onClick={() => setMediaFilter(option.id)}
               className={cn(
-                "relative pb-3 text-sm font-medium capitalize transition-colors",
-                tab === t
-                  ? "text-foreground after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:rounded-full after:bg-foreground"
-                  : "text-muted-foreground hover:text-foreground"
+                "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                mediaFilter === option.id
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
-              {t === "generated" ? "Generated" : "Assets"}
-              <span className="ml-2 text-[10px] text-muted-foreground">
-                {t === "generated" ? generatedAssets.length : uploadedAssets.length}
+              {option.label}
+              <span className="ml-1.5 text-[10px] opacity-75">
+                {mediaFilterCounts[option.id]}
               </span>
             </button>
           ))}
         </div>
-        {tab === "assets" && (
-          <div className="ml-auto flex items-center gap-2 pb-3">
-            <button className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted">
-              New folder
+
+        {mediaFilter === "video" ? (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            {[{ id: "all", label: "All modes" }, ...videoModeOptions.map((value) => ({ id: value, label: value.replaceAll("_", " ") }))].map((option) => (
+              <button
+                key={`video-mode-${option.id}`}
+                type="button"
+                onClick={() => setVideoModeFilter(option.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  videoModeFilter === option.id
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+
+            {[{ id: "all", label: "All ratios" }, ...videoAspectOptions.map((value) => ({ id: value, label: value }))].map((option) => (
+              <button
+                key={`video-aspect-${option.id}`}
+                type="button"
+                onClick={() => setVideoAspectFilter(option.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  videoAspectFilter === option.id
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+
+            {[{ id: "all", label: "All durations" }, ...videoDurationOptions.map((value) => ({ id: value, label: `${value}s` }))].map((option) => (
+              <button
+                key={`video-duration-${option.id}`}
+                type="button"
+                onClick={() => setVideoDurationFilter(option.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  videoDurationFilter === option.id
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+
+            {[
+              { id: "all", label: "All audio" },
+              { id: "audio_on", label: "Audio on" },
+              { id: "audio_off", label: "Silent" },
+            ].map((option) => (
+              <button
+                key={`video-audio-${option.id}`}
+                type="button"
+                onClick={() => setVideoAudioFilter(option.id as "all" | "audio_on" | "audio_off")}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                  videoAudioFilter === option.id
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {selected.size > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 shadow-sm">
+            <span className="text-sm font-medium">{selected.size} selected</span>
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-80 disabled:opacity-50"
+            >
+              {downloading ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+              {selected.size === 1
+                ? `Download ${getAssetFileExtension(
+                    liveAssets.find((asset) => selected.has(asset.id)) ?? {
+                      url: "",
+                      title: "",
+                      type: "image",
+                    }
+                  ).toUpperCase()}`
+                : "Download"}
             </button>
-            <button className="flex items-center gap-1.5 rounded-xl bg-foreground px-3 py-1.5 text-sm font-medium text-background hover:opacity-80">
-              <span>↑</span> Upload
+            <button
+              onClick={handleGenerateGif}
+              disabled={gifGenerating || Array.from(selected).length === 0}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {gifGenerating ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+              Generate GIF
+            </button>
+            <button
+              onClick={handleOpenKakaoBatch}
+              disabled={kakaoBatchSubmitting || selectedKakaoEligibleAssets.length === 0}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {kakaoBatchSubmitting ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+              {selectedKakaoEligibleAssets.length <= 1 ? "Generate Kakao" : `Generate Kakao (${selectedKakaoEligibleAssets.length})`}
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 disabled:opacity-50"
+            >
+              {deleting ? <Loader2 className="size-3 animate-spin" /> : <Trash2 className="size-3" />}
+              Delete
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear selection
             </button>
           </div>
         )}
-      </div>
 
-      {/* ── Selection toolbar (shown when any item selected) ── */}
-      {selected.size > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 shadow-sm">
-          <span className="text-sm font-medium">{selected.size} selected</span>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2">
-            <span className="text-[11px] text-muted-foreground">Prefix:</span>
-            <input
-              value={downloadPrefix}
-              onChange={(e) => setDownloadPrefix(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""))}
-              placeholder="incept"
-              className="w-24 bg-transparent px-1 py-1 text-xs outline-none"
-            />
+        {tab === "generated" && filteredGenerated.length > 0 && (
+          <div className="flex items-center justify-between gap-3">
+            <button
+              onClick={() => toggleAll(filteredGenerated)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {filteredGenerated.every((a) => selected.has(a.id))
+                ? <CheckSquare className="size-4 text-accent" />
+                : <Square className="size-4" />}
+              Select all
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (selectMode) {
+                  setSelectMode(false);
+                  setSelected(new Set());
+                  return;
+                }
+                setSelectMode(true);
+              }}
+              className={cn(
+                "rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                selectMode
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              {selectMode ? "Unselect" : "Select"}
+            </button>
           </div>
-          <button
-            onClick={handleDownload}
-            disabled={downloading}
-            className="flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-80 disabled:opacity-50"
-          >
-            {downloading ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
-            {selected.size === 1 ? "Download PNG" : "Download"}
-          </button>
-          <button
-            onClick={handleGenerateGif}
-            disabled={gifGenerating || Array.from(selected).length === 0}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
-          >
-            {gifGenerating ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
-            Generate GIF
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 disabled:opacity-50"
-          >
-            {deleting ? <Loader2 className="size-3 animate-spin" /> : <Trash2 className="size-3" />}
-            Delete
-          </button>
-          <button
-            onClick={() => setSelected(new Set())}
-            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
-          >
-            Clear selection
-          </button>
-        </div>
-      )}
+        )}
 
-      {zoomedAsset && (
-        <ZoomModal asset={zoomedAsset} onClose={() => setZoomedAsset(null)} />
-      )}
-
-      {/* ── Generated tab ── */}
-      {tab === "generated" && (
-        filteredGenerated.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-            <div className="grid size-14 place-items-center rounded-2xl border-2 border-dashed border-border bg-muted/40">
-              <ImageIcon className="size-6 text-muted-foreground/40" />
-            </div>
-            <p className="font-medium">No generated images yet</p>
-            <p className="text-sm text-muted-foreground">Go to Create to generate your first batch</p>
-          </div>
-        ) : (
-          <>
-            {/* Select-all row */}
-            <div className="mb-2 flex items-center gap-2">
-              <button
-                onClick={() => toggleAll(filteredGenerated)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-              >
-                {filteredGenerated.every((a) => selected.has(a.id))
-                  ? <CheckSquare className="size-4 text-accent" />
-                  : <Square className="size-4" />}
-                Select all
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {filteredGenerated.map((asset) => {
-                const hasReal = Boolean(asset.url && !asset.url.includes("placeholder"));
-                const isSel = selected.has(asset.id);
-                return (
-                  <div key={asset.id} className="group flex flex-col gap-1.5">
-                    <div
-                      className={cn(
-                        "relative aspect-square cursor-pointer overflow-hidden border-2 bg-[#07111F] transition-all",
-                        isSel ? "border-accent shadow-[0_0_0_1px_hsl(var(--accent)/0.3)]" : "border-transparent hover:border-border"
-                      )}
-                      onClick={() => hasReal && setZoomedAsset(asset)}
-                    >
-                      {hasReal ? (
-                        <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center">
-                          <ImageIcon className="size-6 text-white/20" />
-                        </div>
-                      )}
-                      {/* Checkbox */}
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleSelect(asset.id);
-                        }}
-                        className={cn(
-                          "absolute right-1.5 top-1.5 z-20 flex size-5 items-center justify-center rounded-full border-2 transition-all",
-                          isSel
-                            ? "border-accent bg-accent text-white"
-                            : "border-white/50 bg-black/30 opacity-0 group-hover:opacity-100"
-                        )}
-                      >
-                        {isSel && <Check className="size-3" />}
-                      </button>
-                      {hasReal && (
-                        <div className="pointer-events-none absolute inset-0 hidden items-center justify-center bg-black/20 group-hover:flex">
-                          <div className="rounded-full bg-black/60 p-1.5 backdrop-blur-sm">
-                            <Maximize2 className="size-4 text-white" />
-                          </div>
-                        </div>
-                      )}
-                      {/* Size + format label — always visible */}
-                      <div className="absolute bottom-1.5 left-1.5 rounded-md bg-black/75 px-1.5 py-0.5 backdrop-blur-sm">
-                        <span className="text-[8px] font-semibold text-white">
-                          {asset.width && asset.height
-                            ? `${asset.width}×${asset.height} · ${asset.type === "gif" ? "GIF" : "PNG"}`
-                            : asset.type === "gif" ? "GIF" : "PNG"}
-                        </span>
-                      </div>
-                    </div>
-                    <p className="truncate text-[11px] font-medium">{asset.title}</p>
-                    <p className="text-[10px] text-muted-foreground">{asset.model}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )
-      )}
-
-      {/* ── Assets tab ── */}
-      {tab === "assets" && (
-        <div>
-          {/* View toggle */}
-          <div className="mb-4 flex items-center justify-end gap-3">
+        {tab === "assets" && filteredUploads.length > 0 && (
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (selectMode) {
+                  setSelectMode(false);
+                  setSelected(new Set());
+                  return;
+                }
+                setSelectMode(true);
+              }}
+              className={cn(
+                "rounded-xl border px-3 py-1.5 text-sm font-medium transition-colors",
+                selectMode
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              {selectMode ? "Unselect" : "Select"}
+            </button>
             <div className="flex overflow-hidden rounded-xl border border-border">
               {(["list", "grid"] as const).map((m) => (
                 <button
@@ -900,14 +1444,150 @@ function LibraryView({
               ))}
             </div>
           </div>
+        )}
+      </div>
 
-          {/* Filter chips */}
-          <div className="mb-5">
-            <button className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted">
-              + Owner
-            </button>
+      {zoomedAsset && (
+        <ZoomModal asset={zoomedAsset} onClose={() => setZoomedAsset(null)} />
+      )}
+
+      {kakaoBatchOpen && (
+        <KakaoBatchModal
+          assets={selectedKakaoEligibleAssets}
+          submitting={kakaoBatchSubmitting}
+          appIconUrl={kakaoBatchAppIconUrl}
+          mainCopy={kakaoBatchMainCopy}
+          appDownloadCopy={kakaoBatchAppDownloadCopy}
+          gacha={kakaoBatchGacha}
+          previewUrl={kakaoBatchPreviewUrl}
+          validationErrors={kakaoBatchValidationErrors}
+          mainCopyWidthPx={kakaoBatchMainCopyWidthPx}
+          onClose={() => setKakaoBatchOpen(false)}
+          onSubmit={handleGenerateKakaoSelected}
+          onAppIconChange={handleKakaoBatchIconChange}
+          setGacha={setKakaoBatchGacha}
+          onSubtitleChange={setKakaoBatchAppDownloadCopy}
+          onMainCopyChange={setKakaoBatchMainCopy}
+          onApplyChanges={() => {}}
+          previewBusy={false}
+          previewAssetIndex={kakaoBatchPreviewAssetIndex}
+          onPreviewAssetChange={setKakaoBatchPreviewAssetIndex}
+        />
+      )}
+
+      <div
+        className="min-h-0 flex-1 overflow-y-auto pr-1"
+      >
+      <div
+        ref={dragSelectContainerRef}
+        className="relative"
+        onPointerDown={handleDragSelectPointerDown}
+        onPointerMove={handleDragSelectPointerMove}
+        onPointerUp={handleDragSelectPointerEnd}
+        onPointerCancel={handleDragSelectPointerEnd}
+      >
+        {dragSelectRect && selectMode && (
+          <div
+            className="pointer-events-none absolute z-20 rounded-md border border-accent bg-accent/10"
+            style={{
+              left: dragSelectRect.left,
+              top: dragSelectRect.top,
+              width: dragSelectRect.width,
+              height: dragSelectRect.height,
+            }}
+          />
+        )}
+
+      {/* ── Generated tab ── */}
+      {tab === "generated" && (
+        filteredGenerated.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+            <div className="grid size-14 place-items-center rounded-2xl border-2 border-dashed border-border bg-muted/40">
+              <ImageIcon className="size-6 text-muted-foreground/40" />
+            </div>
+            <p className="font-medium">No generated images yet</p>
+            <p className="text-sm text-muted-foreground">Go to Create to generate your first batch</p>
           </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {filteredGenerated.map((asset) => {
+                const hasReal = Boolean(asset.url && !asset.url.includes("placeholder"));
+                const isSel = selected.has(asset.id);
+                return (
+                  <div
+                    key={asset.id}
+                    data-library-asset-id={asset.id}
+                    className={cn("group flex cursor-pointer flex-col gap-1.5", selectMode && "select-none")}
+                    onClick={() => handleLibraryTileClick(asset, hasReal)}
+                  >
+                    <div
+                      className={cn(
+                        "relative aspect-square overflow-hidden border-2 bg-[#07111F] transition-all",
+                        isSel ? "border-accent shadow-[0_0_0_1px_hsl(var(--accent)/0.3)]" : "border-transparent hover:border-border"
+                      )}
+                    >
+                      {hasReal ? (
+                        asset.type === "video" ? (
+                          <video
+                            src={asset.url}
+                            className="h-full w-full object-cover"
+                            muted
+                            playsInline
+                            preload="metadata"
+                            draggable={false}
+                          />
+                        ) : (
+                          <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" draggable={false} />
+                        )
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <ImageIcon className="size-6 text-white/20" />
+                        </div>
+                      )}
+                      {/* Checkbox */}
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelect(asset.id);
+                        }}
+                        className={cn(
+                          "absolute right-1.5 top-1.5 z-20 flex size-5 items-center justify-center rounded-full border-2 transition-all",
+                          isSel
+                            ? "border-accent bg-accent text-white"
+                            : "border-white/50 bg-black/30 opacity-0 group-hover:opacity-100"
+                        )}
+                      >
+                        {isSel && <Check className="size-3" />}
+                      </button>
+                      {hasReal && !selectMode && (
+                        <div className="pointer-events-none absolute inset-0 hidden items-center justify-center bg-black/20 group-hover:flex">
+                          <div className="rounded-full bg-black/60 p-1.5 backdrop-blur-sm">
+                            <Maximize2 className="size-4 text-white" />
+                          </div>
+                        </div>
+                      )}
+                      {/* Size + format label — always visible */}
+                      <div className="absolute bottom-1.5 left-1.5 rounded-md bg-black/75 px-1.5 py-0.5 backdrop-blur-sm">
+                        <span className="text-[8px] font-semibold text-white">
+                          {asset.width && asset.height
+                            ? `${asset.width}×${asset.height} · ${getAssetFileExtension(asset).toUpperCase()}`
+                            : getAssetFileExtension(asset).toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="truncate text-[11px] font-medium">{asset.title}</p>
+                    <p className="text-[10px] text-muted-foreground">{asset.model}</p>
+                  </div>
+                );
+              })}
+          </div>
+        )
+      )}
 
+      {/* ── Assets tab ── */}
+      {tab === "assets" && (
+        <div>
           {filteredUploads.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
               <div className="grid size-14 place-items-center rounded-2xl border-2 border-dashed border-border bg-muted/40">
@@ -939,10 +1619,15 @@ function LibraryView({
                   return (
                     <div
                       key={asset.id}
+                      data-library-asset-id={asset.id}
                       className={cn(
-                        "grid grid-cols-[32px_minmax(0,1fr)_160px_100px_80px] items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/30",
+                        "grid cursor-pointer grid-cols-[32px_minmax(0,1fr)_160px_100px_80px] items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/30",
                         isSel && "bg-soft-accent/40"
                       )}
+                      onClick={(event) => {
+                        if (isInteractiveSelectionTarget(event.target)) return;
+                        handleLibraryTileClick(asset, hasReal);
+                      }}
                     >
                       <button onClick={() => toggleSelect(asset.id)} className="flex items-center justify-center">
                         <div className={cn(
@@ -955,11 +1640,22 @@ function LibraryView({
                       <div className="flex items-center gap-3 min-w-0">
                         <button
                           type="button"
-                          onClick={() => hasReal && setZoomedAsset(asset)}
+                          onClick={() => handleLibraryTileClick(asset, hasReal)}
                           className="size-9 shrink-0 overflow-hidden border border-border bg-muted"
                         >
                           {hasReal ? (
-                            <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
+                            asset.type === "video" ? (
+                              <video
+                                src={asset.url}
+                                className="h-full w-full object-cover"
+                                muted
+                                playsInline
+                                preload="metadata"
+                                draggable={false}
+                              />
+                            ) : (
+                              <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" draggable={false} />
+                            )
                           ) : (
                             <div className="flex h-full w-full items-center justify-center">
                               <ImageIcon className="size-4 text-muted-foreground" />
@@ -970,7 +1666,7 @@ function LibraryView({
                           <p className="truncate text-sm font-medium">{asset.title}</p>
                           <p className="text-[11px] text-muted-foreground">
                             {asset.width && asset.height ? `${asset.width}×${asset.height} · ` : ""}
-                            {asset.type === "gif" ? "GIF" : "PNG"}
+                            {getAssetFileExtension(asset).toUpperCase()}
                           </p>
                         </div>
                       </div>
@@ -999,16 +1695,31 @@ function LibraryView({
                 const hasReal = Boolean(asset.url && !asset.url.includes("placeholder"));
                 const isSel = selected.has(asset.id);
                 return (
-                  <div key={asset.id} className="group flex flex-col gap-1.5">
+                  <div
+                    key={asset.id}
+                    data-library-asset-id={asset.id}
+                    className={cn("group flex cursor-pointer flex-col gap-1.5", selectMode && "select-none")}
+                    onClick={() => handleLibraryTileClick(asset, hasReal)}
+                  >
                     <div
                       className={cn(
-                        "relative aspect-square cursor-pointer overflow-hidden border-2 bg-muted transition-all",
+                        "relative aspect-square overflow-hidden border-2 bg-muted transition-all",
                         isSel ? "border-accent" : "border-transparent hover:border-border"
                       )}
-                      onClick={() => hasReal && setZoomedAsset(asset)}
                     >
                       {hasReal ? (
-                        <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
+                        asset.type === "video" ? (
+                          <video
+                            src={asset.url}
+                            className="h-full w-full object-cover"
+                            muted
+                            playsInline
+                            preload="metadata"
+                            draggable={false}
+                          />
+                        ) : (
+                          <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" draggable={false} />
+                        )
                       ) : (
                         <div className="flex h-full w-full items-center justify-center">
                           <ImageIcon className="size-6 text-muted-foreground/40" />
@@ -1029,7 +1740,7 @@ function LibraryView({
                       >
                         {isSel && <Check className="size-3" />}
                       </button>
-                      {hasReal && (
+                      {hasReal && !selectMode && (
                         <div className="pointer-events-none absolute inset-0 hidden items-center justify-center bg-black/20 group-hover:flex">
                           <div className="rounded-full bg-black/60 p-1.5 backdrop-blur-sm">
                             <Maximize2 className="size-4 text-white" />
@@ -1040,8 +1751,8 @@ function LibraryView({
                       <div className="absolute bottom-1.5 left-1.5 rounded-md bg-black/75 px-1.5 py-0.5 backdrop-blur-sm">
                         <span className="text-[8px] font-semibold text-white">
                           {asset.width && asset.height
-                            ? `${asset.width}×${asset.height} · ${asset.type === "gif" ? "GIF" : "PNG"}`
-                            : asset.type === "gif" ? "GIF" : "PNG"}
+                            ? `${asset.width}×${asset.height} · ${getAssetFileExtension(asset).toUpperCase()}`
+                            : getAssetFileExtension(asset).toUpperCase()}
                         </span>
                       </div>
                     </div>
@@ -1054,6 +1765,8 @@ function LibraryView({
           )}
         </div>
       )}
+      </div>
+      </div>
     </div>
   );
 }
@@ -1093,13 +1806,11 @@ export function Workspace({
   liveAssets, setLiveAssets,
   liveJobs, setLiveJobs,
   liveThreads, setLiveThreads,
-  currentUser, activeWorkspaceId, activeThreadId, onThreadSelect,
-  workspaces, onJobCreated, onMobileMenuOpen, onThreadSelectFromHome,
+  currentUser, contentScope, activeWorkspaceId, activeThreadId, onThreadSelect,
+  onJobCreated, onMobileMenuOpen, onThreadSelectFromHome,
 }: WorkspaceProps) {
   const isChat = activeView === "Workspace";
-  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
   const greeting = getGreeting();
-
   // ── Chat state ──
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -1202,7 +1913,7 @@ export function Workspace({
       const referenceIds: string[] = [];
       for (const att of attachments) {
         try {
-          const result = await uploadAsset(att.file, activeWorkspaceId, "reference");
+          const result = await uploadAsset(att.file, activeWorkspaceId, "reference", activeThreadId ?? undefined);
           if (result) referenceIds.push(result.id);
         } catch { /* skip failed uploads */ }
       }
@@ -1241,7 +1952,7 @@ export function Workspace({
       jobToMsg.current.set(response.job_id, aiMsgId);
 
       if (response.status === "completed") {
-        const newAssets = await listAssets(activeWorkspaceId);
+        const newAssets = await listAssets(activeWorkspaceId, contentScope);
         setLiveAssets(newAssets);
         const jobAssets = newAssets.filter((a) => a.jobId === response.job_id);
         setMessages((prev) =>
@@ -1281,10 +1992,10 @@ export function Workspace({
     sending, onSend: handleSend,
   };
 
-  // ── Create Image view — full-screen, bypasses the chat layout ──
-  if (activeView === "Create") {
+  if (activeView === "Image" || activeView === "Video") {
     return (
-      <CreateImageView
+      <CreateWorkbenchView
+        surface={activeView === "Video" ? "video" : "image"}
         liveAssets={liveAssets}
         setLiveAssets={setLiveAssets}
         liveJobs={liveJobs}
@@ -1292,8 +2003,8 @@ export function Workspace({
         liveThreads={liveThreads}
         setLiveThreads={setLiveThreads}
         currentUser={currentUser}
+        contentScope={contentScope}
         activeWorkspaceId={activeWorkspaceId}
-        activeWorkspaceTitle={activeWorkspace?.title}
         activeThreadId={activeThreadId}
         onThreadSelect={onThreadSelect}
         onJobCreated={onJobCreated}
@@ -1301,33 +2012,55 @@ export function Workspace({
     );
   }
 
+  if (activeView === "VideoProduction") {
+    return (
+      <VideoProductionView
+        liveAssets={liveAssets}
+        setLiveAssets={setLiveAssets}
+        currentUser={currentUser}
+        contentScope={contentScope}
+        activeWorkspaceId={activeWorkspaceId}
+        onMobileMenuOpen={onMobileMenuOpen}
+      />
+    );
+  }
+
   return (
-    <main className="flex-1 min-w-0 grid min-h-screen grid-cols-1">
+    <main className="flex h-screen min-h-0 flex-1 min-w-0 grid-cols-1 overflow-hidden">
       {/* ── Left panel ── */}
-      <section className="flex min-h-screen min-w-0 flex-col border-r bg-background">
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-r bg-background">
         {/* Header — only in active chat or non-chat views */}
         {(!isChat || hasConversation) && (
           <AppHeader
             variant="header"
-            title={isChat && activeWorkspace ? activeWorkspace.title : activeView}
+            title={isChat ? "Thread" : activeView}
             onMobileMenuOpen={onMobileMenuOpen}
+            docsHref="/docs/studio"
           />
         )}
 
         {/* Non-chat views */}
         {!isChat && (
-          <div className="flex-1 overflow-auto px-7 py-6 max-[860px]:px-4">
+          <div
+            className={cn(
+              "flex-1 min-h-0 px-7 py-6 max-[860px]:px-4",
+              activeView === "Library" || activeView === "Settings"
+                ? "flex flex-col overflow-hidden"
+                : "overflow-auto"
+            )}
+          >
             {activeView === "Home" && (
               <HomeView
                 liveAssets={liveAssets}
                 liveJobs={liveJobs}
                 liveThreads={liveThreads}
-                workspaces={workspaces}
                 onViewChange={onViewChange}
                 onThreadSelect={onThreadSelectFromHome}
+                onOpenCreateSurface={(surface) => onViewChange(surface === "video" ? "Video" : "Image")}
               />
             )}
             {activeView === "Analyze" && <ComingSoon activeView={activeView} />}
+            {activeView === "Usage" && <UsageView />}
             {(activeView === "Library" || activeView === "Settings") && (
               <LibraryView
                 activeView={activeView}
@@ -1336,6 +2069,8 @@ export function Workspace({
                 setLiveJobs={setLiveJobs}
                 onJobCreated={onJobCreated}
                 activeWorkspaceId={activeWorkspaceId}
+                contentScope={contentScope}
+                activeThreadId={activeThreadId}
               />
             )}
           </div>

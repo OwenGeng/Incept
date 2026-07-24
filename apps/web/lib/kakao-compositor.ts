@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 // Kakao Bizboard template compositor - produces a 1029x258 transparent PNG
 
@@ -6,51 +6,72 @@ const W = 1029;
 const H = 258;
 const SAFE_L = 48;
 const SAFE_R = 48;
-const THUMB_X = W - SAFE_R - 315;
+const THUMB_X = W - SAFE_R - 315;           // 666
 const THUMB_Y = 36;
 const THUMB_W = 315;
 const THUMB_H = 186;
-const THUMB_GAP = 24;
-const LEFT_ZONE_W = THUMB_X - SAFE_L - THUMB_GAP;
-const MAIN_COPY_MIN_W = 290;
-const MAIN_COPY_MAX_W = 585;
-const MAIN_COPY_Y = 167;
+// Absolute right-edge limit shared by title and subtitle (Go: textMaximumBoundary)
+const TEXT_BOUNDARY_MAX = 633;
+// Coordinates verified against Go backend (kakao_bizboard.go)
+const MAIN_COPY_X = 46;
+const MAIN_COPY_Y = 148;  // titleTextProps.YPos=100 + size=48
+// Go: textMinimumBoundary=340, titleTextProps.XPos=46 → min width = 340-46 = 294
+const MAIN_COPY_MIN_W = 340 - MAIN_COPY_X;
+// Go: textMaximumBoundary=633, titleTextProps.XPos=46 → max width = 633-46 = 587
+const MAIN_COPY_MAX_W = TEXT_BOUNDARY_MAX - MAIN_COPY_X;
 const APP_ICON_SZ = 38;
 const APP_ICON_X = SAFE_L;
-const APP_ICON_Y = 88;
-const SUBTITLE_X = APP_ICON_X + APP_ICON_SZ + 8;
-const SUBTITLE_Y = APP_ICON_Y + 28;
-const AD_PILL_X = SAFE_L;
-const AD_PILL_Y = 208;
-const AD_COPY_X = AD_PILL_X + 34;
-const AD_COPY_Y = AD_PILL_Y + 15;
+const APP_ICON_Y = 50;
+const SUBTITLE_X = 93;           // subtitleTextProps.XPos
+const SUBTITLE_Y = 79;           // subtitleTextProps.YPos=53 + size=26
+const SUBTITLE_ARROW_X_PAD = 3;  // leftPaddingForSubtitleEndingText
+const SUBTITLE_ARROW_Y = 75;     // subtitleTextProps.YPos=53 + yPosAdjustmentForSubtitleEndingText=22
+const SUBTITLE_ARROW_SIZE = 15.6; // defaultSubtitleEndingTextProps.Size
+const NOTICE_X = 102;    // noticeTextProps.XPos
+const NOTICE_Y = 195;    // noticeTextProps.YPos=171 + size=24
+const TEMPLATE_URL = "/kakao-bizboard-template.png";
+
+// App terms Kakao accepts in subtitle (Go: appTerms slice)
+const SUBTITLE_APP_TERMS = ["앱", "app", "App", "APP"] as const;
 
 export const KAKAO_SUBTITLE_SUFFIX = "앱에서 확인";
-export const KAKAO_DEFAULT_DISCLOSURE = "Moloco 광고입니다";
+// Period required per Go reference: noticeTextForNoUseGatchaContents = "Moloco 광고입니다."
+export const KAKAO_DEFAULT_DISCLOSURE = "Moloco 광고입니다.";
 export const KAKAO_GACHA_DISCLOSURE = "Moloco 광고 · 확률형 아이템 포함";
+export const KAKAO_DEFAULT_SUBTITLE = "APP_NAME 앱에서 확인";
+export const KAKAO_DEFAULT_MAIN_COPY = "APP_NAME 출시";
 
 let fontsLoaded = false;
+
+const SPOQA_FONT_BASE = "/SpoqaHanSansNeo_all/SpoqaHanSansNeo_OTF_subset";
 
 export async function loadSpoqaFonts(): Promise<void> {
   if (fontsLoaded) return;
   try {
-    const base =
-      "https://cdn.jsdelivr.net/gh/spoqa/spoqa-han-sans@latest/fonts/SpoqaHanSansNeo";
     const regular = new FontFace(
       "SpoqaHanSansNeo",
-      `url(${base}/SpoqaHanSansNeo-Regular.woff2)`,
+      `url(${SPOQA_FONT_BASE}/SpoqaHanSansNeo-Regular.woff2) format("woff2")`,
+      { weight: "400", style: "normal" },
+    );
+    const medium = new FontFace(
+      "SpoqaHanSansNeo",
+      `url(${SPOQA_FONT_BASE}/SpoqaHanSansNeo-Medium.woff2) format("woff2")`,
+      { weight: "500", style: "normal" },
     );
     const bold = new FontFace(
       "SpoqaHanSansNeo",
-      `url(${base}/SpoqaHanSansNeo-Bold.woff2)`,
-      { weight: "700" },
+      `url(${SPOQA_FONT_BASE}/SpoqaHanSansNeo-Bold.woff2) format("woff2")`,
+      { weight: "700", style: "normal" },
     );
-    await Promise.all([regular.load(), bold.load()]);
+
+    await Promise.all([regular.load(), medium.load(), bold.load()]);
     document.fonts.add(regular);
+    document.fonts.add(medium);
     document.fonts.add(bold);
     fontsLoaded = true;
-  } catch {
-    // Fall back to the system Korean font stack if the CDN is unavailable.
+  } catch (error) {
+    console.warn("Failed to load local Spoqa Han Sans Neo fonts, falling back to system fonts.", error);
+    fontsLoaded = true;
   }
 }
 
@@ -64,20 +85,62 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function centerCropParams(
-  srcW: number,
-  srcH: number,
-  dstW: number,
-  dstH: number,
-) {
+// Trim transparent border pixels from a cleaned product image so the
+// tight object bounding box is used when placing it in the thumbnail slot.
+async function trimTransparentBorders(img: HTMLImageElement): Promise<HTMLCanvasElement> {
+  const temp = document.createElement("canvas");
+  temp.width = img.naturalWidth;
+  temp.height = img.naturalHeight;
+  const tc = temp.getContext("2d");
+  if (!tc) return temp;
+  tc.drawImage(img, 0, 0);
+
+  const { data } = tc.getImageData(0, 0, temp.width, temp.height);
+  let x0 = temp.width, x1 = 0, y0 = temp.height, y1 = 0;
+  for (let y = 0; y < temp.height; y++) {
+    for (let x = 0; x < temp.width; x++) {
+      if (data[(y * temp.width + x) * 4 + 3] > 10) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 <= x0 || y1 <= y0) return temp;
+
+  const out = document.createElement("canvas");
+  out.width = x1 - x0 + 1;
+  out.height = y1 - y0 + 1;
+  const oc = out.getContext("2d");
+  if (!oc) return temp;
+  oc.drawImage(temp, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+  return out;
+}
+
+async function loadTemplateMaskData() {
+  const template = await loadImage(TEMPLATE_URL);
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = W;
+  maskCanvas.height = H;
+  const maskCtx = maskCanvas.getContext("2d");
+  if (!maskCtx) {
+    throw new Error("Could not create Kakao template mask context");
+  }
+  maskCtx.drawImage(template, 0, 0, W, H);
+  return maskCtx.getImageData(0, 0, W, H);
+}
+
+// Cover-fit: scale and center-crop source to fill destination exactly (matches Go drawMainImage).
+function coverCropParams(srcW: number, srcH: number, dstW: number, dstH: number) {
   const srcR = srcW / srcH;
   const dstR = dstW / dstH;
   if (srcR > dstR) {
-    const sw = srcH * dstR;
-    return { sx: (srcW - sw) / 2, sy: 0, sw, sh: srcH };
+    const sw = Math.round(srcH * dstR);
+    return { sx: Math.round((srcW - sw) / 2), sy: 0, sw, sh: srcH };
   }
-  const sh = srcW / dstR;
-  return { sx: 0, sy: (srcH - sh) / 2, sw: srcW, sh };
+  const sh = Math.round(srcW / dstR);
+  return { sx: 0, sy: Math.round((srcH - sh) / 2), sw: srcW, sh };
 }
 
 export interface KakaoCompositeParams {
@@ -116,16 +179,26 @@ function hasEmoji(value: string) {
 
 export function buildKakaoSubtitle(appName: string) {
   const normalized = normalizeCopy(appName);
-  return normalized ? `${normalized} ${KAKAO_SUBTITLE_SUFFIX}` : "";
+  return normalized ? `${normalized} ${KAKAO_SUBTITLE_SUFFIX}` : KAKAO_DEFAULT_SUBTITLE;
 }
 
 export function buildKakaoDefaultMainCopy(appName: string) {
   const normalized = normalizeCopy(appName);
-  return normalized ? `${normalized} 출시` : "";
+  return normalized ? `${normalized} 출시` : KAKAO_DEFAULT_MAIN_COPY;
 }
 
 export function buildKakaoDisclosure(gacha: boolean) {
   return gacha ? KAKAO_GACHA_DISCLOSURE : KAKAO_DEFAULT_DISCLOSURE;
+}
+
+// Measure full subtitle width including the  arrow glyph, matching Go's writeSubtitle return value.
+function measureSubtitleWidth(ctx: CanvasRenderingContext2D, subtitle: string, font: string): number {
+  const bodyText = subtitle.trim() + " ";
+  ctx.font = `26px ${font}`;
+  const bodyWidth = ctx.measureText(bodyText).width;
+  ctx.font = `${SUBTITLE_ARROW_SIZE}px ${font}`;
+  const arrowWidth = ctx.measureText("").width;
+  return bodyWidth + SUBTITLE_ARROW_X_PAD + arrowWidth;
 }
 
 export async function validateKakaoBizboardInputs(
@@ -137,22 +210,22 @@ export async function validateKakaoBizboardInputs(
   const errors: string[] = [];
   const subtitle = normalizeCopy(p.subtitle);
   const mainCopy = normalizeCopy(p.mainCopy);
-  const disclosure = buildKakaoDisclosure(p.gacha);
 
   if (!p.thumbnailUrl) errors.push("A cleaned thumbnail image is required.");
-  if (!p.appIconUrl) errors.push("A 38x38 app icon is required.");
   if (!subtitle) errors.push("Subtitle is required.");
   if (!mainCopy) errors.push("Main copy is required.");
 
   if (subtitle) {
-    if (!subtitle.endsWith(KAKAO_SUBTITLE_SUFFIX)) {
-      errors.push(`Subtitle must end with "${KAKAO_SUBTITLE_SUFFIX}".`);
+    // Go: validate subtitle contains any of appTerms = ["앱", "app", "App", "APP"]
+    if (!SUBTITLE_APP_TERMS.some((t) => subtitle.includes(t))) {
+      errors.push('Subtitle must include "앱" (or "app"/"App"/"APP").');
     }
     if (hasEmoji(subtitle)) {
       errors.push("Subtitle cannot include emoji.");
     }
-    ctx.font = `26px ${font}`;
-    if (ctx.measureText(subtitle).width > LEFT_ZONE_W - APP_ICON_SZ - 8) {
+    // Go: subtitleLength + subtitleTextProps.XPos >= textMaximumBoundary
+    const subtitleRightPos = SUBTITLE_X + measureSubtitleWidth(ctx, subtitle, font);
+    if (subtitleRightPos >= TEXT_BOUNDARY_MAX) {
       errors.push("Subtitle is too long for the fixed Bizboard slot.");
     }
   }
@@ -160,24 +233,18 @@ export async function validateKakaoBizboardInputs(
   if (mainCopy) {
     ctx.font = `700 48px ${font}`;
     const mainCopyWidthPx = ctx.measureText(mainCopy).width;
-    if (mainCopyWidthPx < MAIN_COPY_MIN_W) {
+    // Go: titleRightPos <= textMinimumBoundary (294 + 46 = 340)
+    if (mainCopyWidthPx <= MAIN_COPY_MIN_W) {
       errors.push(
-        `Main copy is too short. It must be at least ${MAIN_COPY_MIN_W}px wide at 48pt.`,
+        `Main copy is too short. It must be wider than ${MAIN_COPY_MIN_W}px at 48pt.`,
       );
     }
-    if (mainCopyWidthPx > MAIN_COPY_MAX_W) {
+    // Go: titleRightPos >= textMaximumBoundary (587 + 46 = 633)
+    if (mainCopyWidthPx >= MAIN_COPY_MAX_W) {
       errors.push(
-        `Main copy is too long. It must not exceed ${MAIN_COPY_MAX_W}px wide at 48pt.`,
+        `Main copy is too long. It must be narrower than ${MAIN_COPY_MAX_W}px at 48pt.`,
       );
     }
-    if (mainCopyWidthPx > LEFT_ZONE_W) {
-      errors.push("Main copy overlaps the Bizboard thumbnail zone.");
-    }
-  }
-
-  ctx.font = `22px ${font}`;
-  if (ctx.measureText(disclosure).width > LEFT_ZONE_W - 34) {
-    errors.push("Moloco disclosure text is too long for the fixed Bizboard slot.");
   }
 
   return {
@@ -193,7 +260,7 @@ export async function validateKakaoBizboardInputs(
   };
 }
 
-export async function composeKakaoBizboard(
+export async function composeKakaoBizboardCanvas(
   p: KakaoCompositeParams,
 ): Promise<Blob> {
   const validation = await validateKakaoBizboardInputs(p);
@@ -211,52 +278,79 @@ export async function composeKakaoBizboard(
   const subtitle = normalizeCopy(p.subtitle);
   const mainCopy = normalizeCopy(p.mainCopy);
   const disclosure = buildKakaoDisclosure(p.gacha);
+  const templateMask = await loadTemplateMaskData();
 
+  // Base template: match the company Kakao Bizboard shell exactly.
+  try {
+    const template = await loadImage(TEMPLATE_URL);
+    ctx.drawImage(template, 0, 0, W, H);
+  } catch (error) {
+    console.warn("Failed to load Kakao Bizboard template, falling back to transparent canvas.", error);
+  }
+
+  // Thumbnail: company Go implementation uses the template alpha mask, not a simple rounded clip.
   const thumb = await loadImage(p.thumbnailUrl);
-  const { sx, sy, sw, sh } = centerCropParams(
-    thumb.naturalWidth,
-    thumb.naturalHeight,
-    THUMB_W,
-    THUMB_H,
-  );
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(THUMB_X, THUMB_Y, THUMB_W, THUMB_H);
-  ctx.clip();
-  ctx.drawImage(thumb, sx, sy, sw, sh, THUMB_X, THUMB_Y, THUMB_W, THUMB_H);
-  ctx.restore();
+  const { sx, sy, sw, sh } = coverCropParams(thumb.naturalWidth, thumb.naturalHeight, THUMB_W, THUMB_H);
+  const thumbCanvas = document.createElement("canvas");
+  thumbCanvas.width = THUMB_W;
+  thumbCanvas.height = THUMB_H;
+  const thumbCtx = thumbCanvas.getContext("2d");
+  if (!thumbCtx) {
+    throw new Error("Could not create Kakao thumbnail context");
+  }
+  thumbCtx.drawImage(thumb, sx, sy, sw, sh, 0, 0, THUMB_W, THUMB_H);
+  const thumbData = thumbCtx.getImageData(0, 0, THUMB_W, THUMB_H);
+  const thumbPixels = thumbData.data;
+  const outData = ctx.getImageData(THUMB_X, THUMB_Y, THUMB_W, THUMB_H);
+  const outPixels = outData.data;
+  const maskPixels = templateMask.data;
+
+  for (let y = 0; y < THUMB_H; y += 1) {
+    for (let x = 0; x < THUMB_W; x += 1) {
+      const localIndex = (y * THUMB_W + x) * 4;
+      const globalIndex = ((THUMB_Y + y) * W + (THUMB_X + x)) * 4;
+      const alpha = maskPixels[globalIndex + 3] / 255;
+
+      outPixels[localIndex] = Math.round(thumbPixels[localIndex] * alpha);
+      outPixels[localIndex + 1] = Math.round(thumbPixels[localIndex + 1] * alpha);
+      outPixels[localIndex + 2] = Math.round(thumbPixels[localIndex + 2] * alpha);
+      outPixels[localIndex + 3] = Math.round(255 * alpha);
+    }
+  }
+
+  ctx.putImageData(outData, THUMB_X, THUMB_Y);
 
   if (p.appIconUrl) {
     const icon = await loadImage(p.appIconUrl);
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(APP_ICON_X, APP_ICON_Y, APP_ICON_SZ, APP_ICON_SZ, 8);
-    ctx.clip();
     ctx.drawImage(icon, APP_ICON_X, APP_ICON_Y, APP_ICON_SZ, APP_ICON_SZ);
-    ctx.restore();
   }
 
-  ctx.font = `26px ${font}`;
+  // Font: Metrics kerning (= fontKerning "normal") and no custom letter spacing,
+  // as required by Kakao bizboard font style guide.
+  ctx.fontKerning = "normal";
+  ctx.letterSpacing = "0px";
   ctx.fillStyle = "#777777";
-  ctx.fillText(subtitle, SUBTITLE_X, SUBTITLE_Y);
+
+  // Subtitle body — strip trailing ">" which the user typed as a placeholder for .
+  // Go: strings.Trim(subtitle, " ") + " " drawn at subtitleTextProps, then  drawn separately.
+  const subtitleBody = subtitle.trim() + " ";
+  ctx.font = `26px ${font}`;
+  ctx.fillText(subtitleBody, SUBTITLE_X, SUBTITLE_Y);
+
+  // Subtitle arrow glyph: Spoqa Han Sans Neo PUA  (custom chevron).
+  // Go: size=15.6, x = subtitleTextProps.XPos + subtitleTextWidth + leftPaddingForSubtitleEndingText(3)
+  //     y = subtitleTextProps.YPos(53) + yPosAdjustmentForSubtitleEndingText(22) = 75
+  const subtitleBodyWidth = ctx.measureText(subtitleBody).width;
+  ctx.font = `${SUBTITLE_ARROW_SIZE}px ${font}`;
+  ctx.fillText("", SUBTITLE_X + subtitleBodyWidth + SUBTITLE_ARROW_X_PAD, SUBTITLE_ARROW_Y);
 
   ctx.font = `700 48px ${font}`;
   ctx.fillStyle = "#4C4C4C";
-  ctx.fillText(mainCopy, SAFE_L, MAIN_COPY_Y);
+  ctx.fillText(mainCopy, MAIN_COPY_X, MAIN_COPY_Y);
 
-  ctx.fillStyle = "#AAAAAA";
-  ctx.beginPath();
-  ctx.roundRect(AD_PILL_X, AD_PILL_Y, 28, 20, 4);
-  ctx.fill();
-  ctx.font = `700 11px ${font}`;
-  ctx.fillStyle = "#FFFFFF";
-  ctx.textAlign = "center";
-  ctx.fillText("AD", AD_PILL_X + 14, AD_PILL_Y + 14);
-  ctx.textAlign = "left";
-
-  ctx.font = `22px ${font}`;
+  ctx.font = `24px ${font}`;
   ctx.fillStyle = "#777777";
-  ctx.fillText(disclosure, AD_COPY_X, AD_COPY_Y);
+  ctx.fillText(disclosure, NOTICE_X, NOTICE_Y);
 
   return new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
@@ -264,4 +358,48 @@ export async function composeKakaoBizboard(
       "image/png",
     ),
   );
+}
+
+async function resolveUrlForBackend(url: string | null): Promise<string | null> {
+  if (!url) return null;
+  if (!url.startsWith("blob:")) return url;
+  const blob = await fetch(url).then((r) => r.blob());
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function composeKakaoBizboardViaAPI(p: KakaoCompositeParams): Promise<Blob> {
+  const [thumbnailUrl, appIconUrl] = await Promise.all([
+    resolveUrlForBackend(p.thumbnailUrl),
+    resolveUrlForBackend(p.appIconUrl),
+  ]);
+  const res = await fetch("/api/incept/api/v1/kakao/compose-bizboard", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      thumbnailUrl,
+      appIconUrl,
+      subtitle: p.subtitle,
+      mainCopy: p.mainCopy,
+      gacha: p.gacha,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Kakao compose API error: ${res.status} ${await res.text()}`);
+  }
+  return res.blob();
+}
+
+export async function composeKakaoBizboard(
+  p: KakaoCompositeParams,
+): Promise<Blob> {
+  const validation = await validateKakaoBizboardInputs(p);
+  if (validation.errors.length) {
+    throw new Error(validation.errors[0]);
+  }
+  return composeKakaoBizboardViaAPI(p);
 }

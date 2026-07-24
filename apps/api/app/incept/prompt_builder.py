@@ -212,7 +212,11 @@ def build_theme_create_style_modify_prompt(
     *,
     style_name: str,
     style_details: str,
+    prompt_template: str = "",
 ) -> str:
+    normalized_prompt = prompt_template.strip()
+    if normalized_prompt.startswith("You are ") or "Instructions:" in normalized_prompt:
+        return normalized_prompt
     return f"""You are an expert AI image modifier. Your task is to transform the artistic style of [Image 1] while strictly preserving its original structural layout, camera perspective, and object composition.
 
 Instructions:
@@ -225,8 +229,8 @@ Instructions:
 Negative Constraint: Do not alter the baseline composition, pose of people, or layout of the scene."""
 
 
-def build_theme_create_style_transfer_prompt() -> str:
-    return """You are an advanced AI creative director executing a zero-loss style transfer. You are provided with two images: [Image 1] (the core content layout) and [Image 2] (the visual style inspiration).
+def build_theme_create_style_transfer_prompt(*, prompt_template: str = "") -> str:
+    base_prompt = """You are an advanced AI creative director executing a zero-loss style transfer. You are provided with two images: [Image 1] (the core content layout) and [Image 2] (the visual style inspiration).
 
 Your goal is to re-render [Image 1] so that it looks exactly as if it was created in the visual universe of [Image 2].
 
@@ -236,93 +240,183 @@ Strict Execution Instructions:
 3. **Seamless Synthesis:** Map the extracted style from [Image 2] directly onto the structure of [Image 1]. The output must look cohesive, intentional, and high-fidelity, without any artifacts or blurry borders.
 
 Negative Constraint: Do not copy the physical subjects, characters, or text content from [Image 2] into the final image. Only copy the *how*, not the *what*."""
+    normalized_prompt = prompt_template.strip()
+    if not normalized_prompt:
+        return base_prompt
+    if normalized_prompt.startswith("You are ") and "Strict Execution Instructions:" in normalized_prompt:
+        return normalized_prompt
+    return f"{base_prompt}\n\nAdditional Direction:\n{normalized_prompt}"
 
 
-def build_theme_create_asset_text_replace_prompt(
+def build_image_remediation_prompt(
     *,
-    logo_position: str,
-    element_position: str,
-    old_text: str,
-    new_text: str,
-    font_style: str,
+    analysis_summary: str = "",
+    user_note: str = "",
+    aggressive_personality_recast: bool = False,
 ) -> str:
-    return f"""You are executing a precise UI/UX asset and text replacement task on [Image 1]. You are provided with asset images: [Image 2] (New Logo) and [Image 3] (New Button/Element).
+    standard_prompt = """You are an advanced commercial advertising image editing engine. Your only task is to remediate policy violations in the provided ad image while preserving the original advertising layout with near pixel-perfect fidelity.
 
-Perform the following localized modifications seamlessly, keeping all other untouched areas of [Image 1] identical:
+[HIGHEST PRIORITY: FULL CANVAS PRESERVATION]
+- Treat the input image as a locked advertisement layout, not as a scene to redesign.
+- The final output must preserve the COMPLETE original canvas composition: same framing, same camera angle, same edge boundaries, same text layout, same logo placement, same CTA placement, same headline placement, and the same visible top/bottom/left/right content.
+- You are strictly FORBIDDEN from cropping, zooming in, reframing, punching in on subjects, enlarging the main characters, or pushing any edge content outside the canvas.
+- If additional space is ever needed to support a compliant edit, extend or reconstruct the surrounding background subtly inside the same visual world. Do NOT solve the task by cutting off borders or enlarging the center.
 
-1. **Logo Replacement:**
-   - Locate the existing logo situated at the {logo_position} of [Image 1].
-   - Replace it entirely with the new logo provided in [Image 2].
-   - Utilize the alpha channel (transparency) of [Image 2] for a clean overlay. Scale and blend it naturally to match the local lighting and perspective.
+[LOCKED REGIONS THAT MUST REMAIN FULLY VISIBLE]
+- Preserve all marketing copy, headline text, subheadline text, CTA buttons, logos, dates, disclaimers, mascots, and background layout blocks unless a specific element is itself the policy violation.
+- Every existing text block and CTA must remain fully readable and fully inside the canvas.
+- The top title area, bottom footer area, left edge content, and right CTA area are protected layout zones. They must not be truncated, cropped, shifted off canvas, or reflowed into a new composition.
 
-2. **Element/Button Replacement:**
-   - Locate the interactive element/button at the {element_position} of [Image 1].
-   - Replace its visual asset with [Image 3], preserving the original button's interactive boundary and alignment.
+[LOCAL-ONLY EDITING RULE]
+- Only edit the violating regions.
+- Keep all non-violating areas unchanged in position, size, and visual hierarchy.
+- Do not redesign the ad. Do not convert the whole piece into a new poster. Do not simplify the layout. Do not remove valid text or valid branding.
 
-3. **Text Content Update:**
-   - Locate the text that reads "{old_text}" in [Image 1].
-   - Rewrite and precisely render this text to read exactly: "{new_text}".
-   - The typography should use a {font_style} font, with colors and sizes that harmoniously match the surrounding design.
+[MANDATORY REMEDIATION: IMPERSONATION & CELEBRITY IP ERADICATION]
+- If recognizable real-world public figures or athletes are present, fully replace only those person regions with generic fictional commercial sports characters.
+- Do NOT keep the original real-human likeness.
+- Do NOT just lightly retouch the face. Change the face, hairstyle, facial hair, jersey identity cues, body silhouette cues, and other recognizable traits enough to remove resemblance.
+- Replace official or iconic team styling, stripes, and famous jersey numbers with generic unbranded sportswear details.
+- Keep the replacement characters in the SAME pose footprint and SAME approximate occupied area as the originals so the ad layout stays intact.
 
-Ensure no artifacts, blurry edges, or misalignment occur at the boundaries of the replaced elements."""
+[MANDATORY REMEDIATION: TROPHY / IP REPLACEMENT]
+- If a protected or recognizable real-world trophy or copyrighted competition object is present, replace only that object with a generic original victory trophy.
+- Keep its approximate placement and scale so surrounding text and CTA layout are not disturbed.
+
+[MANDATORY REMEDIATION: ADULT CONTENT]
+- If any human or illustrated character shows excessive cleavage, intimate exposure, or sexually suggestive styling, redraw only the violating clothing/body area into modest, professional, fully covered attire.
+- Keep the person’s pose footprint and composition footprint stable.
+
+[MANDATORY REMEDIATION: DECEPTIVE UI]
+- Remove fake play buttons, fake close icons, fake system UI, or deceptive notification overlays only when they are present and violating.
+- Fill those removed regions seamlessly without disturbing nearby valid text or CTA areas.
+
+[OUTPUT STANDARD]
+- Output one final remediated ad image.
+- The finished image must look like the original ad survived compliance cleanup, not like a newly reimagined ad.
+- Preserve the original canvas size and aspect ratio of the uploaded image.
+- The most important success condition is this: no cropped headline, no cropped CTA, no cut-off logo, no cut-off border content, and no missing legal or footer text caused by the remediation."""
+
+    aggressive_personality_prompt = """You are an advanced commercial advertising image editing engine. Your only task is to remediate policy violations in the provided ad image while preserving the original advertising layout and full canvas integrity.
+
+[HIGHEST PRIORITY: FULL CANVAS PRESERVATION]
+- Treat the input image as a locked advertisement layout, not as a scene to redesign.
+- Preserve the COMPLETE original canvas composition: same framing, same camera angle, same edge boundaries, same text layout, same logo placement, same CTA placement, same headline placement, and the same visible top/bottom/left/right content.
+- You are strictly FORBIDDEN from cropping, zooming in, reframing, punching in on subjects, enlarging the main characters, or pushing any edge content outside the canvas.
+- If additional space is ever needed to support a compliant edit, extend or reconstruct the surrounding background subtly inside the same visual world. Do NOT solve the task by cutting off borders or enlarging the center.
+
+[LOCKED REGIONS THAT MUST REMAIN FULLY VISIBLE]
+- Preserve all marketing copy, headline text, subheadline text, CTA buttons, logos, dates, disclaimers, mascots, and background layout blocks unless a specific element is itself the policy violation.
+- Every existing text block and CTA must remain fully readable and fully inside the canvas.
+- The top title area, bottom footer area, left edge content, and right CTA area are protected layout zones. They must not be truncated, cropped, shifted off canvas, or reflowed into a new composition.
+
+[AGGRESSIVE PERSONA RECAST RULE]
+- If recognizable real-world public figures, athletes, influencers, celebrities, or personality-rights risks are present, you MUST fully rebuild the entire human character region into generic fictional commercial characters.
+- Do NOT merely retouch the face. Do NOT preserve the original likeness. Do NOT keep the original facial identity.
+- You must change all identity-bearing cues together: face shape, eyes, nose, mouth, jawline, hairstyle, hairline, facial hair, skin detailing, body silhouette, shoulder line, pose-adjacent outline, jersey styling, jersey colors, jersey stripes, jersey logos, famous numbers, and other iconic markers.
+- If necessary, regenerate the full upper body or full visible body region of the violating person so the result no longer resembles the original celebrity at all.
+- The replacement person may keep the same general placement in the ad, but does NOT need to preserve the exact original face, hair, clothing details, or silhouette.
+- Prefer clearly synthetic, commercial, game-like, or stylized sports characters over minimally edited realistic celebrity faces whenever needed to eliminate resemblance.
+
+[LOCALIZE DAMAGE, NOT LIKENESS]
+- Preserve the advertisement layout, background, copy, CTA, logo, and non-violating supporting elements.
+- But for violating celebrity/personality-rights regions, prioritize full de-identification over minimal edit distance.
+- It is acceptable to replace the entire person region and adjacent identity cues if that is required for true compliance.
+- Do not leave behind recognizable remnants of the original person in the face, jersey, hair, body shape, or iconic styling.
+
+[MANDATORY REMEDIATION: TROPHY / IP REPLACEMENT]
+- If a protected or recognizable real-world trophy or copyrighted competition object is present, replace only that object with a generic original victory trophy.
+- Keep its approximate placement and scale so surrounding text and CTA layout are not disturbed.
+
+[MANDATORY REMEDIATION: ADULT CONTENT]
+- If any human or illustrated character shows excessive cleavage, intimate exposure, or sexually suggestive styling, redraw only the violating clothing/body area into modest, professional, fully covered attire.
+- Keep the person’s composition footprint stable unless a larger character-region rebuild is required for de-identification.
+
+[MANDATORY REMEDIATION: DECEPTIVE UI]
+- Remove fake play buttons, fake close icons, fake system UI, or deceptive notification overlays only when they are present and violating.
+- Fill those removed regions seamlessly without disturbing nearby valid text or CTA areas.
+
+[OUTPUT STANDARD]
+- Output one final remediated ad image.
+- The finished image must look like the original ad survived compliance cleanup, not like a newly reimagined ad.
+- Preserve the original canvas size and aspect ratio of the uploaded image.
+- The most important success condition is this: no cropped headline, no cropped CTA, no cut-off logo, no cut-off border content, and no missing legal or footer text caused by the remediation.
+- The second most important success condition is this: no recognizable resemblance to any real-world public figure remains."""
+
+    sections = [aggressive_personality_prompt if aggressive_personality_recast else standard_prompt]
+
+    normalized_analysis = analysis_summary.strip()
+    if normalized_analysis:
+        sections.append(f"""[DETECTED POLICY VIOLATIONS TO FIX]
+- The following structured remediation instructions were produced by the compliance analysis model. Follow them exactly and prioritize them over guesses:
+{normalized_analysis}""")
+
+    normalized_user_note = user_note.strip()
+    if normalized_user_note:
+        sections.append(f"""[USER MICRO-ADJUSTMENTS]
+- In addition to the automatic compliance remediation above, follow this specific user instruction (provided it does not violate policy): {normalized_user_note}""")
+
+    return "\n\n".join(sections)
 
 
-_RESIZE_MICRO_BANNER_SIZES = {"320x50"}
-_RESIZE_LARGE_BANNER_SIZES = {"1200x222", "640x100"}
+_RESIZE_MICRO_BANNER_SIZES = {"320x50", "640x100"}
+_RESIZE_LARGE_BANNER_SIZES = {"1200x222"}
 _RESIZE_ULTRA_NARROW_LEADERBOARD_SIZES = {"728x90"}
 _RESIZE_LANDSCAPE_SIZES = {"1200x628", "1200x600", "640x360"}
 _RESIZE_PORTRAIT_SQUARE_SIZES = {"720x720", "300x250", "480x480", "320x480", "360x640"}
 
-_GEMINI_MICRO_BANNER_RESIZE_TEMPLATE = """You are an expert production designer specializing in high-performance responsive micro-banners. Adapt the provided input image into an ultra-thin, wide banner format with the exact resolution of {target_size} (e.g., 320x50).
+_GEMINI_MICRO_BANNER_RESIZE_TEMPLATE = """You are an expert production designer specializing in high-performance responsive micro-banners. Adapt the provided input image into an ultra-thin, wide banner format with the exact resolution of {target_size} (e.g., 320x50, 640x100).
 
-CRITICAL RESPONSIVE MICRO-LAYOUT CONSTRAINTS:
-1. PRESERVE ALL ASSETS: Every original text element, logo, and the CTA/Text block must be preserved with 100% pixel-perfect fidelity. Do not alter fonts, colors, or content.
-2. AGGRESSIVE VISUAL SCALE: Scale up all main assets (Logo, CTA, Hero element) so they dominate the vertical space, occupying at least 80% of the banner's height.
-3. ADAPTIVE INWARD LAYOUT: Re-arrange the assets into three columns:
-   - Move/Place the brand LOGO to the FAR LEFT, with a small left padding.
-   - Move/Place the main HERO CHARACTER/IMAGE into the center.
-   - Move/Place the preserved CTA / Main text block on the CENTER-RIGHT, not on the far right edge.
-4. SAFE MARGIN MANDATE: You MUST implement a strict safety margin on the FAR RIGHT EDGE. The entire right text block, including all disclaimers, must be shifted INWARD (to the left) by approximately 10% of the canvas width. This ensures zero cropping of text."""
+CRITICAL RESPONSIVE LIQUID-LAYOUT CONSTRAINTS:
+1. PERFECT ASSET PRESERVATION: Every original textual layer, graphic logo, branding asset, and the CTA/Text block from the source image must be preserved with 100% pixel-perfect fidelity. Do not alter fonts, colors, or language.
+2. SINGLE FLUID CANVAS (ANTI-ISOLATION): 
+   - The background across the entire banner must be ONE single, continuous, undivided, and un-interrupted organic environment cloned directly from the source image (e.g., continuous grass, textures, and lighting). 
+   - You are strictly FORBIDDEN from creating any visual vertical columns, rectangular panel partitions, vertical division lines, or tone-breaking color blocks. There must be ZERO geometric separation or isolation between the assets and the background.
+3. SEAMLESS FLOATING ASSETS: 
+   - The brand logo and the CTA text block must FLOAT directly on top of the native background pixels. 
+   - The background textures must flow seamlessly and smoothly underneath and between the Logo, the Center Subject, and the CTA with perfect color and gradient continuity, blending them into one natural scene.
+4. AGGRESSIVE VISUAL SCALE: Scale up all main assets (Logo, CTA, and the core Subject/Hero element) so they dominate the vertical space, occupying at least 80% of the banner's height.
+5. HORIZONTAL POSITIONING LOGIC:
+   - Position the single brand LOGO on the leftmost side, drifting slightly inward from the edge.
+   - Position the main SUBJECT MATTER / HERO IMAGE perfectly in the horizontal center.
+   - Position the preserved CTA / Main text block on the right side, shifted INWARD (to the left) by approximately 15% of the canvas width to maintain a strict, clear empty safety margin on the far-right edge."""
 
-_GEMINI_LARGE_BANNER_RESIZE_TEMPLATE = """You are an expert senior production designer. Adapt the provided input image into a large, wide banner format with the exact resolution of {target_size} (e.g., 1200x222). This version must strictly eliminate the duplicate branding bug seen in image_13.png.
+_GEMINI_LARGE_BANNER_RESIZE_TEMPLATE = """You are an expert production designer. Adapt the provided input image into a large, wide banner format with the exact resolution of {target_size}.
 
-CRITICAL LARGE BANNER LAYOUT & SINGLE-LOGO CONSTRAINTS:
+CRITICAL LARGE BANNER LAYOUT CONSTRAINTS:
+1. PERFECT PRESERVATION (1:1): Preserve all existing assets (Logo, Text, CTA block) with identical fonts, colors, and content. The background must strictly use and extend the exact native textures, lighting, and colors of the source image with zero distortion or thematic changes. Do NOT scale assets up to fill empty space; maintain their clean, relative scale.
+2. ABSOLUTE NO RECTANGULAR BOXES & SINGLE LOGO MANDATE:
+   - You are strictly FORBIDDEN from drawing or rendering any rectangular background panels, solid color containers, or sharp visual bounding frames behind the Logo on the left. The background across the entire banner must be ONE single, organic, continuous un-interrupted scene.
+   - Render exactly ONE single instance of the brand LOGO stack on the entire canvas, positioned on the far-left. Any duplicate or secondary logos emerging in the background artwork must be completely removed and blended over using native background elements.
+3. ADAPTIVE THREE-COLUMN LAYOUT: Implement a balanced three-column layout.
+   - Brand LOGO on the FAR LEFT.
+   - Core SUBJECT MATTER / HERO IMAGE in the CENTER.
+   - Preserved CTA / Main text block on the CENTER-RIGHT.
+4. SAFE MARGIN MANDATE: Shift the entire right-hand CTA/text block INWARD (to the left) by at least 10% of the canvas width, leaving a clear empty safety margin on the far right edge. This is critical to ensure zero cropping of any characters."""
 
-1. ABSOLUTE SINGLE LOGO MANDATE (ANTI-DUPLICATION):
-   - You are strictly FORBIDDEN from rendering more than ONE instance of the brand LOGO on the entire banner. Double logos or cloned text headers (as seen in image_13.png) are a critical failure.
-   - The ONLY permitted logo must be the one placed in the designated Far-Left zone.
-   - If any part of the original logo, title text, or brand badge appears a second time in the background battlefield scene, you must completely erase, paint over, and content-aware fill it using the native background textures (ambient smoke, ancient roofs, or sky).
-
-2. ADAPTIVE THREE-COLUMN LAYOUT:
-   - FAR LEFT Column: Render the single, complete brand LOGO stack cleanly. You may use a native framing panel, color block, or border accent derived directly from the source image style to isolate this logo section professionally.
-   - CENTER Column: Display the central Hero character. Ensure he is naturally integrated into the cinematic scene without hard rectangular borders.
-   - CENTER-RIGHT Column: Render the entire CTA / Main text block (including header tags and subtitles) using identical fonts and colors.
-
-3. SAFE MARGIN MANDATE:
-   - Shift the entire right-hand CTA/text column inward to the left, leaving a strict 10% empty safety margin on the far right edge of the canvas. Every character, descriptor, and disclaimer line must be whole, legible, and completely safe from cropping."""
-
-_GEMINI_OVERSAMPLED_LEADERBOARD_RESIZE_TEMPLATE = """You are a precision technical production artist and layout designer. Your only task is to generate a 2-row vertical split-screen layout sheet containing TWO completely separate, independent 728x90 cinematic web banners stacked vertically inside a single 728x180 canvas.
+_GEMINI_OVERSAMPLED_LEADERBOARD_RESIZE_TEMPLATE = """You are a precision technical production artist and layout designer. Your only task is to generate a 2-row vertical split-screen layout sheet containing TWO completely separate, independent 728x90 cinematic web banners stacked vertically inside a single 728x180 canvas. 
 
 The image must be perfectly divided into a Top Row (Y-axis 0px to 90px) and a Bottom Row (Y-axis 90px to 180px). Each row must act as an independent standalone 728x90 banner asset with zero asset leakage between them.
 
-CRITICAL DUAL-ROW INDEPENDENT LAYOUT CONSTRAINTS:
+CRITICAL DUAL-ROW NO-BORDER LAYOUT CONSTRAINTS:
 
 1. TOP ROW BANNER COMPOSITION (Y-AXIS 0px - 90px):
    - Inside this exact top half, render a complete, self-contained 728x90 banner layout.
-   - Left Logo Panel (NATIVE COLOR INHERITANCE): Identify the primary brand logo or title graphic from the source image. Render this complete logo asset inside a clean vertical panel on the leftmost edge of this row. CRITICAL COLOR RULE: The background color and texture of this panel MUST 100% inherit and replicate the exact original background color, style, and theme surrounding the logo in the source image (whether it is dark, bright, yellow, blue, or textured). Do not alter, invert, or invent a new background color for this panel. Keep the native branding color scheme perfectly intact.
-   - Center Main Subject: Identify the primary central character, figure, or focal subject from the source image. Shrink it heavily until it occupies a maximum of 40% of this row's vertical height (roughly 35 pixels tall). Ensure its entire top boundary (hair/hat/helmet), full face, and eyes are 100% visible and perfectly centered vertically within this top row.
-   - Right CTA Text: Identify the call-to-action (CTA) text block, promotional text, and subtext lines from the right side of the source image. Render this complete multi-layer text stack strictly within the rightmost 25% zone of this row. Scale it down to fit neatly within the 90px row height without any clipping. Maintain a strict 10% empty safety margin from the extreme right edge.
+   - **Left Logo Zone (SEAMLESS FLOATING & INTEGRATION):** Identify the primary brand logo asset from the source image. Render this complete logo asset strictly on the leftmost edge of this row. **CRITICAL NO-BORDER RULE:** Do NOT create any artificial rectangular panels, vertical colored blocks, boxes, or hard graphic shapes behind the logo. Absolutely NO dark blue or mismatched color blocks are allowed. The logo typography MUST float transparently and naturally directly on top of the organic background scenery (smoke, sky, colors) extended from the source image.
+   - **Center Main Subject:** Identify the primary central subject from the source image. Shrink it heavily until it occupies a maximum of 40% of this row's vertical height (roughly 35 pixels tall). Ensure its entire top boundary (hair/hat/helmet), full face, and eyes are 100% visible and perfectly centered vertically within this top row.
+   - **Right CTA Text Zone (SEAMLESS FLOATING):** Identify the CTA text block and promotional subtext lines from the right side of the source image. Render this complete text stack strictly within the rightmost 25% zone of this row, force-shrunken to fit without clipping. **CRITICAL:** The text must float organically on the continuous background scenery with zero hard shapes or boxes behind it. Maintain a strict 10% empty safety margin from the extreme right edge.
 
 2. BOTTOM ROW BANNER COMPOSITION (Y-AXIS 90px - 180px):
    - Inside this exact bottom half, render a duplicate, independent 728x90 banner layout following the exact same structural layout rules as the Top Row.
-   - Left Logo Panel (NATIVE COLOR INHERITANCE): Re-render the complete compressed brand logo inside the leftmost edge panel of this bottom row. The background color and texture MUST be an exact duplicate of the top row's panel, faithfully inheriting the native color scheme of the source image's logo area.
-   - Center Main Subject: Re-render the primary central subject, shrunken down to 40% of this row's height, with the entire head, face, and eyes 100% visible and centered vertically within Y=90px to Y=180px.
-   - Right CTA Text: Re-render the complete compressed multi-layer right-side text stack strictly within the rightmost 25% zone of this bottom row, with a 10% empty safety margin from the extreme right edge.
+   - **Left Logo Zone (SEAMLESS FLOATING & INTEGRATION):** Re-render the complete compressed brand logo inside the leftmost edge zone of this bottom row, floating seamlessly on the continuous background with NO hard borders, NO panel graphics, and NO artificial color blocks.
+   - **Center Main Subject:** Re-render the primary central subject, shrunken down to 40% of this row's height, with the entire head, face, and eyes 100% visible and centered vertically within Y=90px to Y=180px.
+   - **Right CTA Text Zone:** Re-render the complete compressed text stack strictly within the rightmost 25% zone of this bottom row, floating seamlessly with a 10% empty safety margin from the extreme right edge.
 
-3. PERFECT COMPONENT FLOW & SEPARATION:
-   - For BOTH rows independently, the left logo panel, the 40% miniature central subject, and the right CTA text must form three separate horizontal islands.
-   - The remaining gaps inside each row must be seamlessly filled with connecting environment textures, smoke, or backgrounds from the source image.
-   - Ensure the transition line at Y=90px is clean and straight, acting as a perfect boundary between the Top Row banner and the Bottom Row banner."""
+3. CONTINUOUS BACKGROUND FLOW (ZERO DIVIDER LINES):
+   - For BOTH rows independently, the left logo, the 40% miniature central subject, and the right CTA text must be positioned horizontally without any graphic separations.
+   - **STRICTLY FORBID any hard vertical lines, geometric divider borders, color block frames, or rectangular masks between the elements.** - The extended background environment, smoke, gradients, and textures from the source image must flow completely fluidly and unobstructed from the far-left edge to the far-right edge, acting as a single continuous panoramic canvas.
+   - Ensure the horizontal dividing line at Y=90px remains clean and straight as the only sharp boundary between the Top and Bottom banners.
+   - ABSOLUTE NO-ANNOTATION RULE: Do NOT render any technical annotations, measurement labels, dimension text (such as '10px', '9px', '90px'), redlines, arrows, or calibration numbers anywhere on the canvas. All instructions are strictly for layout calculation and must remain completely invisible in the final graphic."""
 
 _GEMINI_LANDSCAPE_RESIZE_TEMPLATE = """You are an expert production designer. Adapt the provided input image into a Landscape format with the exact resolution of {target_size}.
 
@@ -346,6 +440,13 @@ _GEMINI_RESIZE_NEGATIVE_PROMPT = (
     "unreadable disclaimers, text touching the right edge, single element filling "
     "entire canvas, overcrowded layout, double logos, duplicated branding, "
     "cloned text, two logos."
+)
+
+_GEMINI_LARGE_BANNER_NEGATIVE_PROMPT = (
+    "text boxes, background panels, container frames, solid color blocks, "
+    "bounding boxes, sharp border lines, multi-panel background, split screens, "
+    "picture-in-picture, duplicate logos, cloned branding, two logos, cut off "
+    "text, cropped head, missing text, deformed letters."
 )
 
 
@@ -379,7 +480,12 @@ def build_resize_prompt(
         )
     if user_note.strip():
         extras.append(f"Additional user instruction: {user_note.strip()}")
-    negative_prompt = (negative_prompt_override or "").strip() or _GEMINI_RESIZE_NEGATIVE_PROMPT
+    default_negative_prompt = (
+        _GEMINI_LARGE_BANNER_NEGATIVE_PROMPT
+        if target_size in (_RESIZE_MICRO_BANNER_SIZES | _RESIZE_LARGE_BANNER_SIZES)
+        else _GEMINI_RESIZE_NEGATIVE_PROMPT
+    )
+    negative_prompt = (negative_prompt_override or "").strip() or default_negative_prompt
     extras.append(f"Negative Prompt: {negative_prompt}")
 
     if extras:

@@ -1,16 +1,32 @@
-﻿import os
+﻿import logging
+import os
 
 from fastapi import Header, HTTPException, status
 
 from app.incept.config import get_settings
 from app.incept.models import Role, User
 
+logger = logging.getLogger(__name__)
 
 ROLE_RANK = {
     Role.user: 1,
     Role.manager: 2,
     Role.admin: 3,
 }
+
+_bq_service = None
+
+
+def _get_bq_service():
+    global _bq_service
+    if _bq_service is not None:
+        return _bq_service
+    try:
+        from app.services.bq_access import BQAccessService
+        _bq_service = BQAccessService()
+    except Exception:
+        pass
+    return _bq_service
 
 
 def _strip_google_identity_prefix(value: str) -> str:
@@ -25,10 +41,25 @@ def _name_from_email(email: str) -> str:
 def _role_for_email(email: str) -> Role:
     settings = get_settings()
     normalized = email.lower()
+
+    # Env var overrides — always checked first (fast, works without BQ)
     if normalized in settings.admin_emails:
         return Role.admin
     if normalized in settings.manager_emails:
         return Role.manager
+
+    # BQ config.users table — authoritative source for cloud deployments
+    try:
+        svc = _get_bq_service()
+        if svc is not None:
+            record = svc.get_user_record(normalized)
+            if record:
+                bq_role = record.get("role", "")
+                if bq_role in (r.value for r in Role):
+                    return Role(bq_role)
+    except Exception:
+        logger.debug("BQ role lookup failed for %s, defaulting to user", normalized)
+
     return Role.user
 
 
@@ -97,7 +128,10 @@ def get_current_user(
         email = (x_user_email or "").lower()
         if email:
             _require_allowed_domain(email)
-        role = _role_for_email(email) if email else Role.user
+        if x_user_role in (r.value for r in Role):
+            role = Role(x_user_role)
+        else:
+            role = _role_for_email(email) if email else Role.user
         return User(
             id=email or "service",
             name=_name_from_email(email) if email else "NBSpark Service",

@@ -1,0 +1,2748 @@
+openapi: 3.0.0
+info:
+  title: Store Intelligence.
+  description: ''
+  version: '1.0'
+servers:
+  - url: https://api.sensortower.com
+security:
+  - auth_token: []
+paths:
+  /v1/ios/featured/today/stories:
+    get:
+      tags:
+        - 'FEATURED: Featured Today'
+      description: |
+        <p>Retrieve featured today story metadata, such as story title, label, style, and position, as well as the story's featured apps and relevant app metadata.</p> <p> <strong>Note:</strong> Non-App Performance Insights users are limited the the last 3 days of featured today stories. App Performance Insights users will be able to retrieve all-time featured today stories, including <strong>tomorrow's</strong> stories.</p>
+      operationId: featured_today_stories
+      summary: Fetches featured today stories.
+      parameters:
+        - description: |-
+            Country code for the featured today stories,
+            <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: country
+          example: US
+          schema:
+            type: string
+        - description: 'Start Date, `YYYY-MM-DD` (defaults to 3 days ago)'
+          in: query
+          name: start_date
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` (defaults to today)'
+          in: query
+          name: end_date
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/ios/featured/apps:
+    get:
+      tags:
+        - 'FEATURED: Featured Apps and Games'
+      description: |
+        <p>Retrieve apps featured on the App Store&#39;s Apps &amp; Games pages.</p> <p><strong>Note:</strong> Non-App Performance Insights users are limited to the last 3 days of data. App Performance Insights users will be able to retrieve all-time data.</p>
+      operationId: featured_apps
+      summary: Fetches featured apps and games.
+      parameters:
+        - description: |-
+            Category ID,
+            <a target='_blank' href='/api/docs/static/featured_apps_category_ids.json'>Category IDs</a>
+          in: query
+          name: category
+          required: true
+          example: '6020'
+          schema:
+            type: string
+        - description: |-
+            Country code,
+            <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: country
+          example: FR
+          schema:
+            default: US
+            type: string
+        - description: 'Start Date, `YYYY-MM-DD` (defaults to 3 days ago)'
+          in: query
+          name: start_date
+          example: '2021-10-01'
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` (defaults to today)'
+          in: query
+          name: end_date
+          example: '2021-10-01'
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          description: '<strong>Invalid authentication token.</strong> <br> Generate an API authentication token on your <a target="_blank" href="https://app.sensortower.com/users/edit/api-settings">account profile (API Settings tab)</a> and ensure that your organization has access to this product. <br> Please contact the Sensor Tower team for more information.'
+          content:
+            application/json:
+              schema:
+                properties:
+                  error:
+                    type: string
+                    example: Invalid authentication token.
+                required:
+                  - error
+                type: object
+        '403':
+          description: '<strong>Forbidden.</strong> <br> Your API token is not valid. <br> If you lost your API token you can generate a new one on your <a target="_blank" href="https://app.sensortower.com/users/edit/api-settings">account profile (API Settings tab)</a> or contact the Sensor Tower team for more information.'
+          content:
+            application/json:
+              schema:
+                properties:
+                  error:
+                    type: string
+                    example: Your API token is not authorized.
+                required:
+                  - error
+                type: object
+        '422':
+          description: <strong>Invalid Query Parameter.</strong> <br> Please check that all required params are present and valid.
+          content:
+            application/json:
+              schema:
+                properties:
+                  errors:
+                    items:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                          example: 'Required parameter: name is missing'
+                      required:
+                        - title
+                    type: array
+                required:
+                  - errors
+                type: object
+  '/v1/{os}/featured/creatives':
+    get:
+      tags:
+        - 'FEATURED: Featured App Rankings'
+      description: |
+        Retrieve the featured creatives and their positions within the App and Google Play store over time. <br> <strong>Note:</strong> Some Feature Types are specific to the iOS App Store.
+      operationId: featured_creatives
+      summary: Fetches featured creatives details of a particular app.
+      parameters:
+        - description: Operating System
+          in: path
+          name: os
+          required: true
+          schema:
+            default: ios
+            enum:
+              - ios
+              - android
+            type: string
+        - description: ID of App
+          in: query
+          name: app_id
+          required: true
+          example: '479516143'
+          schema:
+            type: string
+        - description: |-
+            Countries to return results for, separated by commas
+            <br>
+            <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: countries
+          explode: false
+          example:
+            - US
+          schema:
+            type: array
+            items:
+              default: ''
+              type: string
+        - description: |-
+            Types to return results for, separated by commas,
+            <a target='_blank' href='/api/docs/static/featured_rankings_types.json'>Types</a>
+          in: query
+          name: types
+          explode: false
+          schema:
+            type: array
+            items:
+              default: ''
+              type: string
+        - description: 'Start Date, `YYYY-MM-DD` (defaults to 30 days ago)'
+          in: query
+          name: start_date
+          example: '2021-02-01'
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` (defaults to today)'
+          in: query
+          name: end_date
+          example: '2021-02-02'
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  features:
+                    type: array
+                    items:
+                      $ref: '#/paths/~1v1~1%7Bos%7D~1featured~1creatives/get/responses/200/content/application~1json/schema/components/schemas/FeaturedCreative'
+                components:
+                  schemas:
+                    FeaturedCreative:
+                      type: object
+                      properties:
+                        country_name:
+                          type: string
+                          example: US
+                        country:
+                          type: string
+                          example: US
+                        category:
+                          oneOf:
+                            - type: integer
+                            - type: string
+                              description: The App or Google Play Store category that the specific feature was shown in
+                          example: 11
+                        type:
+                          type: string
+                          example: story_list
+                        path:
+                          type: array
+                          items:
+                            type: string
+                          description: The name of the specific feature section and name of the specific feature list/creative
+                          example:
+                            - Today
+                            - Top Games Right Now
+                        creatives:
+                          type: array
+                          items:
+                            type: string
+                            description: The url of the feature creative
+                          example: []
+                        first_seen_at:
+                          type: string
+                          example: null
+                        positions:
+                          type: array
+                          items:
+                            type: array
+                            items:
+                              oneOf:
+                                - type: string
+                                  description: The date of the specific feature
+                                - type: array
+                                  items:
+                                    type: integer
+                                    description: The ranking or position of the target app for the given feature type and date
+                            example:
+                              - '2021-10-11'
+                              - - 21
+                        store_positions:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              date:
+                                type: string
+                                example: '2021-10-11'
+                                description: The date of the specific feature
+                              app_position:
+                                type: integer
+                                example: 21
+                                description: The ranking or position of the target app for the given feature type and date
+                              section_position:
+                                type: integer
+                                description: The position in which the specific feature type is located on the App or Google Play Store on the given date. An indicator of how far a user must scroll before reaching the feature list
+                                example: 2
+                        downloads:
+                          type: integer
+                          description: The number of total downloads attributed to the specific feature for the selected time period
+                          example: 32
+                        downloads_share:
+                          type: number
+                          format: float
+                          description: The percentage of total downloads from all featurings that are attributed to the specific feature
+                          example: 1.75
+                        feature_downloads:
+                          type: array
+                          items:
+                            type: array
+                            items:
+                              oneOf:
+                                - type: string
+                                  description: The date of the specific feature
+                                - type: integer
+                                  description: The number of downloads attributed to the specific feature for the given date
+                            example:
+                              - '2021-10-11'
+                              - 4
+                        occurrences:
+                          type: integer
+                          description: The number of times that the target app appeared in the specific feature during the selected time period
+                          example: 8
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  '/v1/{os}/featured/impacts':
+    get:
+      tags:
+        - 'FEATURED: Featured App Rankings'
+      description: |
+        Retrieve the occurrence and download-impact data for an apps featured in the App or Google Play Store. <br> <strong>Note:</strong> Some Feature Types are specific to the iOS App Store.
+      operationId: featured_impacts
+      summary: Fetches occurrence and download-impact data for an app.
+      parameters:
+        - description: Operating System
+          in: path
+          name: os
+          required: true
+          schema:
+            default: ios
+            enum:
+              - ios
+              - android
+            type: string
+        - description: ID of App
+          in: query
+          name: app_id
+          required: true
+          example: '479516143'
+          schema:
+            type: string
+        - description: |-
+            Countries to return results for, separated by commas
+            <br>
+            <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: countries
+          explode: false
+          schema:
+            type: array
+            items:
+              default: ''
+              type: string
+        - description: |-
+            Types to return results for, separated by commas,
+            <a target='_blank' href='/api/docs/static/featured_rankings_types.json'>Types</a>
+          in: query
+          name: types
+          explode: false
+          schema:
+            type: array
+            items:
+              default: ''
+              type: string
+        - description: Breakdown type for the featured today stories
+          in: query
+          name: breakdown
+          example: country
+          schema:
+            type: string
+            enum:
+              - country
+              - type
+        - description: 'Start Date, `YYYY-MM-DD` (defaults to 30 days ago)'
+          in: query
+          name: start_date
+          example: '2021-02-01'
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` (defaults to today)'
+          in: query
+          name: end_date
+          example: '2021-05-01'
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?aso_keyword_research:
+    get:
+      tags:
+        - 'APP STORE OPTIMIZATION: Keyword Research'
+      operationId: get ASOKwResearch
+      description: |
+        Retrieves the list of ranked apps for any keyword and provides metrics such as rank, traffic and keyword difficulty.
+
+        ## Usage
+        - **Required**:
+          - `keywords`
+          - `regions`
+          - `os`
+        - **Exactly one `bundle`**
+        - **Optional**:
+          - `devices` (iOS only)
+
+        ## ASO Keyword Research Bundle
+        - `aso_keyword_research` - Get metrics for a particular keyword.
+
+        ## Metrics in ASO Keyword Research Bundle
+        - `app_id` - The app ID of the ranked app for the keyword.
+        - `keyword_rank` - App's current position for this keyword in store search results.
+        - `keyword_traffic` - How often this keyword is searched. Higher scores mean more people search for it.
+        - `keyword_difficulty_score` - How hard it is to rank highly for this keyword. Higher scores mean tougher competition.
+        - `app_name` - The name of the app.
+        - `app_os` - The platform of the app.
+        - `publisher_id` - The publisher ID of the app.
+        - `publisher_name` - The publisher name of the app.
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetch detailed summary of a particular keyword
+      parameters:
+        - description: The bundle to retrieve data for
+          in: query
+          name: bundle
+          required: true
+          example: aso_keyword_research
+          schema:
+            type: string
+            enum:
+              - aso_keyword_research
+        - description: The platform to filter by.
+          in: query
+          name: os
+          required: true
+          example: ios
+          schema:
+            type: string
+            enum:
+              - ios
+              - android
+        - description: A single keyword to research
+          in: query
+          name: keywords
+          required: true
+          schema:
+            type: string
+          example: social
+        - description: 'A single region code, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Region Codes</a>'
+          in: query
+          name: regions
+          required: true
+          schema:
+            type: string
+          example: US
+        - description: The devices to filter by (iOS only). (Default - `iphone`)
+          in: query
+          name: devices
+          required: false
+          schema:
+            type: string
+            enum:
+              - iphone
+              - ipad
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        app_id:
+                          type: string
+                          format: app_id
+                          description: App ID
+                          example: com.facebook.katana
+                        keyword_rank:
+                          type: number
+                          description: Keyword rank
+                          example: 1
+                        keyword_traffic:
+                          type: number
+                          description: Keyword traffic
+                          example: 10
+                        keyword_difficulty_score:
+                          type: number
+                          description: Difficulty score
+                          example: 5
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                top_app_ids_example:
+                  summary: Top App IDs for "facebook" keyword
+                  value:
+                    data:
+                      - app_id: com.facebook.katana
+                        app_name: Facebook
+                        app_os: android
+                        publisher_id: 'Meta+Platforms,+Inc.'
+                        publisher_name: 'Meta Platforms, Inc.'
+                        keyword_traffic: 3
+                        keyword_rank: 1
+                        keyword_difficulty_score: 7
+                      - app_id: com.facebook.lite
+                        app_name: Facebook Lite
+                        app_os: android
+                        publisher_id: 'Meta+Platforms,+Inc.'
+                        publisher_name: 'Meta Platforms, Inc.'
+                        keyword_traffic: 3
+                        keyword_rank: 2
+                        keyword_difficulty_score: 7
+                      - app_id: com.facebook.orca
+                        app_name: Messenger
+                        app_os: android
+                        publisher_id: 'Meta+Platforms,+Inc.'
+                        publisher_name: 'Meta+Platforms,+Inc.'
+                        keyword_traffic: 3
+                        keyword_rank: 3
+                        keyword_difficulty_score: 7
+                      - app_id: com.instagram.android
+                        app_name: Instagram
+                        app_os: android
+                        publisher_id: Instagram
+                        publisher_name: Instagram
+                        keyword_traffic: 3
+                        keyword_rank: 4
+                        keyword_difficulty_score: 7
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?aso_timeseries:
+    get:
+      tags:
+        - 'APP STORE OPTIMIZATION: Timeseries Metrics'
+      operationId: get ASOTimeseries
+      description: |
+        Get timeseries metrics for ASO Keywords.
+
+        ## Usage
+        - **Required**:
+          - `breakdown`
+          - `date_granularity`
+          - `start_date`
+          - `end_date`
+          - `keywords`
+          - `regions`
+          - `os`
+          - `app_ids`
+        - **Exactly one `metric`**
+        - **Optional**:
+          - `devices` (iOS only)
+          - `paid_search_state` (iOS only)
+          - `keyword_types`
+
+        ## Breakdowns
+
+        Comma-separated list of breakdowns.
+
+        ### Available breakdowns
+
+        - `date, keyword` - Timeseries data by keyword
+
+        ## Granularity
+        - `date_granularity`: How data is aggregated (day/week/month/quarter)
+
+        ## Metrics
+        - `keyword_rank` - Your app's current position for this keyword in store search results.
+        - `keyword_traffic` - How often this keyword is searched. Higher scores mean more people search for it.
+        - `est_keyword_downloads` - Estimated downloads driven by this keyword.
+        - `keyword_opportunity_score` - Opportunity score estimates how valuable a keyword is for this app, blending Traffic Score, Difficulty, your app's relevance (metadata/semantic matches), and whether the app already ranks. Higher scores indicate higher organic potential.
+        - `keyword_app_count` - Number of apps currently ranking for this keyword in the store.
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetch timeseries metrics for ASO Keywords
+      parameters:
+        - description: The metric to retrieve data for
+          in: query
+          name: metric
+          required: true
+          example: keyword_rank
+          schema:
+            type: string
+            enum:
+              - keyword_rank
+              - keyword_traffic
+              - est_keyword_downloads
+              - keyword_opportunity_score
+              - keyword_app_count
+        - description: 'How to break down the data (comma-separated for breakdown by multiple fields, e.g. `date, keyword`)'
+          in: query
+          name: breakdown
+          required: true
+          schema:
+            type: string
+            enum:
+              - 'date, keyword'
+          example: 'date, keyword'
+        - description: Date granularity for the data.
+          in: query
+          required: true
+          name: date_granularity
+          example: day
+          schema:
+            type: string
+            enum:
+              - day
+              - week
+              - month
+              - quarter
+        - description: Start date for the data range. `YYYY-MM-DD` format
+          in: query
+          name: start_date
+          required: true
+          example: '2025-01-01'
+          schema:
+            type: string
+            format: date
+        - description: End date for the data range. `YYYY-MM-DD` format
+          in: query
+          name: end_date
+          required: true
+          example: '2025-01-31'
+          schema:
+            type: string
+            format: date
+        - description: 'A single region code, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Region Codes</a>'
+          in: query
+          name: regions
+          required: true
+          schema:
+            type: string
+          example: US
+        - description: 'Array of keywords to filter by (comma-separated strings). **Maximum: 100 keywords per request.**'
+          in: query
+          name: keywords
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+          example:
+            - facebook
+            - messenger app
+        - description: Single App ID to retrieve data for. Use integer ID for iOS (e.g. `284882215`) or package name for Android (e.g. `com.facebook.katana`).
+          in: query
+          name: app_ids
+          required: true
+          schema:
+            type: string
+          example: '284882215'
+        - description: The platform to filter by.
+          in: query
+          name: os
+          required: true
+          example: ios
+          schema:
+            type: string
+            enum:
+              - ios
+              - android
+        - description: The devices to filter by (iOS only). (Default - `iphone`)
+          in: query
+          name: devices
+          required: false
+          schema:
+            type: string
+            enum:
+              - iphone
+              - ipad
+        - description: The paid search states to filter by (iOS only). (Default - include all states)
+          in: query
+          name: paid_search_state
+          required: false
+          example: []
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - safe
+                - exposed
+                - threatened
+                - critical
+            minItems: 0
+          style: form
+          explode: false
+        - description: The keyword types to filter by. (Default - include all types)
+          in: query
+          name: keyword_types
+          required: false
+          example: []
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - branded
+                - competitor
+                - generic
+            minItems: 0
+          style: form
+          explode: false
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                          description: Date of the data point (when breakdown includes date)
+                          example: '2025-01-01'
+                        keywords:
+                          type: array
+                          items:
+                            type: string
+                          minItems: 1
+                          description: Keyword
+                          example:
+                            - game
+                        keyword_rank:
+                          type: number
+                          description: Keyword rank
+                          example: 1
+                        keyword_traffic:
+                          type: number
+                          description: Keyword traffic
+                          example: 10
+                        est_keyword_downloads:
+                          type: number
+                          description: Estimated downloads driven by this keyword
+                          example: 15000
+                        keyword_opportunity_score:
+                          type: number
+                          description: Opportunity score
+                          example: 5
+                        keyword_app_count:
+                          type: number
+                          description: Number of apps currently ranking for this keyword
+                          example: 1000
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                keyword_rank_example:
+                  summary: Keyword Rank Timeseries example
+                  value:
+                    data:
+                      - keyword: facebook
+                        date: '2025-01-01'
+                        keyword_rank: 1
+                      - keyword: messenger app
+                        date: '2025-01-01'
+                        keyword_rank: 2
+                      - keyword: facebook
+                        date: '2025-01-02'
+                        keyword_rank: 1
+                      - keyword: messenger app
+                        date: '2025-01-02'
+                        keyword_rank: 3
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?aso_rank_overview:
+    get:
+      tags:
+        - 'APP STORE OPTIMIZATION: Timeseries Metrics'
+      operationId: get RankOverviewTimeseries
+      description: |
+        Get Rank Overview timeseries metrics for ASO Keywords.
+
+        ## Usage
+        - **Required**:
+          - `breakdown`
+          - `date_granularity`
+          - `start_date`
+          - `end_date`
+          - `keywords`
+          - `regions`
+          - `os`
+          - `app_ids`
+        - **Exactly one `bundle`**
+        - **Optional**:
+          - `devices` (iOS only)
+          - `paid_search_state` (iOS only)
+          - `keyword_types`
+
+        ## Breakdowns
+
+        Comma-separated list of breakdowns.
+
+        ### Available breakdowns
+
+        - `date, keyword_rank_overview_bin` - Time series data by rank overview bin
+
+        ## Granularity
+        - `date_granularity`: How data is aggregated (day/week/month/quarter)
+
+        ## ASO Rank Overview Bundle - included metrics
+        - `keyword_rank_overview_bin` - Keyword rank divisions / segments / tiers (`1`, `2-3`, `4-5`, `6-10`, `11-20`, `21+`).
+        - `keyword_rank_overview_count` - The number of keywords in the rank division / segment / tier.
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetch timeseries metrics for ASO Rank Overview
+      parameters:
+        - description: The bundle to retrieve data for
+          in: query
+          name: bundle
+          required: true
+          example: aso_rank_overview
+          schema:
+            type: string
+            enum:
+              - aso_rank_overview
+        - description: 'How to break down the data (comma-separated for breakdown by multiple fields, e.g. `date, keyword_rank_overview_bin`)'
+          in: query
+          name: breakdown
+          required: true
+          schema:
+            type: string
+            enum:
+              - 'date, keyword_rank_overview_bin'
+          example: 'date, keyword_rank_overview_bin'
+        - description: Date granularity for the data.
+          in: query
+          required: true
+          name: date_granularity
+          example: day
+          schema:
+            type: string
+            enum:
+              - day
+              - week
+              - month
+              - quarter
+        - description: Start date for the data range. `YYYY-MM-DD` format
+          in: query
+          name: start_date
+          required: true
+          example: '2025-01-01'
+          schema:
+            type: string
+            format: date
+        - description: End date for the data range. `YYYY-MM-DD` format
+          in: query
+          name: end_date
+          required: true
+          example: '2025-01-31'
+          schema:
+            type: string
+            format: date
+        - description: 'A single region code, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Region Codes</a>'
+          in: query
+          name: regions
+          required: true
+          schema:
+            type: string
+          example: US
+        - description: 'Array of keywords to filter by (comma-separated strings). **Maximum: 100 keywords per request.**'
+          in: query
+          name: keywords
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+          example:
+            - facebook
+            - messenger app
+            - video life
+            - media
+        - description: Single App ID to retrieve data for. Use integer ID for iOS (e.g. `284882215`) or package name for Android (e.g. `com.facebook.katana`).
+          in: query
+          name: app_ids
+          required: true
+          schema:
+            type: string
+          example: '284882215'
+        - description: The platform to filter by.
+          in: query
+          name: os
+          required: true
+          example: ios
+          schema:
+            type: string
+            enum:
+              - ios
+              - android
+        - description: The devices to filter by (iOS only). (Default - `iphone`)
+          in: query
+          name: devices
+          required: false
+          schema:
+            type: string
+            enum:
+              - iphone
+              - ipad
+        - description: The paid search states to filter by (iOS only). (Default - include all states)
+          in: query
+          name: paid_search_state
+          required: false
+          example: []
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - safe
+                - exposed
+                - threatened
+                - critical
+            minItems: 0
+          style: form
+          explode: false
+        - description: The keyword types to filter by. (Default - include all types)
+          in: query
+          name: keyword_types
+          required: false
+          example: []
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - branded
+                - competitor
+                - generic
+            minItems: 0
+          style: form
+          explode: false
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                          description: Date of the data point (when breakdown includes date)
+                          example: '2025-01-01'
+                        keyword_rank_overview_bin:
+                          type: string
+                          description: Keyword Rank Overview Bin
+                          example: '1'
+                        keyword_rank_overview_count:
+                          type: number
+                          description: Keyword Rank Overview Count
+                          example: 10
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                rank_overview_example:
+                  summary: Rank Overview Timeseries example
+                  value:
+                    data:
+                      - keyword_rank_overview_bin: '1'
+                        date: '2025-01-01'
+                        keyword_rank_overview_count: 1
+                      - keyword_rank_overview_bin: 2-3
+                        date: '2025-01-01'
+                        keyword_rank_overview_count: 0
+                      - keyword_rank_overview_bin: 4-5
+                        date: '2025-01-01'
+                        keyword_rank_overview_count: 0
+                      - keyword_rank_overview_bin: 6-10
+                        date: '2025-01-01'
+                        keyword_rank_overview_count: 3
+                      - keyword_rank_overview_bin: 11-20
+                        date: '2025-01-01'
+                        keyword_rank_overview_count: 1
+                      - keyword_rank_overview_bin: 21+
+                        date: '2025-01-01'
+                        keyword_rank_overview_count: 6
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?aso_top_keywords:
+    get:
+      tags:
+        - 'APP STORE OPTIMIZATION: Top Keywords'
+      operationId: get TopKeywordMetrics
+      description: |
+        Get top keywords metrics for an app.
+
+        ## Usage
+        - **Required**:
+          - `breakdown`
+          - `regions`
+          - `os`
+          - `app_ids`
+        - **Exactly one `bundle`**
+        - **Optional**:
+          - `start_date`
+          - `end_date`
+          - `user_tracked`
+          - `devices` (iOS only)
+          - `keyword_types`
+          - `limit`
+          - `offset`
+          - `order_by`
+
+        ## Breakdowns
+
+        Comma-separated list of breakdowns.
+
+        ### Available breakdowns
+
+        - `keyword` - Data per keyword
+
+        ## ASO Top Keywords Bundle
+        - `aso_top_keywords` - Get metrics for top keywords.
+
+        ## Metrics included in bundle
+        - `keyword_rank` - Your app's current position for this keyword in store search results.
+        - `keyword_traffic` - How often this keyword is searched. Higher scores mean more people search for it.
+        - `est_keyword_downloads` - Estimated downloads driven by this keyword.
+        - `keyword_opportunity_score` - Opportunity score estimates how valuable a keyword is for this app, blending Traffic Score, Difficulty, your app's relevance (metadata/semantic matches), and whether the app already ranks. Higher scores indicate higher organic potential.
+        - `keyword_app_count` - Number of apps currently ranking for this keyword in the store.
+        - `keyword_type` - Type of keyword (Branded, Competitor, Generic).
+        - `keyword_density` - Density of specific keyword in description.
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetch top keywords metrics for an app
+      parameters:
+        - description: The bundle to retrieve data for
+          in: query
+          name: bundle
+          required: true
+          example: aso_top_keywords
+          schema:
+            type: string
+            enum:
+              - aso_top_keywords
+        - description: 'How to break down the data (comma-separated for breakdown by multiple fields, e.g. `keyword`)'
+          in: query
+          name: breakdown
+          required: true
+          schema:
+            type: string
+            enum:
+              - keyword
+          example: keyword
+        - description: 'A single region code, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Region Codes</a>'
+          in: query
+          name: regions
+          required: true
+          schema:
+            type: string
+          example: US
+        - description: Single App ID to retrieve data for. Use integer ID for iOS (e.g. `284882215`) or package name for Android (e.g. `com.facebook.katana`).
+          in: query
+          name: app_ids
+          required: true
+          schema:
+            type: string
+          example: '284882215'
+        - description: The platform to filter by.
+          in: query
+          name: os
+          required: true
+          example: ios
+          schema:
+            type: string
+            enum:
+              - ios
+              - android
+        - description: 'Start date for the data range. `YYYY-MM-DD` format. Min date `2021-01-01` <br> Max date range: 1 year <br> (Default - 30 days ago)'
+          in: query
+          name: start_date
+          required: false
+          schema:
+            type: string
+            format: date
+        - description: End date for the data range. `YYYY-MM-DD` format. (Default - today)
+          in: query
+          name: end_date
+          required: false
+          schema:
+            type: string
+            format: date
+        - description: Only use keywords tracked by current user. (Default - `false`)
+          in: query
+          name: user_tracked
+          required: false
+          schema:
+            type: string
+            enum:
+              - true
+              - false
+        - description: The devices to filter by (iOS only). (Default - `iphone`)
+          in: query
+          name: devices
+          required: false
+          schema:
+            type: string
+            enum:
+              - iphone
+              - ipad
+        - description: The keyword types to filter by. (Default - include all types)
+          in: query
+          name: keyword_types
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - branded
+                - competitor
+                - generic
+            minItems: 0
+          style: form
+          explode: false
+        - description: Limit of number of keywords to return (max 200).
+          in: query
+          name: limit
+          required: false
+          example: 25
+          schema:
+            type: integer
+            format: Int64
+        - description: Offset.
+          in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            format: Int64
+        - description: 'Array of metrics and direction to order by (`metric:direction`).'
+          in: query
+          name: order_by
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: false
+          examples:
+            top_by_rank:
+              summary: Top keywords by rank
+              value:
+                - 'keyword_rank:asc'
+                - 'keyword:asc'
+            top_by_traffic:
+              summary: Top keywords by traffic
+              value:
+                - 'keyword_traffic:desc'
+                - 'keyword:asc'
+            top_by_difficulty:
+              summary: Top keywords by difficulty score
+              value:
+                - 'keyword_difficulty_score:desc'
+                - 'keyword:asc'
+            top_by_opportunity:
+              summary: Top keywords by opportunity score
+              value:
+                - 'keyword_opportunity_score:desc'
+                - 'keyword:asc'
+            top_by_est_downloads:
+              summary: Top keywords by estimated downloads
+              value:
+                - 'est_keyword_downloads:desc'
+                - 'keyword:asc'
+            top_by_app_count:
+              summary: Top keywords by app count
+              value:
+                - 'keyword_app_count:desc'
+                - 'keyword:asc'
+            top_by_density:
+              summary: Top keywords by density
+              value:
+                - 'keyword_density:desc'
+                - 'keyword:asc'
+            top_by_rank_traffic:
+              summary: Top keywords by rank and traffic
+              value:
+                - 'keyword_rank:asc'
+                - 'keyword_traffic:desc'
+                - 'keyword:asc'
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        keyword:
+                          type: string
+                          description: Keyword
+                          example: facebook
+                        keyword_rank:
+                          type: number
+                          description: Keyword Rank
+                          example: 1
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                top_keywords_example:
+                  summary: Top Keywords by Rank for Facebook (284882215)
+                  value:
+                    data:
+                      - keyword: facebook
+                        keyword_rank: 1
+                      - keyword: oculus
+                        keyword_rank: 2
+                      - keyword: meta quest
+                        keyword_rank: 3
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  '/v1/{os}/review/get_reviews':
+    get:
+      tags:
+        - 'RATINGS & REVIEWS: Review Analysis'
+      description: 'Retrieve user reviews with information such as the review''s content, rating, username, app id, version, date, tags, and more. <br><br> Note: The `tags` and `search_terms` filters are applied together so that all reviews with at least one matching tag or search term will be returned.'
+      operationId: get_reviews
+      summary: Fetches detailed reviews information for a particular app.
+      parameters:
+        - description: Operating System
+          in: path
+          name: os
+          required: true
+          schema:
+            default: ios
+            enum:
+              - ios
+              - android
+            type: string
+        - description: Filter reviews by the App ID i.e. 529479190 (iOS) or com.facebook.katana (Android)
+          in: query
+          name: app_id
+          required: true
+          schema:
+            type: string
+          examples:
+            ios:
+              value: '529479190'
+              summary: integer (iOS)
+            android:
+              value: com.facebook.katana
+              summary: string (Android)
+        - description: 'Start Date, `YYYY-MM-DD` format'
+          in: query
+          name: start_date
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` format'
+          in: query
+          name: end_date
+          schema:
+            type: string
+            format: date
+        - description: 'Country code for the reviews, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Country Codes</a>'
+          in: query
+          name: country
+          deprecated: true
+          schema:
+            type: string
+        - description: 'Country codes for the reviews, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Country Codes</a> , separated by commas. (only for iOS)'
+          in: query
+          name: countries
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - description: 'Language codes for the reviews, <a target=''_blank'' href=''/api/docs/static/app_review_language_ids.json''>Language Codes</a> ,separated by commas. (only for Android)'
+          in: query
+          name: languages
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - description: 'Filter reviews by the ratings given by the user, "positive" "negative", or 1-5  (e.g. 4)'
+          in: query
+          name: rating_filter
+          deprecated: true
+          schema:
+            type: String / Integer
+        - description: 'Filter reviews by the ratings given by the user 1-5, separated by commas. (e.g. 4,5)'
+          in: query
+          name: rating_filters
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+        - description: Filter reviews by content (e.g. "love the app!")
+          in: query
+          name: search_term
+          deprecated: true
+          schema:
+            type: string
+        - description: Filter reviews by search terms (e.g. "love the app!")
+          in: query
+          name: 'search_terms[]'
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - description: 'Filter reviews by tags, <a target=''_blank'' href=''/api/docs/static/app_review_tags.json''>Tag List</a> , separated by commas.'
+          in: query
+          name: tags
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - description: 'Filter reviews by app versions, separated by commas.'
+          in: query
+          name: versions
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - description: 'Filter reviews by sentiments, separated by commas.'
+          in: query
+          name: sentiments
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - happy
+                - mixed
+                - neutral
+                - unhappy
+        - description: Filter reviews by the username of the reviewer
+          in: query
+          name: username
+          schema:
+            type: string
+        - description: 'Limit how many reviews per call (maximum: 200)'
+          in: query
+          name: limit
+          schema:
+            default: 10
+            type: integer
+        - description: 'Offset reviews by the limit for each page, valid values are >= 1'
+          in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  '/v1/{os}/review/app_history_summary':
+    get:
+      tags:
+        - 'RATINGS & REVIEWS: Review Analysis'
+      deprecated: true
+      description: |-
+        <strong>⚠️ DEPRECATED:</strong> This endpoint is deprecated and will be removed in a future release. Please use the new `GET /v1/facets/metrics?reviews_by_rating` endpoint instead. <a target='_blank' href='/api/docs/store_marketing#/RATINGS%20%26%20REVIEWS:%20Review%20Analysis/getReviewMetricsByRating'>
+          See API documentation for the new endpoint.
+        </a> <br><br> Retrieve a summary of positive and or negative reviews of a particular app by each day, along with the app's version update information.
+      operationId: app_history_summary
+      summary: '[DEPRECATED] Fetches summary of positive and negative review counts by day.'
+      parameters:
+        - description: Operating System
+          in: path
+          name: os
+          required: true
+          schema:
+            default: ios
+            enum:
+              - ios
+              - android
+            type: string
+        - description: Filter reviews by the App ID
+          in: query
+          name: app_id
+          required: true
+          schema:
+            type: string
+          examples:
+            ios:
+              value: '585661281'
+              summary: integer (iOS)
+            android:
+              value: com.facebook.katana
+              summary: string (Android)
+        - description: 'Start Date, `YYYY-MM-DD` format'
+          in: query
+          name: start_date
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` format'
+          in: query
+          name: end_date
+          schema:
+            type: string
+            format: date
+        - description: 'Country code for the reviews, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Country Codes</a> (defaults to US)'
+          in: query
+          name: country
+          schema:
+            default: US
+            type: string
+        - description: 'Filter reviews by the ratings given by the user, "positive" "negative", or 1-5  (e.g. 4)'
+          in: query
+          name: rating_filter
+          schema:
+            type: String / Integer
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  '/v1/{os}/review/get_ratings':
+    get:
+      tags:
+        - 'RATINGS & REVIEWS: Rating Analysis'
+      deprecated: true
+      description: |-
+        <strong>⚠️ DEPRECATED:</strong> This endpoint is deprecated and will be removed in a future release. Please use the new `GET /v1/facets/metrics?ratings` endpoint instead. <a target='_blank' href='/api/docs/store_marketing#/RATINGS%20%26%20REVIEWS:%20Rating%20Analysis/getRatingMetrics'>
+          See API documentation for the new endpoint.
+        </a> <br><br> Retrieve historical rating count summary for a particular app, ordered by descending date. If the start date and end date parameters are both left blank, this will return a 0 or 1 length array containing the most recent Rating Count Breakdown for the specified app. <br><br> The returned <code>breakdown</code> is the total cumulative ratings for the lifetime and current version (if applicable) of the app sorted from 1 star to 5 stars. The returned <code>average</code> and <code>total</code> values are of the lifetime breakdowns. <br><br> <strong>Note:</strong> Rating count breakdowns may not be available every day for every app. <br><br> <strong>Deprecation:</strong> <code>current_version_breakdown</code> parameter is deprecated and currently returns the same data as in <code>breakdown</code>.
+      operationId: get_ratings
+      summary: '[DEPRECATED] Fetches rating count breakdown of a particular app.'
+      parameters:
+        - description: Operating System
+          in: path
+          name: os
+          required: true
+          schema:
+            default: ios
+            enum:
+              - ios
+              - android
+            type: string
+        - description: Filter ratings by the App ID i.e. 284882215 (iOS) or com.facebook.katana (Android)
+          in: query
+          name: app_id
+          required: true
+          schema:
+            type: string
+          examples:
+            ios:
+              value: '284882215'
+              summary: integer (iOS)
+            android:
+              value: com.facebook.katana
+              summary: string (Android)
+        - description: 'Start Date, `YYYY-MM-DD` format'
+          in: query
+          name: start_date
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` format'
+          in: query
+          name: end_date
+          schema:
+            type: string
+            format: date
+        - description: 'Country code for the ratings, <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Country Codes</a>'
+          in: query
+          name: country
+          schema:
+            type: string
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?ratings:
+    get:
+      tags:
+        - 'RATINGS & REVIEWS: Rating Analysis'
+      operationId: getRatingMetrics
+      description: |
+        Get rating metrics for mobile apps including total count, star-level breakdowns, and averages.
+
+        ## Bundles
+
+        ### ratings_incremental
+        Daily/periodic rating metrics for the selected period:
+        - `rating_average_incremental` - Average rating score (1-5) for the period
+        - `rating_count_incremental` - Total number of ratings for the period
+        - `rating_1_star_count_incremental` - Count of 1 star ratings for the period
+        - `rating_2_star_count_incremental` - Count of 2 star ratings for the period
+        - `rating_3_star_count_incremental` - Count of 3 star ratings for the period
+        - `rating_4_star_count_incremental` - Count of 4 star ratings for the period
+        - `rating_5_star_count_incremental` - Count of 5 star ratings for the period
+
+        ### ratings_cumulative
+        Cumulative rating metrics at the end of the period:
+        - `rating_average_cumulative` - Cumulative average rating score (1-5)
+        - `rating_count_cumulative` - Total cumulative number of ratings
+        - `rating_1_star_count_cumulative` - Count of 1 star ratings for the period
+        - `rating_2_star_count_cumulative` - Count of 2 star ratings for the period
+        - `rating_3_star_count_cumulative` - Count of 3 star ratings for the period
+        - `rating_4_star_count_cumulative` - Count of 4 star ratings for the period
+        - `rating_5_star_count_cumulative` - Count of 5 star ratings for the period
+
+        ## Breakdowns
+
+        Specify how to break down the data. Use comma-separated values for multiple breakdowns.
+
+        ### Supported combinations
+
+        | Breakdown | Description |
+        |-----------|-------------|
+        | `app_id` | Table-like breakdown by app |
+        | `app_id,date` | Time series data by app |
+        | `region` | Table-like breakdown by region |
+        | `region,date` | Time series data by region |
+        | `app_version` | Breakdown by app version (**incremental bundle only**) |
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetches rating metrics for mobile apps
+      parameters:
+        - description: The bundle of rating metrics to retrieve
+          in: query
+          name: bundle
+          required: true
+          example: ratings_incremental
+          schema:
+            type: string
+            enum:
+              - ratings_incremental
+              - ratings_cumulative
+        - description: How to break down the data
+          in: query
+          name: breakdown
+          required: true
+          schema:
+            type: string
+            enum:
+              - app_id
+              - 'app_id,date'
+              - region
+              - 'region,date'
+              - app_version
+          example: 'app_id,date'
+        - description: How data is aggregated (required when using date breakdown)
+          in: query
+          name: date_granularity
+          required: false
+          schema:
+            type: string
+            enum:
+              - day
+              - week
+              - month
+          example: week
+        - description: 'App IDs to retrieve data for (comma-separated). Use integer IDs for iOS (e.g. `284882215`) or package names for Android (e.g. `com.facebook.katana`). **Maximum: 1,000 app IDs per request.**'
+          in: query
+          name: app_ids
+          required: true
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: '284882215'
+            default: []
+            maxItems: 1000
+          example:
+            - '284882215'
+            - '375380948'
+        - description: Regions to filter by (comma-separated). <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: regions
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: US
+            default: []
+          example:
+            - US
+            - GB
+            - JP
+        - description: Start date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: start_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-01'
+        - description: End date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: end_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-31'
+        - description: 'Apply estimated country weights to Android ratings counts (default: false).'
+          in: query
+          name: android_localized_estimates
+          required: false
+          schema:
+            type: boolean
+            default: true
+          example: true
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        app_id:
+                          type: string
+                          example: '284882215'
+                        date:
+                          type: string
+                          format: date
+                          example: '2024-01-01'
+                        region:
+                          type: string
+                          example: US
+                        app_version:
+                          type: string
+                          example: 1.2.3
+                        rating_average_incremental:
+                          type: number
+                          format: float
+                          example: 4.5
+                        rating_count_incremental:
+                          type: integer
+                          example: 1234
+                        rating_1_star_count_incremental:
+                          type: integer
+                          example: 50
+                        rating_2_star_count_incremental:
+                          type: integer
+                          example: 75
+                        rating_3_star_count_incremental:
+                          type: integer
+                          example: 200
+                        rating_4_star_count_incremental:
+                          type: integer
+                          example: 350
+                        rating_5_star_count_incremental:
+                          type: integer
+                          example: 559
+                        rating_average_cumulative:
+                          type: number
+                          format: float
+                          example: 4.5
+                        rating_count_cumulative:
+                          type: integer
+                          example: 8734
+                        rating_1_star_count_cumulative:
+                          type: integer
+                          example: 250
+                        rating_2_star_count_cumulative:
+                          type: integer
+                          example: 375
+                        rating_3_star_count_cumulative:
+                          type: integer
+                          example: 1200
+                        rating_4_star_count_cumulative:
+                          type: integer
+                          example: 2350
+                        rating_5_star_count_cumulative:
+                          type: integer
+                          example: 4559
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                incremental_by_app_and_date:
+                  summary: Incremental ratings by app and date
+                  value:
+                    data:
+                      - app_id: '284882215'
+                        date: '2024-01-01'
+                        rating_average_incremental: 4.5
+                        rating_count_incremental: 1234
+                        rating_1_star_count_incremental: 50
+                        rating_2_star_count_incremental: 75
+                        rating_3_star_count_incremental: 200
+                        rating_4_star_count_incremental: 350
+                        rating_5_star_count_incremental: 559
+                      - app_id: '284882215'
+                        date: '2024-01-02'
+                        rating_average_incremental: 4.6
+                        rating_count_incremental: 987
+                        rating_1_star_count_incremental: 30
+                        rating_2_star_count_incremental: 45
+                        rating_3_star_count_incremental: 150
+                        rating_4_star_count_incremental: 300
+                        rating_5_star_count_incremental: 462
+                cumulative_by_app:
+                  summary: Cumulative ratings by app
+                  value:
+                    data:
+                      - app_id: '284882215'
+                        rating_average_cumulative: 4.5
+                        rating_count_cumulative: 8734
+                        rating_1_star_count_cumulative: 250
+                        rating_2_star_count_cumulative: 375
+                        rating_3_star_count_cumulative: 1200
+                        rating_4_star_count_cumulative: 2350
+                        rating_5_star_count_cumulative: 4559
+                      - app_id: '375380948'
+                        rating_average_cumulative: 4.3
+                        rating_count_cumulative: 6234
+                        rating_1_star_count_cumulative: 180
+                        rating_2_star_count_cumulative: 320
+                        rating_3_star_count_cumulative: 980
+                        rating_4_star_count_cumulative: 1950
+                        rating_5_star_count_cumulative: 2804
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?reviews_by_rating:
+    get:
+      tags:
+        - 'RATINGS & REVIEWS: Review Analysis'
+      operationId: getReviewMetricsByRating
+      description: |
+        Get review metrics for mobile apps with star rating breakdown including total count, rating averages, and per-rating breakdowns.
+
+        ## Metrics
+
+        | Metric | Description |
+        |--------|-------------|
+        | `review_rating` | Star rating (1-5) |
+        | `review_rating_count` | Number of reviews for a given star rating |
+        | `review_rating_percentage` | Percentage of reviews for a given star rating |
+        | `review_rating_average` | Average rating score for the app. Repeats for each star rating |
+
+        ## Breakdowns
+
+        Specify how to break down the data. Use comma-separated values for multiple breakdowns.
+
+        ### Supported combinations
+
+        | Breakdown | Description |
+        |-----------|-------------|
+        | `review_rating` | Breakdown by star rating (1-5) |
+        | `date,review_rating` | Time series with star rating breakdown |
+        | `region,review_rating` | Region with star rating breakdown |
+        | `language,review_rating` | Language with star rating breakdown |
+        | `app_version,review_rating` | App version with star rating breakdown |
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetches review metrics by rating for mobile apps
+      parameters:
+        - description: The bundle of review metrics to retrieve
+          in: query
+          name: bundle
+          required: true
+          schema:
+            type: string
+            enum:
+              - reviews_by_rating
+          example: reviews_by_rating
+        - description: How to break down the data
+          in: query
+          name: breakdown
+          required: true
+          schema:
+            type: string
+            enum:
+              - review_rating
+              - 'date,review_rating'
+              - 'region,review_rating'
+              - 'language,review_rating'
+              - 'app_version,review_rating'
+          example: 'date,review_rating'
+        - description: How data is aggregated (required when using date breakdown)
+          in: query
+          name: date_granularity
+          required: false
+          schema:
+            type: string
+            enum:
+              - day
+              - week
+              - month
+          example: day
+        - description: Single App ID to retrieve data for. Use integer ID for iOS (e.g. `284882215`) or package name for Android (e.g. `com.facebook.katana`).
+          in: query
+          name: app_ids
+          required: true
+          schema:
+            type: string
+          example: '284882215'
+        - description: 'Regions to filter by (comma-separated, iOS only). <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Country Codes</a>'
+          in: query
+          name: regions
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: US
+            default: []
+          example:
+            - US
+            - GB
+            - JP
+        - description: 'Languages to filter by (comma-separated, Android only). <a target=''_blank'' href=''/api/docs/static/app_review_language_ids.json''>Language Codes</a>'
+          in: query
+          name: languages
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: en
+            default: []
+        - description: Start date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: start_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-01'
+        - description: End date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: end_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-31'
+        - description: Review keywords to filter by (comma-separated).
+          in: query
+          name: review_keywords
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: game
+            default: []
+        - description: Review sentiments to filter by (comma-separated).
+          in: query
+          name: review_sentiments
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - happy
+                - mixed
+                - neutral
+                - unhappy
+            default: []
+        - description: 'Review tags to filter by (comma-separated), <a target=''_blank'' href=''/api/docs/static/app_review_tags.json''>Tag List</a>.'
+          in: query
+          name: review_tags
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: customer_support
+            default: []
+        - description: Search terms to filter reviews by content (comma-separated).
+          in: query
+          name: search_terms
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: crash
+            default: []
+        - description: 'Star ratings to filter by (comma-separated, values 1-5).'
+          in: query
+          name: rating_filters
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - '1'
+                - '2'
+                - '3'
+                - '4'
+                - '5'
+            default: []
+          example:
+            - '4'
+            - '5'
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                          example: '2024-01-01'
+                        region:
+                          type: string
+                          example: US
+                        language:
+                          type: string
+                          example: EN
+                        app_version:
+                          type: string
+                          example: 1.2.3
+                        review_rating:
+                          type: integer
+                          example: 5
+                        review_rating_count:
+                          type: integer
+                          example: 350
+                        review_rating_percentage:
+                          type: number
+                          format: float
+                          example: 28.4
+                        review_rating_average:
+                          type: number
+                          format: float
+                          example: 4.5
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                review_ratings_by_date:
+                  summary: Review ratings by date
+                  value:
+                    data:
+                      - date: '2024-01-01'
+                        review_rating_count: 1234
+                        review_rating_average: 4.5
+                      - date: '2024-01-08'
+                        review_rating_count: 987
+                        review_rating_average: 4.6
+                review_ratings_by_star:
+                  summary: Review ratings by star rating
+                  value:
+                    data:
+                      - review_rating: 1
+                        review_rating_count: 50
+                        review_rating_percentage: 4.1
+                        review_rating_average: 4.5
+                      - review_rating: 5
+                        review_rating_count: 559
+                        review_rating_percentage: 45.3
+                        review_rating_average: 4.5
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?reviews_by_sentiment:
+    get:
+      tags:
+        - 'RATINGS & REVIEWS: Review Analysis'
+      operationId: getReviewMetricsBySentiment
+      description: |
+        Get review metrics for mobile apps with sentiment breakdown including total count and per-sentiment breakdowns.
+
+        ## Metrics
+
+        | Metric | Description |
+        |--------|-------------|
+        | `review_sentiment` | Sentiment |
+        | `review_sentiment_count` | Number of reviews for a given sentiment |
+        | `review_sentiment_percentage` | Percentage of reviews for a given sentiment |
+
+        ## Breakdowns
+
+        Specify how to break down the data. Use comma-separated values for multiple breakdowns.
+
+        ### Supported combinations
+
+        | Breakdown | Description |
+        |-----------|-------------|
+        | `review_sentiment` | Breakdown by sentiment |
+        | `date,review_sentiment` | Time series with sentiment breakdown |
+        | `region,review_sentiment` | Region with sentiment breakdown |
+        | `language,review_sentiment` | Language with sentiment breakdown |
+        | `app_version,review_sentiment` | App version with sentiment breakdown |
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetches review metrics by sentiment for mobile apps
+      parameters:
+        - description: The bundle of review metrics to retrieve
+          in: query
+          name: bundle
+          required: true
+          schema:
+            type: string
+            enum:
+              - reviews_by_sentiment
+          example: reviews_by_sentiment
+        - description: How to break down the data
+          in: query
+          name: breakdown
+          required: true
+          schema:
+            type: string
+            enum:
+              - review_sentiment
+              - 'date,review_sentiment'
+              - 'region,review_sentiment'
+              - 'language,review_sentiment'
+              - 'app_version,review_sentiment'
+          example: 'date,review_sentiment'
+        - description: How data is aggregated (required when using date breakdown)
+          in: query
+          name: date_granularity
+          required: false
+          schema:
+            type: string
+            enum:
+              - day
+              - week
+              - month
+          example: day
+        - description: Single App ID to retrieve data for. Use integer ID for iOS (e.g. `284882215`) or package name for Android (e.g. `com.facebook.katana`).
+          in: query
+          name: app_ids
+          required: true
+          schema:
+            type: string
+          example: '284882215'
+        - description: 'Regions to filter by (comma-separated, iOS only). <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Country Codes</a>'
+          in: query
+          name: regions
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: US
+            default: []
+          example:
+            - US
+            - GB
+            - JP
+        - description: 'Languages to filter by (comma-separated, Android only). <a target=''_blank'' href=''/api/docs/static/app_review_language_ids.json''>Language Codes</a>'
+          in: query
+          name: languages
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: en
+            default: []
+          example: []
+        - description: Start date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: start_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-01'
+        - description: End date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: end_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-31'
+        - description: Review keywords to filter by (comma-separated).
+          in: query
+          name: review_keywords
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: game
+            default: []
+        - description: Review sentiments to filter by (comma-separated).
+          in: query
+          name: review_sentiments
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - happy
+                - mixed
+                - neutral
+                - unhappy
+            default: []
+        - description: 'Review tags to filter by (comma-separated), <a target=''_blank'' href=''/api/docs/static/app_review_tags.json''>Tag List</a>.'
+          in: query
+          name: review_tags
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: customer_support
+            default: []
+        - description: Search terms to filter reviews by content (comma-separated).
+          in: query
+          name: search_terms
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: crash
+            default: []
+        - description: 'Star ratings to filter by (comma-separated, values 1-5).'
+          in: query
+          name: rating_filters
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - '1'
+                - '2'
+                - '3'
+                - '4'
+                - '5'
+            default: []
+          example:
+            - '4'
+            - '5'
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                          example: '2024-01-01'
+                        region:
+                          type: string
+                          example: US
+                        language:
+                          type: string
+                          example: EN
+                        app_version:
+                          type: string
+                          example: 1.2.3
+                        review_sentiment:
+                          type: string
+                          example: happy
+                        review_sentiment_count:
+                          type: integer
+                          example: 450
+                        review_sentiment_percentage:
+                          type: number
+                          format: float
+                          example: 36.5
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                review_sentiment_by_date:
+                  summary: Review sentiment by date
+                  value:
+                    data:
+                      - date: '2024-01-01'
+                        review_sentiment_count: 1234
+                      - date: '2024-01-08'
+                        review_sentiment_count: 987
+                review_sentiment_by_sentiment:
+                  summary: Review sentiment breakdown
+                  value:
+                    data:
+                      - review_sentiment: happy
+                        review_sentiment_count: 450
+                        review_sentiment_percentage: 36.5
+                      - review_sentiment: neutral
+                        review_sentiment_count: 380
+                        review_sentiment_percentage: 30.8
+                      - review_sentiment: unhappy
+                        review_sentiment_count: 404
+                        review_sentiment_percentage: 32.7
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/facets/metrics?reviews_by_tag:
+    get:
+      tags:
+        - 'RATINGS & REVIEWS: Review Analysis'
+      operationId: getReviewMetricsByTag
+      description: |
+        Get review metrics for mobile apps with tag breakdown including total count and per-tag breakdowns.
+
+        ## Metrics
+
+        | Metric | Description |
+        |--------|-------------|
+        | `review_tag` | Tag, <a target='_blank' href='/api/docs/static/app_review_tags.json'>Tag List</a> |
+        | `review_tag_count` | Number of reviews for a given tag |
+        | `review_tag_percentage` | Percentage of reviews for a given tag |
+
+        ## Breakdowns
+
+        Specify how to break down the data. Use comma-separated values for multiple breakdowns.
+
+        ### Supported combinations
+
+        | Breakdown | Description |
+        |-----------|-------------|
+        | `review_tag` | Breakdown by tag |
+        | `date,review_tag` | Time series with tag breakdown |
+        | `language,review_tag` | Language with tag breakdown |
+        | `region,review_tag` | Region with tag breakdown |
+        | `app_version,review_tag` | App version with tag breakdown |
+
+        ## Notes
+
+        **Important:** This API might get updated in the future (next 6 months after release, see <a href="/api/docs/changelog">API Changelog</a>) as we continue to expand its functionality and support more metrics.
+        We recommend integrating with caution and monitoring release notes for upcoming changes.
+      summary: Fetches review metrics by tag for mobile apps
+      parameters:
+        - description: The bundle of review metrics to retrieve
+          in: query
+          name: bundle
+          required: true
+          schema:
+            type: string
+            enum:
+              - reviews_by_tag
+          example: reviews_by_tag
+        - description: How to break down the data
+          in: query
+          name: breakdown
+          required: true
+          schema:
+            type: string
+            enum:
+              - review_tag
+              - 'date,review_tag'
+              - 'language,review_tag'
+              - 'region,review_tag'
+              - 'app_version,review_tag'
+          example: 'date,review_tag'
+        - description: How data is aggregated (required when using date breakdown)
+          in: query
+          name: date_granularity
+          required: false
+          schema:
+            type: string
+            enum:
+              - day
+              - week
+              - month
+          example: day
+        - description: Single App ID to retrieve data for. Use integer ID for iOS (e.g. `284882215`) or package name for Android (e.g. `com.facebook.katana`).
+          in: query
+          name: app_ids
+          required: true
+          schema:
+            type: string
+          example: '284882215'
+        - description: 'Regions to filter by (comma-separated, iOS only). <a target=''_blank'' href=''/api/docs/static/country_ids.json''>Country Codes</a>'
+          in: query
+          name: regions
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: US
+            default: []
+          example:
+            - US
+            - GB
+            - JP
+        - description: 'Languages to filter by (comma-separated, Android only). <a target=''_blank'' href=''/api/docs/static/app_review_language_ids.json''>Language Codes</a>'
+          in: query
+          name: languages
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: en
+            default: []
+        - description: Start date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: start_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-01'
+        - description: End date for the period (`YYYY-MM-DD` format).
+          in: query
+          name: end_date
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2024-01-31'
+        - description: Review keywords to filter by (comma-separated).
+          in: query
+          name: review_keywords
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: game
+            default: []
+        - description: Review sentiments to filter by (comma-separated).
+          in: query
+          name: review_sentiments
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - happy
+                - mixed
+                - neutral
+                - unhappy
+            default: []
+        - description: 'Review tags to filter by (comma-separated), <a target=''_blank'' href=''/api/docs/static/app_review_tags.json''>Tag List</a>.'
+          in: query
+          name: review_tags
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: customer_support
+            default: []
+        - description: Search terms to filter reviews by content (comma-separated).
+          in: query
+          name: search_terms
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              example: crash
+            default: []
+        - description: 'Star ratings to filter by (comma-separated, values 1-5).'
+          in: query
+          name: rating_filters
+          required: false
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - '1'
+                - '2'
+                - '3'
+                - '4'
+                - '5'
+            default: []
+          example:
+            - '4'
+            - '5'
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                          example: '2024-01-01'
+                        region:
+                          type: string
+                          example: US
+                        language:
+                          type: string
+                          example: EN
+                        app_version:
+                          type: string
+                          example: 1.2.3
+                        review_tag:
+                          type: string
+                          example: customer_support
+                        review_tag_count:
+                          type: integer
+                          example: 180
+                        review_tag_percentage:
+                          type: number
+                          format: float
+                          example: 14.6
+                      additionalProperties: true
+                required:
+                  - data
+              examples:
+                review_tag_by_date:
+                  summary: Review tags by date
+                  value:
+                    data:
+                      - date: '2024-01-01'
+                        review_tag_count: 1234
+                      - date: '2024-01-08'
+                        review_tag_count: 987
+                review_tag_by_tag:
+                  summary: Review tag breakdown
+                  value:
+                    data:
+                      - review_tag: customer_support
+                        review_tag_count: 180
+                        review_tag_percentage: 14.6
+                      - review_tag: payment
+                        review_tag_count: 220
+                        review_tag_percentage: 17.8
+                review_tag_by_region:
+                  summary: Review tags by region
+                  value:
+                    data:
+                      - region: US
+                        review_tag_count: 850
+                      - region: GB
+                        review_tag_count: 384
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/ios/search_ads/apps:
+    get:
+      tags:
+        - 'SEARCH ADS: Apple Search Ads'
+      description: |-
+        Retrieve a list of apps that have Search Ads for the given keyword,
+        along with its current share of voice for that keyword.
+      operationId: search_ads_apps
+      summary: Fetches search ad apps of a particular keyword.
+      parameters:
+        - description: Keyword to lookup
+          in: query
+          name: term
+          required: true
+          schema:
+            default: social
+            type: string
+        - description: |-
+            Country code for the keywords,
+            <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: country
+          required: true
+          schema:
+            default: US
+            type: string
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/ios/search_ads/terms:
+    get:
+      tags:
+        - 'SEARCH ADS: Apple Search Ads'
+      description: |-
+        Retrieve a list of keywords that the given app has Search Ads for,
+        along with its share of voice for the selected date range, number of competitors
+        for the same keyword, and information on the keyword's top competitors
+      operationId: search_ads_terms
+      summary: Fetches search ad keywords of a particular app.
+      parameters:
+        - description: ID of App
+          in: query
+          name: app_id
+          required: true
+          example: 284882215
+          schema:
+            type: string
+        - description: |-
+            Country code for the keywords,
+            <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: country
+          required: true
+          schema:
+            default: US
+            type: string
+        - description: 'Start Date, `YYYY-MM-DD` Format'
+          in: query
+          name: start_date
+          required: true
+          example: '2021-06-01'
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` Format'
+          in: query
+          name: end_date
+          required: true
+          example: '2021-06-02'
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/ios/search_ads/history:
+    get:
+      tags:
+        - 'SEARCH ADS: Apple Search Ads'
+      description: 'Retrieve historical share of voice information for the given apps and term, broken down by date.'
+      operationId: search_ads_history
+      summary: Fetches historical search ads share of voice for the particular apps and term.
+      parameters:
+        - description: ID of App
+          in: query
+          name: app_id
+          required: true
+          example: '905953485'
+          schema:
+            type: string
+        - description: Keyword to lookup
+          in: query
+          name: term
+          required: true
+          example: vpn
+          schema:
+            type: string
+        - description: |-
+            Country code for the history,
+            <a target='_blank' href='/api/docs/static/country_ids.json'>Country Codes</a>
+          in: query
+          name: country
+          required: true
+          schema:
+            default: US
+            type: string
+        - description: 'Start Date, `YYYY-MM-DD` Format'
+          in: query
+          name: start_date
+          required: true
+          example: '2021-06-01'
+          schema:
+            type: string
+            format: date
+        - description: 'End Date, `YYYY-MM-DD` Format'
+          in: query
+          name: end_date
+          required: true
+          example: '2021-06-02'
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+        '422':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/422'
+  /v1/ios/ajax/user_apps:
+    get:
+      tags:
+        - 'APP STORE OPTIMIZATION: User Apps'
+      deprecated: true
+      description: '<strong>⚠️ DEPRECATED:</strong> This endpoint is deprecated and will be removed. <br><br> Retrieve detailed information on the iOS <b>and</b> Android apps that you own or currently have access to.'
+      operationId: user_apps
+      summary: '[DEPRECATED] Fetches apps that you manage.'
+      responses:
+        '200':
+          description: <strong>Success.</strong>
+        '401':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/401'
+        '403':
+          $ref: '#/paths/~1v1~1ios~1featured~1apps/get/responses/403'
+components:
+  securitySchemes:
+    auth_token:
+      type: apiKey
+      description: 'API authentication token. You can generate yours on your <a target="_blank" href="/users/edit/api-settings">account profile (API Settings tab)</a>.'
+      name: auth_token
+      in: query
+tags:
+  - name: 'APP STORE OPTIMIZATION: Keyword Research'
+  - name: 'APP STORE OPTIMIZATION: Timeseries Metrics'
+  - name: 'APP STORE OPTIMIZATION: Top Keywords'
+  - name: 'FEATURED: Featured Apps and Games'
+  - name: 'FEATURED: Featured App Rankings'
+  - name: 'FEATURED: Featured Today'
+  - name: 'RATINGS & REVIEWS: Rating Analysis'
+  - name: 'RATINGS & REVIEWS: Review Analysis'
+  - name: 'SEARCH ADS: Apple Search Ads'
+  - name: 'APP STORE OPTIMIZATION: User Apps'
+    description: ⚠️ DEPRECATED - This API category will be removed in a future release.
+    x-deprecated: true

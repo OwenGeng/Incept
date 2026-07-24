@@ -138,7 +138,7 @@ function Deploy-Api {
         "GCP_PROJECT_DEPLOY=$PROJECT_ID,GOOGLE_CLOUD_PROJECT=$PROJECT_ID," +
         "GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_ENTERPRISE=true," +
         "GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1," +
-        "GEMINI_MODEL=gemini-2.5-flash," +
+        "GEMINI_MODEL=gemini-3.1-flash-lite," +
         "VERTEX_GEMINI_ENABLED=true,VERTEX_AI_ENABLED=true," +
         "DEFAULT_IMAGE_PROVIDER=gemini," +
         "BQ_WRITE_PROJECT=$BQ_WRITE,BQ_READ_PROJECT=$BQ_READ," +

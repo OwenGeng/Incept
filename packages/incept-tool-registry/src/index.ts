@@ -23,10 +23,10 @@ export const toolRegistry: ToolDefinition[] = [
     id: "veo-video",
     name: "Veo Video",
     category: "video_generation",
-    status: "mock",
-    provider: "mock",
+    status: "enabled",
+    provider: "gemini",
     owner: "Growth AI",
-    description: "Mock adapter reserved for image-to-video and reference-based video workflows."
+    description: "Vertex AI Veo adapter for image-to-video, storyboard, and extend-video workflows."
   },
   {
     id: "lightweight-gif",
@@ -47,4 +47,3 @@ export const toolRegistry: ToolDefinition[] = [
     description: "Mock adapter for joining Incept asset lineage with BigQuery performance data."
   }
 ];
-

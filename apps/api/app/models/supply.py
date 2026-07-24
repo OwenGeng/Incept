@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 
-PriorityTier = Literal["P1", "P2", "P3", "P4"]
+PriorityTier = Literal["P1", "P2", "P3"]
 
 
 class SelectionStep(BaseModel):
@@ -63,6 +63,15 @@ class WeeklyBriefPayload(BaseModel):
     funnel_steps: list[FunnelStep] = []
 
 
+class WeeklyBriefSummaryPayload(BaseModel):
+    """AI-generated portion of the weekly brief — served separately so the
+    rest of the page can render without waiting on the Gemini call."""
+    summary: str
+    opportunity: str
+    big_things: list[str] = []
+    week_changes: list[str] = []
+
+
 class FilterChip(BaseModel):
     label: str
     value: str
@@ -73,15 +82,25 @@ class CompanyRow(BaseModel):
     company_name: str
     priority: PriorityTier
     company_prospect_label: str
-    final_hq_country: str
+    hq_country: str = ""
+    final_hq_country: str = ""
+    website: str = ""
     team_routing: str
+    app_count: int = 0
+    total_apps: int = 0
+    os_mix: str = ""
+    genres: str = ""
+    total_downloads: int = 0
+    total_downloads_latest_month: int = 0
+    total_mau: int = 0
+    max_paid_frac: float = 0.0
     monetization_types: str
-    total_apps: int
-    total_downloads_latest_month: int
-    is_moloco_supply_visible: bool
-    moloco_media_cost_30d: int
-    all_active_networks: str
-    apps_with_other_exchange_sdk: int
+    any_active_ua: bool = False
+    all_ua_networks: str = ""
+    all_active_networks: str = ""
+    is_moloco_supply_visible: bool = False
+    any_moloco_supply: bool = False
+    moloco_media_cost_30d: int = 0
 
 
 class AppRow(BaseModel):
@@ -121,11 +140,17 @@ class AnalysisRow(BaseModel):
     color: Optional[str] = None
 
 
+class AnalysisGroup(BaseModel):
+    label: str
+    segments: list[AnalysisRow]
+
+
 class AnalysisModule(BaseModel):
     title: str
     caption: str
-    chart_type: Optional[str] = None  # "bar" | "pie"
-    rows: list[AnalysisRow]
+    chart_type: Optional[str] = None  # "bar" | "pie" | "stacked_group"
+    rows: list[AnalysisRow] = []
+    groups: list[AnalysisGroup] = []
 
 
 class MethodologySection(BaseModel):

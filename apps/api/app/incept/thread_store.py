@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 from datetime import datetime
 from uuid import uuid4
 
@@ -23,6 +24,10 @@ def _bootstrap() -> None:
                 cover_asset_id=row["cover_asset_id"],
                 latest_asset_id=row["latest_asset_id"],
                 latest_job_id=row["latest_job_id"],
+                messages=[
+                    ThreadMessage.model_validate(message)
+                    for message in json.loads(row.get("messages_json") or "[]")
+                ],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
             )
@@ -283,23 +288,9 @@ def backfill_legacy_threads(jobs: list[GenerationJob], assets: list[Asset]) -> N
                 cover_asset_id=legacy_assets[0].id,
             )
 
-    for asset in assets:
-        if asset.thread_id or asset.job_id:
-            continue
-        thread = create_thread(
-            workspace_id=asset.workspace_id,
-            title=asset.theme or asset.title or "Imported asset",
-            generation_mode=GenerationMode.free_create,
-            created_by=asset.created_by,
-            origin_asset_id=asset.id,
-        )
-        asset.thread_id = thread.thread_id
-        asset.root_asset_id = asset.root_asset_id or asset.id
-        touch_thread(
-            thread.thread_id,
-            latest_asset_id=asset.id,
-            cover_asset_id=asset.id,
-        )
+    # Intentionally do not auto-create threads for upload-only/orphan assets.
+    # Threads should only be created by explicit user action (New Thread) or
+    # by legacy job recovery above.
 
 
 def add_user_message(

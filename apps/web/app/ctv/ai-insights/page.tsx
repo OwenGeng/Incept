@@ -5,7 +5,7 @@ import { Sparkles } from "lucide-react";
 export default function CtvAiInsightsPage() {
   return (
     <>
-      <Topbar title="AI Insights" subtitle="AI-powered CTV intelligence and trend analysis." />
+      <Topbar title="AI Insights" subtitle="AI-powered CTV intelligence and trend analysis." docsHref="/docs" />
       <Card className="p-10 text-center">
         <div className="mx-auto mb-5 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#f97316] to-[#ea580c] shadow-lg">
           <Sparkles className="size-8 text-white" />

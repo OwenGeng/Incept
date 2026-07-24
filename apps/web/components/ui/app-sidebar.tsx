@@ -70,6 +70,10 @@ export type SidebarUser = {
 export interface AppSidebarProps {
   /** Product name shown in the header — e.g. "Scout", "Studio" */
   productName: string;
+  /** Optional brand title shown next to the logo, defaults to "Linglong" */
+  brandTitle?: string;
+  /** Optional brand subtitle shown under the brand title */
+  brandSubtitle?: string;
   /** Optional logo image path (served from /public). Shown left of product name. */
   logo?: string;
   /** localStorage key prefix to avoid state collision between products */
@@ -79,6 +83,7 @@ export interface AppSidebarProps {
   isActive: (key: string) => boolean;
   user?: SidebarUser;
   onSignOut: () => void;
+  topContent?: React.ReactNode;
 }
 
 // ── Collapsed-mode group flyout ────────────────────────────────────────────────
@@ -124,12 +129,15 @@ function GroupFlyout({
 
 export function AppSidebar({
   productName,
+  brandTitle = "Linglong",
+  brandSubtitle,
   logo,
   storageKey = "app",
   items,
   isActive,
   user,
   onSignOut,
+  topContent,
 }: AppSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -195,12 +203,12 @@ export function AppSidebar({
         /* Collapsed: just the logo, links back to portal */
         <Link
           href="/"
-          title="Linglong"
+          title={brandTitle}
           className="flex shrink-0 items-center justify-center border-b border-border py-[18px] transition hover:bg-muted"
         >
           {logo ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={logo} alt="Linglong" className="size-9 shrink-0 rounded-lg object-contain" />
+            <img src={logo} alt={brandTitle} className="size-9 shrink-0 rounded-lg object-contain" />
           ) : (
             <div className="flex size-9 shrink-0 select-none items-center justify-center rounded-xl bg-foreground text-[11px] font-bold tracking-tight text-background">
               LL
@@ -208,31 +216,46 @@ export function AppSidebar({
           )}
         </Link>
       ) : (
-        /* Expanded: Linglong (platform, clickable) + Scout (product sub-label) */
+        /* Expanded: brand block + optional product sub-label */
         <div className="shrink-0 border-b border-border px-4 py-3">
           <Link
             href="/"
-            className="group -mx-1 flex items-center gap-2 rounded-lg px-1 py-1 transition hover:bg-muted"
+            className="group -mx-1 flex items-center gap-3 rounded-lg px-1 py-1 transition hover:bg-muted"
           >
             {logo ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={logo} alt="Linglong" className="size-6 shrink-0 rounded-md object-contain" />
+              <img src={logo} alt={brandTitle} className="size-8 shrink-0 rounded-lg object-contain" />
             ) : (
-              <div className="flex size-6 shrink-0 select-none items-center justify-center rounded-md bg-foreground text-[9px] font-bold text-background">
+              <div className="flex size-8 shrink-0 select-none items-center justify-center rounded-lg bg-foreground text-[10px] font-bold text-background">
                 LL
               </div>
             )}
-            <span className="text-[13px] font-medium text-muted-foreground transition group-hover:text-foreground">
-              Linglong
-            </span>
+            <div className="flex min-w-0 flex-col leading-none">
+              <span className="text-[15px] font-semibold tracking-tight text-foreground transition group-hover:text-foreground">
+                {brandTitle}
+              </span>
+              {brandSubtitle ? (
+                <span className="mt-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground transition group-hover:text-foreground/80">
+                  {brandSubtitle}
+                </span>
+              ) : null}
+            </div>
           </Link>
-          <div className="mt-1.5 px-1">
-            <span className="text-[17px] font-semibold tracking-tight text-foreground">
-              {productName}
-            </span>
-          </div>
+          {productName ? (
+            <div className="mt-1.5 px-1">
+              <span className="text-[17px] font-semibold tracking-tight text-foreground">
+                {productName}
+              </span>
+            </div>
+          ) : null}
         </div>
       )}
+
+      {!isCollapsed && topContent ? (
+        <div className="shrink-0 border-b border-border px-4 py-3">
+          {topContent}
+        </div>
+      ) : null}
 
       {/* ── Navigation ──────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto py-3">

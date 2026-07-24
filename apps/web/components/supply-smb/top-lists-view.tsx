@@ -14,7 +14,7 @@ import {
 import type { TopListsQuery } from "@/components/supply-smb/prospect-filter-bar";
 export type { TopListsQuery } from "@/components/supply-smb/prospect-filter-bar";
 import type { AppRow, CompanyRow, TopListsPayload } from "@/types/supply";
-import { cn, formatCompactNumber, formatCurrency, formatPercent } from "@/lib/utils";
+import { cn, formatCompactNumber, formatCurrency } from "@/lib/utils";
 
 // ── Sort helpers ──────────────────────────────────────────────────────────────
 
@@ -136,16 +136,22 @@ function Pagination({
 
 function CompanyTable({ rows, query }: { rows: CompanyRow[]; query: TopListsQuery }) {
   const columns: SortableColumn[] = [
-    { key: "company_prospect_label",         label: "Label" },
-    { key: "company_name",                   label: "Company",        className: "min-w-[220px]" },
-    { key: "final_hq_country",               label: "HQ" },
-    { key: "team_routing",                   label: "Routing" },
-    { key: "monetization_types",             label: "Monetization",   className: "min-w-[180px]" },
-    { key: "total_apps",                     label: "Apps" },
-    { key: "total_downloads_latest_month",   label: "DL / mo" },
-    { key: "is_moloco_supply_visible",       label: "Supply Visible" },
-    { key: "moloco_media_cost_usd_30d",      label: "Media Cost 30d" },
-    { key: "apps_with_other_exchange_sdk",   label: "Other Exch. SDK" },
+    { key: "best_priority",                label: "Priority" },
+    { key: "company_name",                 label: "Company",       className: "min-w-[200px]" },
+    { key: "hq_country",                   label: "HQ" },
+    { key: "website",                      label: "Website",       className: "min-w-[140px]" },
+    { key: "team_routing",                 label: "Routing" },
+    { key: "app_count",                    label: "Apps" },
+    { key: "os_mix",                       label: "OS" },
+    { key: "genres",                       label: "Genres",        className: "min-w-[180px]" },
+    { key: "monetization_types",           label: "Monetization",  className: "min-w-[140px]" },
+    { key: "total_downloads",              label: "DL / mo" },
+    { key: "total_mau",                    label: "MAU" },
+    { key: "max_paid_frac",                label: "Paid Frac" },
+    { key: "any_active_ua",               label: "Active UA" },
+    { key: "all_ua_networks",              label: "UA Networks",   className: "min-w-[200px]" },
+    { key: "any_moloco_supply",            label: "Supply Visible" },
+    { key: "moloco_media_cost_30d",        label: "Moloco Cost 30d" },
   ];
   const LIST_SOURCE = "no-sdk-no-ua";
 
@@ -163,31 +169,55 @@ function CompanyTable({ rows, query }: { rows: CompanyRow[]; query: TopListsQuer
         <tbody>
           {rows.map((row) => (
             <tr
-              key={`${row.companyName}-${row.finalHqCountry}-${row.companyProspectLabel}`}
+              key={`${row.companyName}-${row.hqCountry}-${row.priority}`}
               className="border-b border-border text-sm transition hover:bg-muted"
             >
               <td className="px-6 py-4">
                 <TierBadge label={row.companyProspectLabel} />
               </td>
-              <td className="max-w-[220px] whitespace-normal break-words px-6 py-4 font-medium text-foreground">
+              <td className="max-w-[200px] whitespace-normal break-words px-6 py-4 font-medium text-foreground">
                 {row.companyName}
               </td>
-              <td className="px-6 py-4 text-muted-foreground">{row.finalHqCountry}</td>
-              <td className="px-6 py-4 text-muted-foreground">{row.teamRouting}</td>
-              <td className="max-w-[200px] px-6 py-4">
-                <MonetizationChips value={row.monetizationTypes} />
+              <td className="px-6 py-4 text-muted-foreground">{row.hqCountry || row.finalHqCountry}</td>
+              <td className="max-w-[140px] truncate px-6 py-4 text-muted-foreground">
+                {row.website ? (
+                  <a href={row.website.startsWith("http") ? row.website : `https://${row.website}`}
+                     target="_blank" rel="noopener noreferrer"
+                     className="text-accent hover:underline">
+                    {row.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                  </a>
+                ) : "—"}
               </td>
-              <td className="px-6 py-4 text-muted-foreground">{row.totalApps}</td>
-              <td className="px-6 py-4 text-muted-foreground">
-                {formatCompactNumber(row.totalDownloadsLatestMonth)}
+              <td className="px-6 py-4 text-muted-foreground">{row.teamRouting}</td>
+              <td className="px-6 py-4 text-muted-foreground">{row.appCount || row.totalApps}</td>
+              <td className="px-6 py-4 text-muted-foreground">{row.osMix || "—"}</td>
+              <td className="max-w-[180px] whitespace-normal break-words px-6 py-4 text-muted-foreground">
+                {row.genres || "—"}
               </td>
               <td className="px-6 py-4">
-                <SupplyVisibleBadge visible={row.isMolocoSupplyVisible} />
+                <MonetizationChips value={row.monetizationTypes} />
+              </td>
+              <td className="px-6 py-4 text-muted-foreground">
+                {formatCompactNumber(row.totalDownloads || row.totalDownloadsLatestMonth)}
+              </td>
+              <td className="px-6 py-4 text-muted-foreground">
+                {row.totalMau ? formatCompactNumber(row.totalMau) : "—"}
+              </td>
+              <td className="px-6 py-4 text-muted-foreground">
+                {row.maxPaidFrac ? `${(row.maxPaidFrac * 100).toFixed(0)}%` : "—"}
+              </td>
+              <td className="px-6 py-4">
+                <SupplyVisibleBadge visible={row.anyActiveUa} />
+              </td>
+              <td className="max-w-[200px] whitespace-normal break-words px-6 py-4 text-muted-foreground">
+                {row.allUaNetworks || row.allActiveNetworks || "—"}
+              </td>
+              <td className="px-6 py-4">
+                <SupplyVisibleBadge visible={row.isMolocoSupplyVisible || row.anyMolocoSupply} />
               </td>
               <td className="px-6 py-4 font-semibold text-foreground">
-                {formatCurrency(row.molocoMediaCost30d)}
+                {row.molocoMediaCost30d ? formatCurrency(row.molocoMediaCost30d) : "—"}
               </td>
-              <td className="px-6 py-4 text-muted-foreground">{row.appsWithOtherExchangeSdk}</td>
               <td className="px-4 py-4">
                 <LeadModal
                   companyName={row.companyName}
@@ -207,14 +237,13 @@ function CompanyTable({ rows, query }: { rows: CompanyRow[]; query: TopListsQuer
 
 function AppsTable({ rows, query }: { rows: AppRow[]; query: TopListsQuery }) {
   const columns: SortableColumn[] = [
-    { key: "prospect_label",                 label: "Label" },
+    { key: "priority",                       label: "Priority" },
     { key: "app_name",                       label: "App",            className: "min-w-[220px]" },
     { key: "company_name",                   label: "Company",        className: "min-w-[180px]" },
     { key: "team_routing",                   label: "Routing" },
     { key: "genre",                          label: "Genre" },
     { key: "monetization_type",              label: "Monetization" },
     { key: "downloads_latest_month",         label: "DL / mo" },
-    { key: "download_growth_rate_mom",       label: "MoM %" },
     { key: "active_ua_networks",             label: "UA Networks",    className: "min-w-[180px]" },
     { key: "is_moloco_supply_visible",       label: "Supply Visible" },
     { key: "moloco_media_cost_usd_30d",      label: "Media Cost 30d" },
@@ -254,14 +283,8 @@ function AppsTable({ rows, query }: { rows: AppRow[]; query: TopListsQuery }) {
               <td className="px-6 py-4 text-muted-foreground">
                 {formatCompactNumber(row.downloadsLatestMonth)}
               </td>
-              <td className={cn(
-                "px-6 py-4 font-semibold",
-                row.downloadGrowthRateMom >= 0 ? "text-success" : "text-destructive",
-              )}>
-                {formatPercent(row.downloadGrowthRateMom)}
-              </td>
               <td className="max-w-[180px] whitespace-normal break-words px-6 py-4 text-muted-foreground">
-                {row.activeUaNetworks}
+                {row.activeUaNetworks || "—"}
               </td>
               <td className="px-6 py-4">
                 <SupplyVisibleBadge visible={row.isMolocoSupplyVisible} />
@@ -389,10 +412,9 @@ const NO_SDK_NO_UA_FIELDS = [
     label: "Priority",
     options: [
       { label: "All",        value: "all" },
-      { label: "P1",         value: "P1" },
-      { label: "P2",         value: "P2" },
-      { label: "P3",         value: "P3" },
-      { label: "P4",         value: "P4" },
+      { label: "P1 Prime",   value: "P1" },
+      { label: "P2 Strong",  value: "P2" },
+      { label: "P3 Cold",    value: "P3" },
     ],
   },
   {

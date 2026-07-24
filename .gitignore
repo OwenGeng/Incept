@@ -29,6 +29,16 @@ setup-secrets.sh
 # ── Deploy temp files ─────────────────────────────────────────────────────────
 .api-url.tmp
 *.bak
+tmp/
+
+# ── Local credentials and certificate material ────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*service-account*.json
+*credentials*.json
+secrets/
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log

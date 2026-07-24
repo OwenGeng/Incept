@@ -20,8 +20,9 @@ class Settings(BaseModel):
     gcp_project_id: str | None = Field(default=None)
     gcp_location: str = Field(default="global")
     incept_asset_bucket: str = Field(default="INCEPT_ASSET_BUCKET")
+    incept_require_gcs_upload: bool = Field(default=False)
     bigquery_enabled: bool = Field(default=False)
-    bigquery_dataset: str = Field(default="incept")
+    bigquery_dataset: str = Field(default="Incept")
     bigquery_table_prefix: str = Field(default="ll_")
 
     openai_api_key: str | None = Field(default=None)
@@ -36,6 +37,20 @@ class Settings(BaseModel):
     vertex_gemini_image_model: str = Field(default="gemini-3.1-flash-image")
     vertex_gemini_enabled: bool = Field(default=True)
     vertex_gemini_model: str = Field(default="gemini-3.1-flash-lite")
+    vertex_playable_model: str = Field(default="gemini-3.6-flash")
+    # Keep video planning on the richer model without changing image/remediation analysis.
+    vertex_video_analysis_model: str = Field(default="gemini-3.6-flash")
+    vertex_lyria_model: str = Field(default="lyria-3-clip-preview")
+    vertex_lyria_location: str = Field(default="global")
+    vertex_lyria_enabled: bool = Field(default=True)
+    vertex_veo_fast_model: str = Field(default="veo-3.1-fast-generate-001")
+    vertex_veo_location: str = Field(default="us-central1")
+    vertex_veo_model: str = Field(default="")
+    studio_user_budget_usd: float = Field(default=500.0)
+    veo_fast_estimated_cost_per_second_usd: float = Field(default=0.08)
+    creative_core_home: str = Field(default="")
+    playable_capture_chrome_path: str = Field(default="")
+    playable_capture_ffmpeg_path: str = Field(default="")
     gcp_vision_enabled: bool = Field(default=False)
     max_image_variants: int = Field(default=2)
     max_output_sizes: int = Field(default=32)
@@ -64,8 +79,9 @@ def get_settings() -> Settings:
         gcp_project_id=os.getenv("GCP_PROJECT_ID") or os.getenv("GOOGLE_CLOUD_PROJECT"),
         gcp_location=os.getenv("GCP_LOCATION", "global"),
         incept_asset_bucket=os.getenv("INCEPT_ASSET_BUCKET", "INCEPT_ASSET_BUCKET"),
+        incept_require_gcs_upload=os.getenv("INCEPT_REQUIRE_GCS_UPLOAD", "false").lower() == "true",
         bigquery_enabled=os.getenv("BIGQUERY_ENABLED", "false").lower() == "true",
-        bigquery_dataset=os.getenv("BIGQUERY_DATASET", "incept"),
+        bigquery_dataset=os.getenv("BIGQUERY_DATASET", "Incept"),
         bigquery_table_prefix=os.getenv("BIGQUERY_TABLE_PREFIX", "ll_"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         default_image_provider=os.getenv("DEFAULT_IMAGE_PROVIDER", "gemini"),
@@ -76,6 +92,19 @@ def get_settings() -> Settings:
         vertex_gemini_image_model=os.getenv("VERTEX_GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
         vertex_gemini_enabled=os.getenv("VERTEX_GEMINI_ENABLED", "true").lower() == "true",
         vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.1-flash-lite"),
+        vertex_playable_model=os.getenv("VERTEX_PLAYABLE_MODEL", "gemini-3.6-flash"),
+        vertex_video_analysis_model=os.getenv("VERTEX_VIDEO_ANALYSIS_MODEL", "gemini-3.6-flash"),
+        vertex_lyria_model=os.getenv("VERTEX_LYRIA_MODEL", "lyria-3-clip-preview"),
+        vertex_lyria_location=os.getenv("VERTEX_LYRIA_LOCATION", "global"),
+        vertex_lyria_enabled=os.getenv("VERTEX_LYRIA_ENABLED", "true").lower() == "true",
+        vertex_veo_fast_model=os.getenv("VERTEX_VEO_FAST_MODEL") or "veo-3.1-fast-generate-001",
+        vertex_veo_location=os.getenv("VERTEX_VEO_LOCATION") or "us-central1",
+        vertex_veo_model=os.getenv("VERTEX_VEO_MODEL", ""),
+        studio_user_budget_usd=float(os.getenv("STUDIO_USER_BUDGET_USD", "500")),
+        veo_fast_estimated_cost_per_second_usd=float(os.getenv("VEO_FAST_ESTIMATED_COST_PER_SECOND_USD", "0.08")),
+        creative_core_home=os.getenv("CREATIVE_CORE_HOME", ""),
+        playable_capture_chrome_path=os.getenv("PLAYABLE_CAPTURE_CHROME_PATH", ""),
+        playable_capture_ffmpeg_path=os.getenv("PLAYABLE_CAPTURE_FFMPEG_PATH", ""),
         gcp_vision_enabled=os.getenv("GCP_VISION_ENABLED", "false").lower() == "true",
         max_image_variants=int(os.getenv("MAX_IMAGE_VARIANTS", "2")),
         max_output_sizes=int(os.getenv("MAX_OUTPUT_SIZES", "32")),

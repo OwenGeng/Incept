@@ -8,6 +8,7 @@ import type {
   RefreshSnapshotResponse,
   TopListsPayload,
   WeeklyBriefPayload,
+  WeeklyBriefSummaryPayload,
 } from "@/types/supply";
 import type { AiInsightsPayload } from "@/types/ai-insights";
 
@@ -157,6 +158,10 @@ export function getWeeklyBrief(user?: SessionUser) {
   return fetchFromApi<WeeklyBriefPayload>("/api/v1/supply-smb/weekly-brief", user);
 }
 
+export function getWeeklyBriefSummary(user?: SessionUser) {
+  return fetchFromApi<WeeklyBriefSummaryPayload>("/api/v1/supply-smb/weekly-brief/summary", user);
+}
+
 export function getTopLists(user?: SessionUser, query?: TopListsQuery) {
   return fetchFromApi<TopListsPayload>(
     `/api/v1/supply-smb/top-lists${buildQueryString({
@@ -209,6 +214,7 @@ export function refreshSnapshot(user?: SessionUser) {
   return fetchFromApi<RefreshSnapshotResponse>("/api/v1/supply-smb/refresh-snapshot", user, { method: "POST" });
 }
 
+
 // ── Lead Tracking ──────────────────────────────────────────────────────────────
 
 export function getLeads(user?: SessionUser, withAttribution = false) {
@@ -245,6 +251,58 @@ export function updateLeadStatus(
 
 export function getAiInsights(user?: SessionUser, scope = "no-sdk-no-ua") {
   return fetchFromApi<AiInsightsPayload>(`/api/v1/ai-insights?scope=${scope}`, user);
+}
+
+// ── Cold Prospects ─────────────────────────────────────────────────────────────
+
+export type ColdProspectOverview = {
+  totalApps: number;
+  totalCompanies: number;
+  p1Count: number;
+  p2Count: number;
+  p3Count: number;
+  dataAsOf: string;
+  wowNew: number;
+  wowDropped: number;
+  avgPaidFracP1: number;
+  avgPaidFracP2: number;
+  topUaNetworks: { network: string; appCount: number }[];
+};
+
+export type ColdProspectApp = {
+  appMarketBundle: string;
+  appName: string;
+  companyName: string;
+  os: string;
+  priority: string;
+  paidFrac: number | null;
+  stLastMonthDownloads: number | null;
+  mauWw: number | null;
+  activeUaNetworks: string | null;
+  monetizationType: string | null;
+  genre: string | null;
+  hqCountry: string | null;
+};
+
+export type ColdProspectAppsPayload = {
+  total: number;
+  page: number;
+  pageSize: number;
+  apps: ColdProspectApp[];
+};
+
+export function getColdProspectOverview(user?: SessionUser) {
+  return fetchFromApi<ColdProspectOverview>("/api/v1/cold-prospects/overview", user);
+}
+
+export function getColdProspectApps(
+  user?: SessionUser,
+  query?: { priority?: string; os?: string; search?: string; page?: string },
+) {
+  return fetchFromApi<ColdProspectAppsPayload>(
+    `/api/v1/cold-prospects/apps${buildQueryString(query)}`,
+    user,
+  );
 }
 
 // ── Admin: User Management ─────────────────────────────────────────────────────

@@ -3,11 +3,14 @@ Admin-only endpoints for user management.
 All routes require the internal API key + admin role.
 """
 import logging
+import os
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 logger = logging.getLogger(__name__)
 
+from app.incept.auth import get_current_user, require_role
+from app.incept.models import Role, User
 from app.models.admin import (
     VALID_ROLES,
     UserBulkCreate,
@@ -16,16 +19,13 @@ from app.models.admin import (
     UserRecord,
     UserUpdate,
 )
-from app.services.auth import require_internal_key
 from app.services.bq_access import BQAccessService
 
-# ── Admin email (hardcoded) ────────────────────────────────────────────────────
-ADMIN_EMAIL = "owen.geng@moloco.com"
+ADMIN_EMAIL = os.getenv("INCEPT_ADMIN_EMAIL", "owen.geng@moloco.com")
 
 router = APIRouter(
     prefix="/api/v1/admin",
     tags=["admin"],
-    dependencies=[Depends(require_internal_key)],
 )
 
 _service: BQAccessService | None = None
@@ -38,12 +38,9 @@ def _get_service() -> BQAccessService:
     return _service
 
 
-def _require_admin(x_user_role: str = Header(default="")) -> None:
-    if x_user_role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin role required.",
-        )
+def _require_admin(user: User = Depends(get_current_user)) -> User:
+    require_role(user, Role.admin)
+    return user
 
 
 def _validate_role(role: str) -> None:
@@ -78,7 +75,7 @@ def list_users() -> UserListPayload:
             detail=(
                 f"User list unavailable — BigQuery query failed: {exc}. "
                 "Check BQ_WRITE_PROJECT / GCP_PROJECT_DEPLOY env vars and that "
-                "the `config.users` table exists with columns (email, role, allowed_projects ARRAY<STRING>)."
+                "the `Incept.users` table exists with columns (email, role, allowed_projects ARRAY<STRING>)."
             ),
         ) from exc
 

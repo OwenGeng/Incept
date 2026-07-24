@@ -188,7 +188,7 @@ meta AS (
 
   FROM `ads-bpd-guard-china.athena.dim1_app_v3`
   WHERE (
-    UPPER(sensortower.company.hq_country) IN ('CN','CHN','CHINA','HK','HKG','TW','TWN','SG','SGP')
+    UPPER(sensortower.company.hq_country) IN ('CN','CHN','CHINA','HK','HKG','TW','TWN')
     OR sensortower.company.hq_country IS NULL
     OR TRIM(sensortower.company.hq_country) = ''
   )
@@ -262,6 +262,82 @@ net_signals AS (
     COUNTIF(LOWER(network) NOT LIKE '%moloco%')                AS competitor_network_count
   FROM `ads-bpd-guard-china.sensortower.network_analysis`
   WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+  GROUP BY app_id
+),
+
+-- ─────────────────────────────────────────────────────────────────
+-- CTE 4b: top_app_market — SOV, TAM network coverage, installed SDK signals
+-- sov_latest        : peak Share of Voice in last 90 days
+-- tam_active_networks: networks where app appears as a top app (cross-check vs network_analysis)
+-- installed_sdk_count: count of third-party ad/MMP SDKs detected (from custom_tags)
+-- installed_sdk_list : names of those SDKs as a comma-separated string
+-- ─────────────────────────────────────────────────────────────────
+top_app_mkt AS (
+  SELECT
+    app_id,
+    MAX(sov)                                                             AS sov_latest,
+    STRING_AGG(DISTINCT network ORDER BY network)                        AS tam_active_networks,
+    COUNT(DISTINCT network)                                              AS tam_network_count,
+    MAX(
+      (CASE WHEN custom_tags.has_sdk_adjust     = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_applovin   = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_appsflyer  = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_branch     = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_ironsource = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_kochava    = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_mintegral  = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_singular   = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_tenjin     = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_unity      = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_unity_ads  = true THEN 1 ELSE 0 END) +
+      (CASE WHEN custom_tags.has_sdk_vungle     = true THEN 1 ELSE 0 END)
+    )                                                                    AS installed_sdk_count,
+    MAX(ARRAY_TO_STRING(
+      ARRAY(SELECT x FROM UNNEST([
+        IF(custom_tags.has_sdk_adjust,    'Adjust',     NULL),
+        IF(custom_tags.has_sdk_applovin,  'AppLovin',   NULL),
+        IF(custom_tags.has_sdk_appsflyer, 'AppsFlyer',  NULL),
+        IF(custom_tags.has_sdk_branch,    'Branch',     NULL),
+        IF(custom_tags.has_sdk_ironsource,'IronSource', NULL),
+        IF(custom_tags.has_sdk_kochava,   'Kochava',    NULL),
+        IF(custom_tags.has_sdk_mintegral, 'Mintegral',  NULL),
+        IF(custom_tags.has_sdk_singular,  'Singular',   NULL),
+        IF(custom_tags.has_sdk_tenjin,    'Tenjin',     NULL),
+        IF(custom_tags.has_sdk_unity,     'Unity',      NULL),
+        IF(custom_tags.has_sdk_unity_ads, 'Unity Ads',  NULL),
+        IF(custom_tags.has_sdk_vungle,    'Vungle',     NULL)
+      ]) AS x WHERE x IS NOT NULL
+    ), ', '))                                                            AS installed_sdk_list
+  FROM `ads-bpd-guard-china.sensortower.top_app_market`
+  WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+  GROUP BY app_id
+),
+
+-- ─────────────────────────────────────────────────────────────────
+-- CTE 4c: Download channel breakdown (sensortower.download_channel_v3, 30d)
+-- download_details: absolute download counts by channel
+-- download_shares: % share by channel (averaged across days/countries)
+-- ─────────────────────────────────────────────────────────────────
+dl_channel AS (
+  SELECT
+    app_id,
+    SUM(download_details.web_browser)      AS dl_web_browser,
+    SUM(download_details.organic)          AS dl_organic,
+    SUM(download_details.organic_browse)   AS dl_organic_browse,
+    SUM(download_details.organic_search)   AS dl_organic_search,
+    SUM(download_details.paid_channel)     AS dl_paid_channel,
+    SUM(download_details.paid_ads)         AS dl_paid_ads,
+    SUM(download_details.paid_search)      AS dl_paid_search,
+    ROUND(AVG(download_shares.web_browser),    4) AS share_web_browser,
+    ROUND(AVG(download_shares.organic),        4) AS share_organic,
+    ROUND(AVG(download_shares.organic_browse), 4) AS share_organic_browse,
+    ROUND(AVG(download_shares.organic_search), 4) AS share_organic_search,
+    ROUND(AVG(download_shares.paid_channel),   4) AS share_paid_channel,
+    ROUND(AVG(download_shares.paid_ads),       4) AS share_paid_ads,
+    ROUND(AVG(download_shares.paid_search),    4) AS share_paid_search
+  FROM `ads-bpd-guard-china.sensortower.download_channel_v3`
+  WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+    AND app_id IS NOT NULL
   GROUP BY app_id
 ),
 
@@ -409,6 +485,28 @@ app_level AS (
       ELSE false
     END                                                                AS has_other_exchange_sdk,
     COALESCE(pe.pub_other_exchange_list, 'None')                      AS active_other_exchange_sdks,
+    COALESCE(pe.pub_other_exchange_count, 0)                          AS other_exchange_sdk_count,
+    -- top_app_market signals (SOV + TAM network coverage + installed SDK fingerprint)
+    COALESCE(tam.sov_latest, 0)                                       AS sov_latest,
+    COALESCE(tam.tam_active_networks, 'None')                         AS tam_active_networks,
+    COALESCE(tam.tam_network_count, 0)                                AS tam_network_count,
+    COALESCE(tam.installed_sdk_count, 0)                              AS installed_sdk_count,
+    COALESCE(tam.installed_sdk_list, 'None')                          AS installed_sdk_list,
+    -- Download channel breakdown (sensortower.download_channel_v3, 30d)
+    COALESCE(dc.dl_web_browser,    0) AS dl_web_browser,
+    COALESCE(dc.dl_organic,        0) AS dl_organic,
+    COALESCE(dc.dl_organic_browse, 0) AS dl_organic_browse,
+    COALESCE(dc.dl_organic_search, 0) AS dl_organic_search,
+    COALESCE(dc.dl_paid_channel,   0) AS dl_paid_channel,
+    COALESCE(dc.dl_paid_ads,       0) AS dl_paid_ads,
+    COALESCE(dc.dl_paid_search,    0) AS dl_paid_search,
+    COALESCE(dc.share_web_browser,    0) AS share_web_browser,
+    COALESCE(dc.share_organic,        0) AS share_organic,
+    COALESCE(dc.share_organic_browse, 0) AS share_organic_browse,
+    COALESCE(dc.share_organic_search, 0) AS share_organic_search,
+    COALESCE(dc.share_paid_channel,   0) AS share_paid_channel,
+    COALESCE(dc.share_paid_ads,       0) AS share_paid_ads,
+    COALESCE(dc.share_paid_search,    0) AS share_paid_search,
     -- Moloco supply visibility (from supply_demand_overlap — positive signal)
     -- is_supply_partner=true → Moloco DSP already buying this app's inventory via open exchange.
     -- Strongest IAA confirmation + best SDK pitch entry point.
@@ -430,21 +528,21 @@ app_level AS (
       -- ── List 5 (IAP): UA-pitch priority based on download scale ─────────────
       WHEN m.monetization_type = 'IAP' THEN
         CASE
-          -- P1: large downloads + already spending on competitor UA + T1 market presence
+          -- P1: large downloads + T1 top market
           WHEN d.downloads_latest_month >= 100000
-           AND COALESCE(n.competitor_network_count, 0) > 0
-           AND COALESCE(g.t1_downloads_total, 0) > 0           THEN 'P1 — UA Ready'
-          -- P2: meaningful scale + T1 presence (not yet on UA networks)
+           AND UPPER(pm.top_country_latest_month) IN ('US','CA','DE','FR','GB','AU','JP','KR','TW')
+            THEN 'P1 — UA Ready'
+          -- P2: meaningful scale + T1 top market
           WHEN d.downloads_latest_month >= 50000
-           AND COALESCE(g.t1_downloads_total, 0) > 0            THEN 'P2 — T1 Scale'
+           AND UPPER(pm.top_country_latest_month) IN ('US','CA','DE','FR','GB','AU','JP','KR','TW')
+            THEN 'P2 — T1 Scale'
           -- P3: growing app, smaller scale
           WHEN d.downloads_latest_month >= 20000                THEN 'P3 — Growing'
           ELSE                                                        'P4 — Cold'
         END
       -- ── List 4/6 (IAA/Hybrid): supply-visibility + media-cost ───────────────
-      -- P1: CHN only, all 4 signals — NBS direct priority
-      WHEN UPPER(COALESCE(gtm.final_hq_country, m.hq_country)) IN ('CHN','CHINA','CN')
-       AND COALESCE(sv.is_supply_partner, false) = true
+      -- P1: all Greater China HQ, all 4 signals — NBS direct priority
+      WHEN COALESCE(sv.is_supply_partner, false) = true
        AND COALESCE(sv.sdl_media_cost_usd_30d, 0) > 2000
        AND d.downloads_latest_month >= 100000
        AND SAFE_DIVIDE(
@@ -452,9 +550,8 @@ app_level AS (
              NULLIF(CAST(d.downloads_prior_month AS FLOAT64), 0)
            ) > 0.1
         THEN 'P1 — Prime'
-      -- P2: CHN only, sv + mc>$500 + dl>=50K + MoM>-10%
-      WHEN UPPER(COALESCE(gtm.final_hq_country, m.hq_country)) IN ('CHN','CHINA','CN')
-       AND COALESCE(sv.is_supply_partner, false) = true
+      -- P2: all Greater China HQ, sv + mc>$500 + dl>=50K + MoM>-10%
+      WHEN COALESCE(sv.is_supply_partner, false) = true
        AND COALESCE(sv.sdl_media_cost_usd_30d, 0) > 500
        AND d.downloads_latest_month >= 50000
        AND SAFE_DIVIDE(
@@ -474,24 +571,21 @@ app_level AS (
       WHEN m.monetization_type = 'IAP' THEN
         CASE
           WHEN d.downloads_latest_month >= 100000
-           AND COALESCE(n.competitor_network_count, 0) > 0
-           AND COALESCE(g.t1_downloads_total, 0) > 0           THEN 1
+           AND UPPER(pm.top_country_latest_month) IN ('US','CA','DE','FR','GB','AU','JP','KR','TW') THEN 1
           WHEN d.downloads_latest_month >= 50000
-           AND COALESCE(g.t1_downloads_total, 0) > 0            THEN 2
+           AND UPPER(pm.top_country_latest_month) IN ('US','CA','DE','FR','GB','AU','JP','KR','TW') THEN 2
           WHEN d.downloads_latest_month >= 20000                THEN 3
           ELSE                                                        4
         END
-      -- IAA/Hybrid path (unchanged)
-      WHEN UPPER(COALESCE(gtm.final_hq_country, m.hq_country)) IN ('CHN','CHINA','CN')
-       AND COALESCE(sv.is_supply_partner, false) = true
+      -- IAA/Hybrid path (CHN mainland condition removed — applies to all Greater China HQ)
+      WHEN COALESCE(sv.is_supply_partner, false) = true
        AND COALESCE(sv.sdl_media_cost_usd_30d, 0) > 2000
        AND d.downloads_latest_month >= 100000
        AND SAFE_DIVIDE(
              CAST(d.downloads_latest_month - d.downloads_prior_month AS FLOAT64),
              NULLIF(CAST(d.downloads_prior_month AS FLOAT64), 0)
            ) > 0.1                                                                THEN 1
-      WHEN UPPER(COALESCE(gtm.final_hq_country, m.hq_country)) IN ('CHN','CHINA','CN')
-       AND COALESCE(sv.is_supply_partner, false) = true
+      WHEN COALESCE(sv.is_supply_partner, false) = true
        AND COALESCE(sv.sdl_media_cost_usd_30d, 0) > 500
        AND d.downloads_latest_month >= 50000
        AND SAFE_DIVIDE(
@@ -511,6 +605,8 @@ app_level AS (
   LEFT JOIN sdk_bundles_exclude  sdk_ex ON m.app_market_bundle = sdk_ex.app_bundle
   LEFT JOIN supply_visibility    sv     ON m.app_market_bundle = sv.app_bundle
   LEFT JOIN net_signals n        ON m.st_app_id = n.app_id
+  LEFT JOIN top_app_mkt tam      ON m.st_app_id = tam.app_id
+  LEFT JOIN dl_channel dc        ON m.st_app_id = dc.app_id
   LEFT JOIN geo_metrics g        ON m.st_app_id = g.app_id
   LEFT JOIN pub_exchange pe      ON m.app_market_bundle = pe.bundle_id
   WHERE
@@ -525,7 +621,7 @@ app_level AS (
     -- Exclude domestic apps: if the #1 download market is China/HK/TW/MO,
     -- the app is primarily domestic-facing — not an overseas UA target.
     AND UPPER(pm.top_country_latest_month) NOT IN (
-      'CN','CHN','CHINA','HK','HKG','TW','TWN','MO','MAC'
+      'CN','CHN','CHINA','IN','IND'
     )
     -- Country filter (strict positive match only — no null/empty passthrough):
     -- Only include companies positively identified as Greater China / Singapore.
@@ -533,10 +629,10 @@ app_level AS (
     -- from entering the list when both GTM and ST country data are missing.
     AND (
       UPPER(COALESCE(gtm.final_hq_country, m.hq_country)) IN (
-        'CN','CHN','CHINA','HK','HKG','TW','TWN','SG','SGP'
+        'CN','CHN','CHINA','HK','HKG','TW','TWN'
       )
       OR (gtm.is_manually_corrected = true
-          AND UPPER(gtm.final_hq_country) IN ('CN','CHN','CHINA','HK','HKG','TW','TWN','SG','SGP'))
+          AND UPPER(gtm.final_hq_country) IN ('CN','CHN','CHINA','HK','HKG','TW','TWN'))
     )
 ),
 
@@ -547,6 +643,7 @@ company_level AS (
   SELECT
     -- list_type removed from GROUP BY — one row per company regardless of monetization mix
     company_name,
+    MAX(publisher_name)                                                AS publisher_name,
     STRING_AGG(DISTINCT list_type, ', ' ORDER BY list_type)           AS list_types,   -- e.g. "List4_IAA_New, List6_Hybrid_New"
     MAX(sensortower_hq_country)                                        AS sensortower_hq_country,
     MAX(final_hq_country)                                              AS final_hq_country,
@@ -566,6 +663,7 @@ company_level AS (
     MAX(downloads_month)                                               AS downloads_month,
     -- Aggregate active UA networks across all apps in the company
     STRING_AGG(DISTINCT active_ua_networks, ', ')                      AS all_active_networks,
+    STRING_AGG(DISTINCT tam_active_networks, ', ')                     AS all_tam_networks,
     -- Company prospect label: best (lowest score) app tier determines the company tier
     CASE MIN(priority_score)
       WHEN 1 THEN 'P1 — Prime'
@@ -581,6 +679,18 @@ company_level AS (
       DISTINCT CASE WHEN has_other_exchange_sdk THEN active_other_exchange_sdks END,
       ' | '
     )                                                                  AS other_exchange_sdk_detail,
+    MAX(sov_latest)                                                    AS max_sov_latest,
+    MAX(installed_sdk_count)                                           AS max_installed_sdk_count,
+    STRING_AGG(DISTINCT CASE WHEN installed_sdk_list != 'None' THEN installed_sdk_list END, ' | ')
+                                                                       AS all_installed_sdks,
+    SUM(dl_paid_channel)                                               AS total_dl_paid_channel,
+    SUM(dl_paid_ads)                                                   AS total_dl_paid_ads,
+    SUM(dl_paid_search)                                                AS total_dl_paid_search,
+    SUM(dl_organic)                                                    AS total_dl_organic,
+    ROUND(AVG(NULLIF(share_paid_channel, 0)), 4)                       AS avg_share_paid_channel,
+    ROUND(AVG(NULLIF(share_paid_ads,     0)), 4)                       AS avg_share_paid_ads,
+    ROUND(AVG(NULLIF(share_paid_search,  0)), 4)                       AS avg_share_paid_search,
+    ROUND(AVG(NULLIF(share_organic,      0)), 4)                       AS avg_share_organic,
     CURRENT_DATE()                                                     AS data_as_of
   FROM app_level
   WHERE company_name IS NOT NULL AND TRIM(company_name) != ''
@@ -588,19 +698,18 @@ company_level AS (
 )
 
 -- =============================================================================
--- TAB 1: COMPANY SUMMARY (default)
--- To switch to TAB 2 App Detail: comment out this block and uncomment below.
+-- COMPANY SUMMARY OUTPUT
 -- =============================================================================
 SELECT
   company_name,
-  list_types,               -- all lists this company's apps appear in (e.g. "List4_IAA_New, List6_Hybrid_New")
-  company_prospect_label,   -- P1/P2/P3/P4 based on best app in company
+  publisher_name,
+  list_types,
+  company_prospect_label,
   sensortower_hq_country,
   final_hq_country,
-  hq_region,
   team_routing,
   website,
-  monetization_types,       -- all monetization types present (e.g. "IAA, Hybrid-IAA")
+  monetization_types,
   total_apps,
   iaa_app_count,
   hybrid_app_count,
@@ -610,8 +719,20 @@ SELECT
   is_moloco_supply_visible,
   moloco_media_cost_usd_30d,
   all_active_networks,
+  all_tam_networks,
   apps_with_other_exchange_sdk,
   other_exchange_sdk_detail,
+  max_sov_latest,
+  max_installed_sdk_count,
+  all_installed_sdks,
+  total_dl_paid_channel,
+  total_dl_paid_ads,
+  total_dl_paid_search,
+  total_dl_organic,
+  avg_share_paid_channel,
+  avg_share_paid_ads,
+  avg_share_paid_search,
+  avg_share_organic,
   data_as_of
 FROM company_level
 WHERE company_name IS NOT NULL AND TRIM(company_name) != ''
@@ -620,53 +741,3 @@ ORDER BY
   total_downloads_latest_month DESC
 ;
 
--- =============================================================================
--- TAB 2: APP DETAIL (uncomment this block to replace TAB 1)
--- =============================================================================
-/*
-SELECT
-  list_type,
-  prospect_label,
-  app_market_bundle,
-  os,
-  app_name,
-  company_name,
-  publisher_name,
-  sensortower_hq_country,         -- ST raw HQ country
-  final_hq_country,               -- GTM-verified HQ country (preferred)
-  hq_country_source,              -- 'GTM_triage' = verified; 'ST_original' = unverified fallback
-  hq_region,
-  website,
-  team_routing,
-  monetization_type,
-  genre,
-  downloads_month,                -- period label for downloads_latest_month (e.g. 2026-05)
-  downloads_prior_month_label,    -- prior month label (e.g. 2026-04)
-  downloads_latest_month,         -- latest full month global downloads (domestic apps already excluded)
-  downloads_prior_month,          -- prior full month global downloads (MoM denominator)
-  download_growth_rate_mom,       -- month-over-month growth rate (latest / prior - 1)
-  active_ua_networks,             -- UA networks active in last 90d (comma-separated, sorted by impression vol)
-  has_other_exchange_sdk,         -- true = connected to other exchange SDK(s) but no Moloco SDK
-  active_other_exchange_sdks,     -- which exchanges (sorted by impression volume, descending)
-  -- Moloco supply visibility (from supply_demand_overlap)
-  is_moloco_supply_visible,       -- true = Moloco DSP already buying this app's inventory via open exchange
-  moloco_media_cost_usd_30d,      -- 30d media cost Moloco paid for this app via open exchange
-  moloco_media_cost_usd_7d,       -- 7d snapshot (recency check)
-  moloco_bid_requests,            -- bid request volume
-  sdl_eligibility_status,         -- Moloco eligibility status
-  app_last_updated_time,          -- ST last app update time
-  app_first_release_date,         -- ST first release date
-  -- T1 market downloads (US, CA, DE, FR, GB, AU, JP, KR, TW) from download_revenue_v3 (30d)
-  t1_downloads_total,             -- total downloads across all T1 countries
-  top_dl_country_T1,              -- T1 country with highest downloads
-  top_dl_country_T1_downloads
-FROM app_level
-WHERE company_name != 'Unknown'
-ORDER BY
-  list_type ASC,
-  is_moloco_supply_visible DESC,   -- Moloco-visible supply first — easiest SDK pitch
-  moloco_media_cost_usd_30d DESC,  -- higher spend = better inventory quality
-  competitor_network_count DESC,
-  downloads_latest_month DESC,
-  download_growth_rate_mom DESC;
-*/

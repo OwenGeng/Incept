@@ -1,8 +1,16 @@
-import { ArrowRight, CalendarDays, CheckCircle2, GitCompareArrows, RefreshCw, TrendingUp } from "lucide-react";
-import { Card, CardTitle } from "@/components/ui/card";
-import { EHBar } from "@/components/charts/EHBar";
+import { Suspense } from "react";
+import { ArrowRight, CalendarDays, CheckCircle2, RefreshCw } from "lucide-react";
+import { Card } from "@/components/ui/card";
 import { ProspectFunnel } from "@/components/supply-smb/prospect-funnel";
-import type { WeeklyBriefPayload } from "@/types/supply";
+import { RunPipelineButton } from "@/components/supply-smb/run-pipeline-button";
+import { RefreshDataButton } from "@/components/supply-smb/refresh-data-button";
+import {
+  WeeklyBriefSummaryLeft,
+  WeeklyBriefSummaryLeftSkeleton,
+  WeeklyBriefSummaryRight,
+  WeeklyBriefSummaryRightSkeleton,
+} from "@/components/supply-smb/weekly-brief-summary-section";
+import type { WeeklyBriefPayload, WeeklyBriefSummaryPayload } from "@/types/supply";
 import { cn } from "@/lib/utils";
 
 // Consistent with supply-badges.tsx tier colour palette
@@ -10,10 +18,15 @@ const tierStyles = {
   P1: { chip: "bg-[#EFF6FF] text-[#2563eb]",  line: "bg-[#3a86ff]" },
   P2: { chip: "bg-[#F3EEFB] text-[#8338ec]",  line: "bg-[#8338ec]" },
   P3: { chip: "bg-[#FFF0F6] text-[#db0058]",  line: "bg-[#ff006e]" },
-  P4: { chip: "bg-[#F1F5F9] text-[#475569]",  line: "bg-[#94a3b8]" },
 } as const;
 
-export function WeeklyBriefView({ data }: { data: WeeklyBriefPayload }) {
+export function WeeklyBriefView({
+  data,
+  summaryPromise,
+}: {
+  data: WeeklyBriefPayload;
+  summaryPromise: Promise<WeeklyBriefSummaryPayload>;
+}) {
   return (
     <div className="space-y-6">
       {/* ── Hero brief card ── */}
@@ -34,77 +47,31 @@ export function WeeklyBriefView({ data }: { data: WeeklyBriefPayload }) {
                 {data.title}
               </h2>
             </div>
-            <div className="flex items-center gap-2 rounded-full bg-soft-accent px-4 py-1.5 text-sm font-medium text-accent">
-              <CalendarDays className="size-3.5" />
-              {data.dateRange}
+            <div className="flex items-center gap-2">
+              <RefreshDataButton />
+              <RunPipelineButton />
+              <div className="flex items-center gap-2 rounded-full bg-soft-accent px-4 py-1.5 text-sm font-medium text-accent">
+                <CalendarDays className="size-3.5" />
+                {data.dateRange}
+              </div>
             </div>
           </div>
 
           {/* Body: 2-col grid */}
           <div className="grid gap-5 lg:grid-cols-[1.7fr_1fr]">
 
-            {/* Left: summary + opportunity */}
+            {/* Left: summary + opportunity — streams in separately, doesn't block the page */}
             <div className="space-y-4">
-              <p className="text-[15px] leading-8 text-muted-foreground">{data.summary}</p>
-
-              <div className="rounded-2xl border-l-4 border-accent bg-[#F0F5FF] px-5 py-4">
-                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">
-                  Opportunity
-                </div>
-                <p className="text-sm leading-7 text-[#344163]">{data.opportunity}</p>
-              </div>
+              <Suspense fallback={<WeeklyBriefSummaryLeftSkeleton />}>
+                <WeeklyBriefSummaryLeft summaryPromise={summaryPromise} />
+              </Suspense>
             </div>
 
             {/* Right: insight boxes */}
             <div className="space-y-3">
-              {/* Big things this week */}
-              <div className="rounded-2xl bg-muted px-5 py-4">
-                <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-foreground">
-                  <TrendingUp className="size-3.5 text-accent" />
-                  Big things this week
-                </div>
-                <div className="space-y-2.5 text-sm leading-7 text-muted-foreground">
-                  {data.bigThings && data.bigThings.length > 0 ? (
-                    data.bigThings.map((item, i) => (
-                      <div key={i} className="flex items-start gap-2">
-                        <span className="mt-2.5 size-1.5 shrink-0 rounded-full bg-accent" />
-                        <span>{item}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <>
-                      {[
-                        "Moloco-visible supply accounts anchor the top of the priority queue.",
-                        "Fast-growth gaming titles are clustering below the current P1 threshold.",
-                        "AI follow-up suggestions target stale notes and unverified HQ countries.",
-                      ].map((text, i) => (
-                        <div key={i} className="flex items-start gap-2">
-                          <span className="mt-2.5 size-1.5 shrink-0 rounded-full bg-accent" />
-                          <span>{text}</span>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Week-over-week — only when data available */}
-              {data.weekChanges && data.weekChanges.length > 0 && (
-                <div className="rounded-2xl bg-muted px-5 py-4">
-                  <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold text-foreground">
-                    <GitCompareArrows className="size-3.5 text-[#8338ec]" />
-                    vs. last week
-                  </div>
-                  <div className="space-y-2.5 text-sm leading-7 text-muted-foreground">
-                    {data.weekChanges.map((item, i) => (
-                      <div key={i} className="flex items-start gap-2">
-                        <span className="mt-2.5 size-1.5 shrink-0 rounded-full bg-[#8338ec]" />
-                        <span>{item}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <Suspense fallback={<WeeklyBriefSummaryRightSkeleton />}>
+                <WeeklyBriefSummaryRight summaryPromise={summaryPromise} />
+              </Suspense>
 
               {/* Refresh status */}
               <div className="flex items-start gap-3 rounded-2xl bg-muted px-5 py-4">
@@ -147,7 +114,7 @@ export function WeeklyBriefView({ data }: { data: WeeklyBriefPayload }) {
 
       <div className="grid gap-4 xl:grid-cols-4">
         {data.priorities.map((card) => {
-          const style = tierStyles[card.tier];
+          const style = tierStyles[card.tier as keyof typeof tierStyles] ?? tierStyles.P3;
           return (
             <Card key={card.tier} className="relative overflow-hidden p-5">
               <div className={cn("absolute inset-x-0 top-0 h-1.5", style.line)} />
@@ -164,42 +131,11 @@ export function WeeklyBriefView({ data }: { data: WeeklyBriefPayload }) {
                 {card.apps ? `${card.apps} apps` : "companies"}
               </div>
               <p className="mt-4 text-sm leading-7 text-muted-foreground">{card.note}</p>
-              <div className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-foreground">
-                {card.route}
-              </div>
             </Card>
           );
         })}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        {data.highlights.map((item) => (
-          <Card key={item.label} className="p-6">
-            <CardTitle>{item.label}</CardTitle>
-            <div className="mt-4 text-[38px] font-semibold text-foreground">{item.value}</div>
-            <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.detail}</p>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        {data.supportingCharts.map((chart) => (
-          <Card key={chart.title} className="p-6">
-            <CardTitle>{chart.title}</CardTitle>
-            <p className="mt-2 text-sm leading-7 text-muted-foreground">{chart.description}</p>
-            <div className="mt-2">
-              <EHBar
-                rows={chart.rows.map((r) => ({
-                  label: r.label,
-                  barWidth: r.value,
-                  displayValue: r.display,
-                  color: r.color,
-                }))}
-              />
-            </div>
-          </Card>
-        ))}
-      </div>
     </div>
   );
 }

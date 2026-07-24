@@ -24,10 +24,10 @@ TOOLS = [
         id="veo-video",
         name="Veo Video",
         category="video_generation",
-        status="mock",
-        provider="mock",
+        status="enabled",
+        provider="gemini",
         owner="Growth AI",
-        description="Mock adapter for image-to-video and reference-based video workflows.",
+        description="Vertex AI Veo adapter for image-to-video, storyboard, and extend-video workflows.",
     ),
     ToolDefinition(
         id="lightweight-gif",

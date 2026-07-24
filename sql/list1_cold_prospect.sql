@@ -40,6 +40,25 @@ active_ua AS (
 ),
 
 -- ---------------------------------------------------------------------------
+-- CTE 2b: 2-year UA history (informational only — does NOT affect exclusion)
+-- ---------------------------------------------------------------------------
+ua_history_2y AS (
+  SELECT
+    product.app_market_bundle                                          AS bundle_id,
+    STRING_AGG(DISTINCT CAST(platform_id AS STRING) ORDER BY CAST(platform_id AS STRING))
+                                                                       AS historical_platform_ids,
+    ROUND(SUM(gross_spend_usd), 2)                                     AS historical_spend_2y_usd,
+    MIN(date_utc)                                                      AS first_ua_date_2y,
+    MAX(date_utc)                                                      AS last_ua_date_2y
+  FROM `ads-bpd-guard-china.athena.fact_dsp_core`
+  WHERE date_utc >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 YEAR)
+    AND gross_spend_usd > 0
+    AND product.app_market_bundle IS NOT NULL
+    AND product.app_market_bundle != ''
+  GROUP BY 1
+),
+
+-- ---------------------------------------------------------------------------
 -- CTE 3: supply_demand_overlap
 -- Removed: vertical, bid_requests, sdl_offices, sdl_ads_growth_managers,
 --          sdl_advertiser_names
@@ -49,6 +68,7 @@ sdl AS (
     app_bundle,
     MAX(is_moloco_sdk_app)              AS is_moloco_sdk_app,
     MAX(is_moloco_advertiser_app)       AS is_moloco_advertiser_app,
+    MAX(is_moloco_advertiser_publisher) AS is_moloco_advertiser_publisher,
     MAX(sdk_media_cost_usd)             AS sdk_media_cost_usd,
     MAX(pub_rank_30d)                   AS pub_rank_30d,
     MAX(sdk_media_cost_rank)            AS sdk_media_cost_rank,
@@ -59,7 +79,6 @@ sdl AS (
     MAX(eligibility_status)             AS eligibility_status,
     MAX(ineligibility_reasons)          AS ineligibility_reasons,
     MAX(eligibility_evaluation_date)    AS eligibility_evaluation_date,
-    MAX(success_threshold_status)       AS success_threshold_status
   FROM `ads-bpd-guard-china.gtm.supply_demand_overlap`
   GROUP BY app_bundle
 ),
@@ -193,8 +212,6 @@ tagged AS (
     s.app_name,
     s.os,
     COALESCE(
-      NULLIF(TRIM(s.tracking_publisher_name), ''),
-      NULLIF(TRIM(m.parent_company), ''),
       NULLIF(TRIM(m.company_name_st), ''),
       NULLIF(TRIM(s.company_name_supply), ''),
       'Unknown'
@@ -219,8 +236,9 @@ tagged AS (
       ELSE m.monetization_type
     END                                                 AS monetization_type,
     a.bundle_id IS NOT NULL                             AS is_buying_ua,
-    COALESCE(d.is_moloco_sdk_app,        false)         AS is_moloco_sdk_app,
-    COALESCE(d.is_moloco_advertiser_app, false)         AS is_moloco_advertiser_app,
+    COALESCE(d.is_moloco_sdk_app,                false)  AS is_moloco_sdk_app,
+    COALESCE(d.is_moloco_advertiser_app,         false)  AS is_moloco_advertiser_app,
+    COALESCE(d.is_moloco_advertiser_publisher,   false)  AS is_moloco_advertiser_publisher,
     COALESCE(d.sdk_media_cost_usd,       0)             AS sdk_media_cost_usd_30d,
     d.pub_rank_30d,
     d.sdk_media_cost_rank,
@@ -231,17 +249,23 @@ tagged AS (
     d.eligibility_status,
     d.ineligibility_reasons,
     d.eligibility_evaluation_date,
-    d.success_threshold_status,
     n.active_ua_networks,
     COALESCE(n.competitor_network_count, 0)             AS competitor_network_count,
     g.total_downloads_30d,
     g.top_dl_country,
-    stc.top_sdk_impression_country
+    stc.top_sdk_impression_country,
+    -- 2-year UA history (informational — bundle had prior Moloco UA even if inactive now)
+    uh.bundle_id IS NOT NULL                                           AS has_ua_history_2y,
+    uh.historical_platform_ids,
+    uh.historical_spend_2y_usd,
+    uh.first_ua_date_2y,
+    uh.last_ua_date_2y
 
   FROM sdk_bundles s
   LEFT JOIN meta               m   ON s.bundle_id = m.app_market_bundle AND s.os = m.os
-  LEFT JOIN gtm_hq             gtm ON m.company_name_st = gtm.company_name
+  LEFT JOIN gtm_hq             gtm ON COALESCE(NULLIF(TRIM(m.parent_company), ''), m.company_name_st) = gtm.company_name
   LEFT JOIN active_ua          a   ON s.bundle_id = a.bundle_id
+  LEFT JOIN ua_history_2y      uh  ON s.bundle_id = uh.bundle_id
   LEFT JOIN sdl                d   ON s.bundle_id = d.app_bundle
   LEFT JOIN net_signals        n   ON m.st_app_id  = n.app_id
   LEFT JOIN geo_metrics        g   ON m.st_app_id  = g.app_id
@@ -267,10 +291,11 @@ company_level AS (
     MAX(sdl_sdk_growth_managers)                                  AS sdk_growth_managers
   FROM tagged
   WHERE canonical_company != 'Unknown'
-    AND UPPER(final_hq_country) IN ('CHN', 'HKG', 'TWN', 'MAC', 'SGP')
+    AND UPPER(final_hq_country) IN ('CN','CHN','CHINA','HK','HKG','TW','TWN')
   GROUP BY canonical_company
   HAVING COUNT(DISTINCT CASE WHEN is_buying_ua THEN bundle_id END) = 0
-    AND MAX(CASE WHEN is_moloco_advertiser_app THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN is_moloco_advertiser_app        THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN is_moloco_advertiser_publisher  THEN 1 ELSE 0 END) = 0
 )
 
 -- =============================================================================
@@ -278,6 +303,11 @@ company_level AS (
 -- =============================================================================
 SELECT
   'List 1 New'                          AS list_type,
+  CASE
+    WHEN t.sdk_media_cost_usd_30d > 10000 THEN 'P1'
+    WHEN t.sdk_media_cost_usd_30d >= 5000 THEN 'P2'
+    ELSE                                       'P3'
+  END                                   AS prospect_tier,
   cl.team_routing,
   t.canonical_company,
   t.tracking_publisher_name,
@@ -291,32 +321,26 @@ SELECT
   t.website,
   t.sdk_media_cost_usd_30d,
   t.sdk_media_cost_rank,
-  t.pub_rank_30d,
   t.eligibility_status,
   t.ineligibility_reasons,
-  t.eligibility_evaluation_date,
-  t.success_threshold_status,
-  t.mmp,
-  t.mmp_event_names,
-  t.sdl_sdk_growth_managers,
-  t.sdl_ads_growth_pods,
   t.active_ua_networks,
-  t.competitor_network_count,
   t.total_downloads_30d,
-  t.top_dl_country,
   t.top_sdk_impression_country,
-  cl.total_sdk_apps,
   cl.untapped_apps,
   cl.total_sdk_media_cost_usd_30d       AS company_sdk_media_cost_usd_30d,
   cl.monetization_types                 AS company_monetization_types,
   cl.eligibility_statuses               AS company_eligibility_statuses,
   cl.mmps                               AS company_mmps,
   cl.sdk_growth_managers,
-  CURRENT_DATE()                        AS data_as_of
+  t.has_ua_history_2y,
+  t.historical_platform_ids,
+  t.historical_spend_2y_usd,
+  t.first_ua_date_2y,
+  t.last_ua_date_2y
 
 FROM tagged t
 INNER JOIN company_level cl ON t.canonical_company = cl.canonical_company
-WHERE t.sdk_media_cost_usd_30d > 10000
+WHERE t.sdk_media_cost_usd_30d > 0
   AND t.is_buying_ua = false
 ORDER BY
   t.sdk_media_cost_usd_30d DESC;

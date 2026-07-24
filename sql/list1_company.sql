@@ -48,6 +48,7 @@ sdl AS (
     app_bundle,
     MAX(is_moloco_sdk_app)              AS is_moloco_sdk_app,
     MAX(is_moloco_advertiser_app)       AS is_moloco_advertiser_app,
+    MAX(is_moloco_advertiser_publisher) AS is_moloco_advertiser_publisher,
     MAX(sdk_media_cost_usd)             AS sdk_media_cost_usd,
     MAX(pub_rank_30d)                   AS pub_rank_30d,
     MAX(sdk_media_cost_rank)            AS sdk_media_cost_rank,
@@ -136,7 +137,8 @@ tagged AS (
       ELSE m.monetization_type
     END                                                 AS monetization_type,
     a.bundle_id IS NOT NULL                             AS is_buying_ua,
-    COALESCE(d.is_moloco_advertiser_app, false)         AS is_moloco_advertiser_app,
+    COALESCE(d.is_moloco_advertiser_app,       false)    AS is_moloco_advertiser_app,
+    COALESCE(d.is_moloco_advertiser_publisher, false)    AS is_moloco_advertiser_publisher,
     COALESCE(d.sdk_media_cost_usd,       0)             AS sdk_media_cost_usd_30d,
     d.eligibility_status,
     d.mmp,
@@ -171,7 +173,8 @@ company_level AS (
     AND UPPER(final_hq_country) IN ('CHN', 'HKG', 'TWN', 'MAC', 'SGP')
   GROUP BY canonical_company
   HAVING COUNT(DISTINCT CASE WHEN is_buying_ua THEN bundle_id END) = 0
-    AND MAX(CASE WHEN is_moloco_advertiser_app THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN is_moloco_advertiser_app        THEN 1 ELSE 0 END) = 0
+    AND MAX(CASE WHEN is_moloco_advertiser_publisher  THEN 1 ELSE 0 END) = 0
 )
 
 -- =============================================================================

@@ -163,13 +163,12 @@ Backend uses:
 
 ### Theme Create Prompt State
 
-The three Gemini-oriented prompt templates were added to `prompt_builder.py` and intentionally follow the provided prompt structures directly.
+The two active Gemini-oriented prompt templates live in `prompt_builder.py` and intentionally follow the provided prompt structures directly.
 
 Important prompt builder functions:
 
 - `build_theme_create_style_modify_prompt`
 - `build_theme_create_style_transfer_prompt`
-- `build_theme_create_asset_text_replace_prompt`
 
 ### Theme Create Backend State
 
@@ -186,10 +185,6 @@ Current fixed image order:
 - `style_transfer`
   - `[Image 1] = source`
   - `[Image 2] = reference`
-- `asset_text_replace`
-  - `[Image 1] = source`
-  - `[Image 2] = new logo`
-  - `[Image 3] = new element`
 
 ### Important Theme Create Files
 
@@ -202,6 +197,7 @@ Current fixed image order:
 ### Theme Create Risks / Known Caveats
 
 - The old `style_match` generation mode still exists in shared types and some backend enums, but the active UI path has been shifted away from it
+- `asset_text_replace` was removed from the live Theme Create UI and execution path, but a backend enum value remains for historical compatibility with older records
 - Theme Create UI was simplified, but not all cosmetic cleanup may be finished
 - The current mapping of main prompt into the style-modify template is functional but could be refined later if a cleaner prompt schema is desired
 

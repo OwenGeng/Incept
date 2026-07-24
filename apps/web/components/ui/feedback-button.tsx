@@ -89,10 +89,10 @@ export function FeedbackButton() {
   );
 }
 
-export function DocsButton() {
+export function DocsButton({ href = "/docs" }: { href?: string }) {
   return (
     <a
-      href="/docs"
+      href={href}
       className="rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
     >
       Docs

@@ -5,7 +5,7 @@ import { MessageSquare } from "lucide-react";
 export default function CtvAskAiPage() {
   return (
     <>
-      <Topbar title="Ask AI" subtitle="Your CTV data analyst — ask any question about your CTV business." />
+      <Topbar title="Ask AI" subtitle="Your CTV data analyst — ask any question about your CTV business." docsHref="/docs" />
       <Card className="p-10 text-center">
         <div className="mx-auto mb-5 flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#f97316] to-[#ea580c] shadow-lg">
           <MessageSquare className="size-8 text-white" />

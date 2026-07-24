@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import type { AppView } from "./Sidebar";
 import { Workspace } from "./Workspace";
-import type { AssetSummary, CreativeThreadSummary, InceptUser, JobSummary, WorkspaceSummary } from "@incept/shared";
-import { getCurrentUser, getJob, listAssets, listJobs, listThreads, listWorkspaces } from "@/lib/incept-api";
+import type { AssetSummary, CreativeThreadSummary, InceptUser, JobSummary } from "@incept/shared";
+import { getCurrentUser, getJob, listAssets, listJobs, listThreads, type ContentScope } from "@/lib/incept-api";
 
 const ANONYMOUS_USER: InceptUser = { id: "anon", name: "User", email: "", role: "user", team: "nbs" };
+const DEFAULT_WORKSPACE_ID = "wsp_q2";
 
 export function AppShell() {
   const [activeView, setActiveView] = useState<AppView>("Home");
@@ -15,10 +16,10 @@ export function AppShell() {
   const [liveAssets, setLiveAssets] = useState<AssetSummary[]>([]);
   const [liveJobs, setLiveJobs] = useState<JobSummary[]>([]);
   const [liveThreads, setLiveThreads] = useState<CreativeThreadSummary[]>([]);
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState("wsp_q2");
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(DEFAULT_WORKSPACE_ID);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<InceptUser>(ANONYMOUS_USER);
+  const [contentScope, setContentScope] = useState<ContentScope>("mine");
 
   // Track which job IDs need polling
   const pollingJobs = useRef<Set<string>>(new Set());
@@ -28,23 +29,27 @@ export function AppShell() {
     let mounted = true;
     async function boot() {
       try {
-        const [user, assets, jobs, threads, wsList] = await Promise.all([
-          getCurrentUser(),
-          listAssets("wsp_q2"),
-          listJobs(),
-          listThreads("wsp_q2"),
-          listWorkspaces(),
+        const user = await getCurrentUser();
+        const scope: ContentScope = "mine";
+        const [assets, jobs, threads] = await Promise.all([
+          listAssets(DEFAULT_WORKSPACE_ID, scope),
+          listJobs(DEFAULT_WORKSPACE_ID, scope),
+          listThreads(DEFAULT_WORKSPACE_ID, scope),
         ]);
         if (!mounted) return;
         if (user) setCurrentUser(user);
+        setContentScope(scope);
         setLiveAssets(assets);
         setLiveJobs(jobs);
         setLiveThreads(threads);
-        setWorkspaces(wsList);
 
-        // Resume polling for any still-running jobs from a previous session
+        // Resume polling for any still-running jobs from an earlier thread
         for (const job of jobs) {
-          if (job.status === "running" || job.status === "queued") {
+          if (
+            job.status === "running" ||
+            job.status === "queued" ||
+            job.status === "pending"
+          ) {
             pollingJobs.current.add(job.jobId ?? job.id);
           }
         }
@@ -61,13 +66,18 @@ export function AppShell() {
   // Reload assets when workspace changes
   useEffect(() => {
     let mounted = true;
-    Promise.all([listAssets(activeWorkspaceId), listThreads(activeWorkspaceId)]).then(([assets, threads]) => {
+    Promise.all([
+      listAssets(activeWorkspaceId, contentScope),
+      listJobs(activeWorkspaceId, contentScope),
+      listThreads(activeWorkspaceId, contentScope),
+    ]).then(([assets, jobs, threads]) => {
       if (!mounted) return;
       setLiveAssets(assets);
+      setLiveJobs(jobs);
       setLiveThreads(threads);
     }).catch(() => {});
     return () => { mounted = false; };
-  }, [activeWorkspaceId]);
+  }, [activeWorkspaceId, contentScope]);
 
   function startPolling() {
     if (intervalRef.current) return;
@@ -99,8 +109,8 @@ export function AppShell() {
       });
       if (anyCompleted) {
         const [assets, threads] = await Promise.all([
-          listAssets(activeWorkspaceId),
-          listThreads(activeWorkspaceId),
+          listAssets(activeWorkspaceId, contentScope),
+          listThreads(activeWorkspaceId, contentScope),
         ]);
         setLiveAssets(assets);
         setLiveThreads(threads);
@@ -109,16 +119,30 @@ export function AppShell() {
   }
 
   function trackJob(job: JobSummary) {
-    if (job.status === "running" || job.status === "queued") {
+    if (
+      job.status === "running" ||
+      job.status === "queued" ||
+      job.status === "pending"
+    ) {
       pollingJobs.current.add(job.jobId ?? job.id);
       startPolling();
     }
+    void Promise.all([
+      listAssets(activeWorkspaceId, contentScope),
+      listThreads(activeWorkspaceId, contentScope),
+    ])
+      .then(([assets, threads]) => {
+        setLiveAssets(assets);
+        setLiveThreads(threads);
+      })
+      .catch(() => {});
   }
 
-  function handleThreadSelect(workspaceId: string, threadId: string) {
-    setActiveWorkspaceId(workspaceId);
+  function handleThreadSelect(threadId: string) {
+    const thread = liveThreads.find((item) => item.id === threadId);
+    setActiveWorkspaceId(DEFAULT_WORKSPACE_ID);
     setActiveThreadId(threadId);
-    setActiveView("Create");
+    setActiveView(thread?.generationMode === "video" ? "Video" : "Image");
     setSidebarOpen(false);
   }
 
@@ -137,6 +161,9 @@ export function AppShell() {
         <Sidebar
           activeView={activeView}
           onViewChange={(v) => { setActiveView(v); setSidebarOpen(false); }}
+          currentUser={currentUser}
+          contentScope={contentScope}
+          onContentScopeChange={setContentScope}
         />
       </div>
 
@@ -150,10 +177,10 @@ export function AppShell() {
         liveThreads={liveThreads}
         setLiveThreads={setLiveThreads}
         currentUser={currentUser}
+        contentScope={contentScope}
         activeWorkspaceId={activeWorkspaceId}
         activeThreadId={activeThreadId}
         onThreadSelect={(id) => setActiveThreadId(id)}
-        workspaces={workspaces}
         onJobCreated={trackJob}
         onMobileMenuOpen={() => setSidebarOpen(true)}
         onThreadSelectFromHome={handleThreadSelect}

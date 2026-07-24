@@ -84,7 +84,6 @@ sdl AS (
     MAX(eligibility_status)            AS eligibility_status,
     MAX(ineligibility_reasons)         AS ineligibility_reasons,
     MAX(eligibility_evaluation_date)   AS eligibility_evaluation_date,
-    MAX(success_threshold_status)      AS success_threshold_status
   FROM `ads-bpd-guard-china.gtm.supply_demand_overlap`
   GROUP BY app_bundle
 ),
@@ -231,8 +230,6 @@ tagged AS (
     s.app_name,
     s.os,
     COALESCE(
-      NULLIF(TRIM(s.tracking_publisher_name), ''),
-      NULLIF(TRIM(m.parent_company), ''),
       NULLIF(TRIM(m.company_name_st), ''),
       NULLIF(TRIM(s.company_name_supply), ''),
       'Unknown'
@@ -280,7 +277,6 @@ tagged AS (
     d.eligibility_status,
     d.ineligibility_reasons,
     d.eligibility_evaluation_date,
-    d.success_threshold_status,
 
     -- 竞品网络
     n.active_ua_networks,
@@ -390,7 +386,6 @@ SELECT
   t.eligibility_status,
   t.ineligibility_reasons,
   t.eligibility_evaluation_date,
-  t.success_threshold_status,
   t.mmp,
   t.mmp_event_names,
   t.sdl_sdk_growth_managers,

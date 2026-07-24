@@ -135,7 +135,6 @@ The first version should standardize on these buckets:
 - `workflow`
   - `style_modify`
   - `style_transfer`
-  - `asset_text_replace`
 
 ## GM Save Flow
 
@@ -168,7 +167,31 @@ First-pass code has been added for:
 - Theme Create UI
   - preset library loading
   - load preset into form
-  - GM `Save as Preset`
+  - GM `Save Preset Asset`
+
+## Current Live Workflow
+
+The current product flow should now be understood as two Theme Create lanes plus one accumulation lane:
+
+1. `Style Modify`
+   - upload `Source Image`
+   - write the full style-modification prompt
+   - optionally fill `Style Name` and `Style Details`
+   - generate output
+2. `Style Transfer`
+   - upload `Source Image`
+   - upload `Reference Image`
+   - optionally add extra direction text
+   - optionally fill `Style Name` and `Style Details`
+   - generate output
+3. `Preset Accumulation`
+   - after a strong result, GM clicks `Draft Style Report`
+   - system drafts reusable report metadata
+   - GM reviews `Preset Asset Name` and `Style report summary`
+   - GM clicks `Save Preset Asset`
+   - preset becomes available in the Theme Create preset shelf for the same mode
+
+`Asset & Text Replace` is no longer part of the live Theme Create workflow.
 
 ## Rollout Plan
 

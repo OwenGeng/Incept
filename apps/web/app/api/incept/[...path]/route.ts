@@ -16,7 +16,6 @@
 
 import http from "node:http";
 import { type NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { isAuthDevSkipped } from "@/lib/auth-mode";
 
 const INCEPT_BASE = (
@@ -65,7 +64,9 @@ async function getCloudRunIdentityToken(audience: string): Promise<string | null
 
 async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
   // ── 1. Auth ──────────────────────────────────────────────────────────────
-  const session = isAuthDevSkipped() ? null : await auth();
+  const session = isAuthDevSkipped()
+    ? null
+    : await import("@/auth").then((mod) => mod.auth());
   if (!isAuthDevSkipped() && !session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -128,3 +129,4 @@ export const DELETE = proxy;
 
 // Never cache — every request carries live session data
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";

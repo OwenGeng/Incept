@@ -12,6 +12,7 @@ from typing import Any
 
 from app.models.supply import (
     AnalysisModule,
+    AnalysisGroup,
     AnalysisRow,
     DetailedAnalysisPayload,
     FilterChip,
@@ -53,15 +54,13 @@ def _project_root() -> Path:
 
 
 PROJECT_ROOT = _project_root()
-LIST_456_SQL = PROJECT_ROOT / "sql" / "list4_5_6_cold_prospects.sql"
+LIST_NO_SDK_UA_APP_SQL     = PROJECT_ROOT / "sql" / "no_sdk_no_ua_cold_app.sql"
+LIST_NO_SDK_UA_COMPANY_SQL = PROJECT_ROOT / "sql" / "no_sdk_no_ua_cold_company.sql"
 LIST1_SQL = PROJECT_ROOT / "sql" / "list1_cold_prospect.sql"
 LIST1_COMPANY_SQL = PROJECT_ROOT / "sql" / "list1_company.sql"
 LIST2_SQL = PROJECT_ROOT / "sql" / "list2_expansion.sql"
 LIST3_SQL = PROJECT_ROOT / "sql" / "list3_supply_partner_upsdk.sql"
 
-APP_QUERY_START = "-- =============================================================================\n-- TAB 1: COMPANY SUMMARY (default)"
-APP_QUERY_COMMENT_START = "/*"
-APP_QUERY_COMMENT_END = "*/"
 
 _cache_lock = threading.Lock()
 _cache_ttl_seconds = 14_400  # 4 hours — keeps cache warm between periodic refreshes
@@ -137,7 +136,6 @@ DATASET_META: dict[str, dict[str, Any]] = {
             ("active_ua_networks", "active_ua_networks", "text"),
             ("eligibility_status", "eligibility_status", "badge"),
             ("ineligibility_reasons", "ineligibility_reasons", "text"),
-            ("success_threshold_status", "success_threshold_status", "text"),
             ("mmp", "mmp", "text"),
             ("sdl_sdk_growth_managers", "sdl_sdk_growth_managers", "text"),
             ("final_hq_country", "final_hq_country", "text"),
@@ -261,6 +259,13 @@ class SupplySmbLiveService:
                 pass  # Non-fatal; will retry next time
 
     def get_weekly_brief(self) -> WeeklyBriefPayload:
+        """
+        Fast path — dataset is BQ-cached (see _get_dataset), no LLM call.
+        summary/opportunity are filled with the deterministic fallback text so
+        the page always has something to show immediately; the AI-generated
+        version is fetched separately via get_weekly_brief_summary() and
+        streamed in on the frontend once ready.
+        """
         dataset = self._get_dataset()
         companies = dataset["companies"]
         apps = dataset["apps"]
@@ -268,36 +273,52 @@ class SupplySmbLiveService:
         priority_cards = self._build_priority_cards(companies, apps)
         highlights = self._build_highlights(companies, apps)
         supporting_charts = self._build_supporting_charts(apps)
-
-        # Try to load previous week's snapshot for comparison
-        prev_snapshot: dict[str, Any] | None = None
-        try:
-            self._ensure_intersight()
-            week_start = _current_week_start().isoformat()
-            prev_snapshot = self.bigquery.read_previous_snapshot(before_date=week_start)
-        except Exception:
-            pass
-
-        generated = self._generate_summary_with_gemini(
-            companies, apps, highlights, priority_cards, prev_snapshot=prev_snapshot
-        )
-
         funnel_steps = self._compute_funnel(companies, apps)
 
         return WeeklyBriefPayload(
             title="Supply SMB Cross-Sell",
             date_range=self._current_month_label(),
             refresh_status=f"BigQuery refresh synced {self._current_timestamp_label()}",
-            summary=generated.get("summary") or self._fallback_summary(companies, apps, highlights),
-            opportunity=generated.get("opportunity") or self._fallback_opportunity(companies, apps),
-            big_things=generated.get("big_things") or [],
-            week_changes=generated.get("week_changes") or [],
+            summary=self._fallback_summary(companies, apps, highlights),
+            opportunity=self._fallback_opportunity(companies, apps),
+            big_things=[],
+            week_changes=[],
             selection_steps=self._selection_steps(),
             priorities=priority_cards,
             highlights=highlights,
             supporting_charts=supporting_charts,
             funnel_steps=funnel_steps,
         )
+
+    def get_weekly_brief_summary(self) -> dict[str, Any]:
+        """
+        Slow path — calls Gemini, cached for _cache_ttl_seconds (4h) so repeat
+        page loads within the window skip the LLM round trip entirely.
+        Cache is cleared on every refresh_snapshot() run.
+        """
+        cached = self._cache_get("weekly_brief_summary")
+        if cached is not None:
+            return cached
+
+        dataset = self._get_dataset()
+        companies = dataset["companies"]
+        apps = dataset["apps"]
+        priority_cards = self._build_priority_cards(companies, apps)
+        highlights = self._build_highlights(companies, apps)
+        snapshot_diff = self._get_snapshot_diff()
+
+        generated = self._generate_summary_with_gemini(
+            companies, apps, highlights, priority_cards, snapshot_diff=snapshot_diff
+        )
+
+        result = {
+            "summary": generated.get("summary") or self._fallback_summary(companies, apps, highlights),
+            "opportunity": generated.get("opportunity") or self._fallback_opportunity(companies, apps),
+            "big_things": generated.get("big_things") or [],
+            "week_changes": generated.get("week_changes") or [],
+        }
+        self._cache_set("weekly_brief_summary", result)
+        return result
 
     def refresh_snapshot(self) -> RefreshSnapshotResponse:
         """
@@ -377,67 +398,169 @@ class SupplySmbLiveService:
         if routing_filter:
             companies = [c for c in companies if (c.get("team_routing") or "") == routing_filter]
             app_company_names = {c.get("company_name") for c in companies}
-            apps = [a for a in apps if (a.get("company_name") or a.get("canonical_company") or "") in app_company_names]
+            apps = [a for a in apps if (a.get("company_name") or "") in app_company_names]
+
+        # Paid fraction buckets (from download_channels API via ST)
+        def _paid_frac_bucket(frac: float) -> str:
+            if frac >= 0.5:
+                return "≥50% (P1 range)"
+            if frac >= 0.2:
+                return "20–50% (P2 range)"
+            if frac >= 0.05:
+                return "5–20%"
+            return "<5% (organic)"
+
+        # Parse multi-value text fields — split on ", " (pipeline delimiter), strip whitespace
+        def _parse_multivalue(raw: str) -> list[str]:
+            import re as _re
+            parts = _re.split(r",\s*|\n", raw)
+            return [p.strip() for p in parts if p.strip()]
+
+        # UA SDK normalisation map: any name containing the key → canonical label
+        _UA_SDK_NORM: list[tuple[str, str]] = [
+            ("AppLovin",    "AppLovin (MAX)"),
+            ("ironSource",  "ironSource / LevelPlay"),
+            ("LevelPlay",   "ironSource / LevelPlay"),
+            ("UnityAds",    "Unity Ads"),
+            ("Mintegral",   "Mintegral"),
+            ("Pangle",      "Pangle (TikTok)"),
+            ("TopOn",       "TopOn"),
+            ("Appodeal",    "Appodeal"),
+            ("Bidmachine",  "BidMachine"),
+            ("AdMob",       "AdMob"),
+            ("AdColony",    "AdColony / DT Exchange"),
+            ("DT Exchange", "AdColony / DT Exchange"),
+            ("Vungle",      "Vungle / Liftoff"),
+            ("Liftoff",     "Vungle / Liftoff"),
+            ("Chartboost",  "Chartboost"),
+            ("InMobi",      "InMobi"),
+        ]
+
+        def _normalise_sdk(name: str) -> str | None:
+            """Return canonical UA SDK label if name matches, else None."""
+            lower = name.lower()
+            for keyword, label in _UA_SDK_NORM:
+                if keyword.lower() in lower:
+                    return label
+            return None
+
+        ua_sdk_counter: Counter[str] = Counter()
+        for app in apps:
+            raw = app.get("installed_sdks") or ""
+            seen: set[str] = set()
+            for sdk_name in _parse_multivalue(raw):
+                canonical = _normalise_sdk(sdk_name)
+                if canonical and canonical not in seen:
+                    ua_sdk_counter[canonical] += 1
+                    seen.add(canonical)
+
+        ua_network_counter: Counter[str] = Counter()
+        for app in apps:
+            raw = app.get("active_ua_networks") or ""
+            if raw and raw != "No Active Networks":
+                for net in _parse_multivalue(raw):
+                    canonical = _normalise_sdk(net) or net
+                    ua_network_counter[canonical] += 1
+
+        top_country_counter: Counter[str] = Counter()
+        for app in apps:
+            tc_raw = app.get("top_countries") or "[]"
+            try:
+                tc_list = json.loads(tc_raw) if isinstance(tc_raw, str) else (tc_raw or [])
+            except Exception:
+                tc_list = []
+            for country in tc_list:
+                if country:
+                    top_country_counter[str(country).upper()] += 1
 
         modules = [
             self._distribution_module(
-                "Geography Distribution",
-                "Verified HQ routing distribution across the active company pool.",
-                Counter(company.get("final_hq_country") or "Unknown" for company in companies),
+                "Priority Distribution",
+                "P1/P2/P3 split across all companies. P1 = UA SDK + paid_frac ≥50% + active networks; P2 = UA SDK + paid_frac ≥20%; P3 = all others.",
+                Counter(company.get("best_priority") or "P3" for company in companies),
                 CHART_PALETTE,
             ),
             self._distribution_module(
+                "HQ Country Distribution",
+                "Headquarters country across the full company pool, sourced from SensorTower company metadata.",
+                Counter(company.get("hq_country") or "Unknown" for company in companies),
+                CHART_PALETTE,
+                limit=8,
+            ),
+            self._distribution_module(
                 "Team Routing",
-                "Current company mix for gaming versus non-gaming follow-up ownership.",
+                "GTM routing assignment per company — determines which AE or agency handles outreach.",
                 Counter(company.get("team_routing") or "Unknown" for company in companies),
                 CHART_PALETTE,
                 chart_type="pie",
             ),
+            self._gaming_by_priority_module(companies),
             self._distribution_module(
                 "Monetization Mix",
-                "App-level monetization types that shape the SDK and UA pitch path.",
+                "App-level monetization type from SensorTower (IAA / IAP / Hybrid / Free). Shapes UA pitch strategy.",
                 Counter((app.get("monetization_type") or "Unknown") for app in apps),
                 CHART_PALETTE,
                 chart_type="pie",
             ),
             self._distribution_module(
                 "Genre Mix",
-                "Top app genres in the current active cross-sell universe.",
+                "Top app genres across the cold prospect pool. Gaming vs non-gaming determines routing and pitch angle.",
                 Counter((app.get("genre") or "Unknown") for app in apps),
                 CHART_PALETTE,
-                limit=5,
+                limit=6,
                 chart_type="pie",
             ),
             self._distribution_module(
                 "Download Scale",
-                "Latest-month download buckets across active apps.",
-                Counter(self._download_bucket(int(app.get("downloads_latest_month") or 0)) for app in apps),
+                "Latest-month download buckets (SensorTower st_last_month_downloads). All apps already pass the ≥20K threshold.",
+                Counter(self._download_bucket(int(app.get("st_last_month_downloads") or 0)) for app in apps),
                 CHART_PALETTE,
             ),
             self._distribution_module(
-                "MoM Growth",
-                "Month-over-month growth bands for active apps.",
-                Counter(self._growth_bucket(float(app.get("download_growth_rate_mom") or 0)) for app in apps),
+                "Paid Download Fraction",
+                "Share of downloads that are paid (paid_abs / total). Sourced from SensorTower download channels API. High paid_frac = active UA spender.",
+                Counter(_paid_frac_bucket(float(app.get("paid_frac") or 0)) for app in apps),
                 CHART_PALETTE,
             ),
             self._distribution_module(
                 "Supply Visibility",
-                "Priority and supply visibility split across the company queue.",
-                Counter(company.get("company_prospect_label") or "Unknown" for company in companies),
+                "Whether Moloco already buys this company's exchange inventory (any_moloco_supply). Visible = can start cross-sell immediately.",
+                Counter(("Supply Visible" if company.get("any_moloco_supply") else "Not Visible") for company in companies),
                 CHART_PALETTE,
+                chart_type="pie",
             ),
             self._distribution_module(
                 "Eligibility Status",
-                "Moloco supply eligibility state seen on active app records.",
-                Counter((app.get("sdl_eligibility_status") or "Undecided") for app in apps),
+                "Moloco supply eligibility state from the BQ supply pipeline — indicates whether SDL has reviewed and cleared the app.",
+                Counter((app.get("eligibility_status") or "Undecided") for app in apps),
                 CHART_PALETTE,
             ),
             self._distribution_module(
                 "OS Distribution",
-                "iOS vs Android split across the active app pool.",
+                "iOS vs Android split. Determines SensorTower API coverage and SDK integration path.",
                 Counter((str(app.get("os") or "Unknown")).capitalize() for app in apps),
                 CHART_PALETTE,
                 chart_type="pie",
+            ),
+            self._distribution_module(
+                "UA SDK Presence",
+                "How many apps in the cold prospect pool have each UA SDK installed (from SensorTower SDK tags). AppLovin variants normalised into one label. Apps with any of these SDKs are P1/P2 candidates.",
+                ua_sdk_counter,
+                CHART_PALETTE,
+            ),
+            self._distribution_module(
+                "Active UA Networks (SOV)",
+                "UA networks actively running creatives on these apps right now (SensorTower network SOV data). Distinct from SDK presence — shows live spend, not just integration.",
+                ua_network_counter,
+                CHART_PALETTE,
+                limit=12,
+            ),
+            self._distribution_module(
+                "Top Download Countries",
+                "All countries appearing in each app's top_countries list (SensorTower, all positions counted). Shows which markets these apps are actually reaching.",
+                top_country_counter,
+                CHART_PALETTE,
+                limit=15,
             ),
         ]
 
@@ -445,28 +568,28 @@ class SupplySmbLiveService:
             MethodologySection(
                 title="Data Sources",
                 items=[
-                    "BigQuery prospect engine query from sql/list4_5_6_cold_prospects.sql",
-                    "Sensor Tower app metadata, downloads, and network analysis tables",
-                    "Moloco supply_demand_overlap and fact_dsp_publisher exchange signals",
-                    "GTM HQ country triage overrides and BigQuery access configuration",
+                    "ads-bpd-guard-sandbox.supply_smb.cold_prospect_app — one row per app, refreshed weekly by sensortower_pipeline.py",
+                    "ads-bpd-guard-sandbox.supply_smb.cold_prospect_company — company rollup aggregated from cold_prospect_app",
+                    "SensorTower API: app metadata, monthly downloads, download channels (paid/organic split), SDK tags, UA network SOV",
+                    "Moloco BQ: supply_demand_overlap for exchange visibility, fact_dsp_publisher for media cost signals",
                 ],
             ),
             MethodologySection(
                 title="Inclusion Logic",
                 items=[
-                    "Latest full month downloads of at least 20,000",
-                    "Primary market must be outside CN / HK / TW / MO",
-                    "No Moloco SDK or Moloco UA relationship on the app or company path",
-                    "Monetization must be IAA, IAP, or hybrid",
+                    "Latest full month downloads ≥ 20,000 (SensorTower st_last_month_downloads)",
+                    "App has IAA, IAP, or Hybrid monetization — pure Free apps excluded",
+                    "No Moloco SDK relationship on the app (is_moloco_sdk_app = false)",
+                    "No Moloco UA advertiser spend on the app (is_moloco_advertiser_app = false)",
                 ],
             ),
             MethodologySection(
-                title="Ranking Logic",
+                title="Priority Logic",
                 items=[
-                    "Priority tier is inherited from the strongest company or app signal",
-                    "Moloco supply visibility and media cost rank ahead of raw scale",
-                    "Download momentum and active network breadth act as secondary tie-breakers",
-                    "Top Lists can be filtered by priority, routing, supply visibility, and search",
+                    "P1: has UA SDK (AppLovin/ironSource/Mintegral/Pangle etc.) + paid_frac ≥ 50% + active_ua_networks not null",
+                    "P2: has UA SDK + paid_frac ≥ 20% (monetising but below P1 threshold)",
+                    "P3: no UA SDK or paid_frac below threshold — broad cold pool for agency batch outreach",
+                    "Company best_priority = best (lowest P-number) across all its apps",
                 ],
             ),
         ]
@@ -572,17 +695,48 @@ class SupplySmbLiveService:
         return rows
 
     def _run_company_query(self) -> list[dict[str, Any]]:
-        sql = LIST_456_SQL.read_text(encoding="utf-8")
-        return self.bigquery.query(sql)
+        return self.bigquery.query(
+            "SELECT * FROM `ads-bpd-guard-sandbox.supply_smb.cold_prospect_company`"
+        )
 
     def _run_app_query(self) -> list[dict[str, Any]]:
-        sql_text = LIST_456_SQL.read_text(encoding="utf-8")
-        prefix, remainder = sql_text.split(APP_QUERY_START, maxsplit=1)
-        comment_start = remainder.index(APP_QUERY_COMMENT_START)
-        comment_end = remainder.index(APP_QUERY_COMMENT_END, comment_start)
-        comment_block = remainder[comment_start + len(APP_QUERY_COMMENT_START) : comment_end]
-        app_query = f"{prefix.rstrip()}\n{comment_block.strip()}"
-        return self.bigquery.query(app_query)
+        return self.bigquery.query(
+            "SELECT * FROM `ads-bpd-guard-sandbox.supply_smb.cold_prospect_app`"
+        )
+
+    def _get_snapshot_diff(self) -> dict[str, int]:
+        """Compare latest two weeks in prospect_snapshot, return new/dropped counts."""
+        try:
+            sql = """
+            WITH weeks AS (
+              SELECT DISTINCT week_of
+              FROM `ads-bpd-guard-sandbox.supply_smb.prospect_snapshot`
+              ORDER BY week_of DESC LIMIT 2
+            ),
+            cur AS (
+              SELECT app_market_bundle
+              FROM `ads-bpd-guard-sandbox.supply_smb.prospect_snapshot`
+              WHERE week_of = (SELECT MAX(week_of) FROM weeks)
+            ),
+            prev AS (
+              SELECT app_market_bundle
+              FROM `ads-bpd-guard-sandbox.supply_smb.prospect_snapshot`
+              WHERE week_of = (SELECT MIN(week_of) FROM weeks)
+            )
+            SELECT
+              COUNTIF(cur.app_market_bundle IS NULL)  AS dropped,
+              COUNTIF(prev.app_market_bundle IS NULL) AS new_apps
+            FROM cur FULL OUTER JOIN prev USING (app_market_bundle)
+            """
+            rows = self.bigquery.query(sql)
+            if rows:
+                return {
+                    "new": int(rows[0].get("new_apps") or 0),
+                    "dropped": int(rows[0].get("dropped") or 0),
+                }
+        except Exception:
+            pass
+        return {"new": 0, "dropped": 0}
 
     def _filter_custom_apps(
         self,
@@ -842,7 +996,7 @@ class SupplySmbLiveService:
         search = options.search.strip().lower()
         filtered: list[dict[str, Any]] = []
         for company in companies:
-            priority = self._priority_code(company.get("company_prospect_label"))
+            priority = self._priority_code(company.get("best_priority"))
             if options.priority != "all" and priority != options.priority:
                 continue
             if options.routing != "all" and (company.get("team_routing") or "") != options.routing:
@@ -861,7 +1015,7 @@ class SupplySmbLiveService:
         search = options.search.strip().lower()
         filtered: list[dict[str, Any]] = []
         for app in apps:
-            priority = self._priority_code(app.get("prospect_label"))
+            priority = self._priority_code(app.get("priority"))
             if options.priority != "all" and priority != options.priority:
                 continue
             if options.routing != "all" and (app.get("team_routing") or "") != options.routing:
@@ -884,8 +1038,8 @@ class SupplySmbLiveService:
         table: str,
     ) -> list[dict[str, Any]]:
         def normalize_value(row: dict[str, Any]) -> Any:
-            if sort_by in {"company_prospect_label", "prospect_label"}:
-                return self._priority_rank(row.get(sort_by))
+            if sort_by in {"best_priority", "priority", "company_prospect_label", "prospect_label"}:
+                return self._priority_rank(row.get(sort_by) or row.get("best_priority") or row.get("priority"))
             value = row.get(sort_by)
             if isinstance(value, bool):
                 return int(value)
@@ -913,18 +1067,17 @@ class SupplySmbLiveService:
         apps: list[dict[str, Any]],
     ) -> list[PriorityCard]:
         tier_meta = {
-            "P1": ("Prime / UA Ready", "NBS direct", "IAA/Hybrid: high supply signal + scale. IAP: 100K+ DL + on competitor UA networks + T1 market."),
-            "P2": ("Strong / T1 Scale", "NBS + agency", "IAA/Hybrid: supply visible + strong downloads. IAP: 50K+ DL with T1 market presence."),
-            "P3": ("Visible / Growing", "Agency batch", "IAA/Hybrid: Moloco-visible. IAP: 20K+ monthly downloads."),
-            "P4": ("Cold", "Monitor", "No near-term supply signal (IAA/Hybrid) or insufficient download scale (IAP)."),
+            "P1": ("Prime / UA Ready", "NBS direct", "Has UA SDK + paid fraction ≥50% + active UA networks — highest conversion potential."),
+            "P2": ("Strong Signal", "NBS + agency", "Has UA SDK + paid fraction ≥20% — clear monetization intent without full UA commitment."),
+            "P3": ("Cold", "Agency batch", "No UA SDK or insufficient paid fraction — broad outreach pool for agency follow-up."),
         }
 
         cards: list[PriorityCard] = []
-        for tier in ("P1", "P2", "P3", "P4"):
+        for tier in ("P1", "P2", "P3"):
             company_count = sum(
-                1 for company in companies if self._priority_code(company.get("company_prospect_label")) == tier
+                1 for company in companies if self._priority_code(company.get("best_priority")) == tier
             )
-            app_count = sum(1 for app in apps if self._priority_code(app.get("prospect_label")) == tier)
+            app_count = sum(1 for app in apps if self._priority_code(app.get("priority")) == tier)
             label, route, note = tier_meta[tier]
             cards.append(
                 PriorityCard(
@@ -947,25 +1100,19 @@ class SupplySmbLiveService:
         focus_companies = [
             company
             for company in companies
-            if self._priority_code(company.get("company_prospect_label")) in {"P1", "P2"}
-        ]
-        focus_apps = [
-            app for app in apps if self._priority_code(app.get("prospect_label")) in {"P1", "P2"}
+            if self._priority_code(company.get("best_priority")) in {"P1", "P2"}
         ]
         visible_companies = [
-            company for company in companies if bool(company.get("is_moloco_supply_visible"))
+            company for company in companies if bool(company.get("any_moloco_supply"))
         ]
         median_cost = 0
         if visible_companies:
             median_cost = round(
                 statistics.median(
-                    int(company.get("moloco_media_cost_usd_30d") or 0) for company in visible_companies
+                    int(company.get("total_moloco_cost_30d") or 0) for company in visible_companies
                 )
             )
-        exchange_ready_rate = 0
-        if focus_apps:
-            ready_count = sum(1 for app in focus_apps if bool(app.get("has_other_exchange_sdk")))
-            exchange_ready_rate = round((ready_count / len(focus_apps)) * 100)
+        p1_count = sum(1 for c in companies if self._priority_code(c.get("best_priority")) == "P1")
 
         return [
             HighlightCard(
@@ -979,15 +1126,15 @@ class SupplySmbLiveService:
                 detail="Median 30-day Moloco media cost among companies with visible supply overlap.",
             ),
             HighlightCard(
-                label="Exchange SDK Readiness",
-                value=f"{exchange_ready_rate}%",
-                detail="Share of P1 + P2 apps already running on another exchange or mediation path.",
+                label="P1 Prime Companies",
+                value=str(p1_count),
+                detail="Companies with UA SDK + high paid fraction + active networks — top outreach priority.",
             ),
         ]
 
     def _build_supporting_charts(self, apps: list[dict[str, Any]]) -> list[SupportingChart]:
         genre_counts = Counter((app.get("genre") or "Unknown") for app in apps)
-        scale_counts = Counter(self._download_bucket(int(app.get("downloads_latest_month") or 0)) for app in apps)
+        scale_counts = Counter(self._download_bucket(int(app.get("st_last_month_downloads") or 0)) for app in apps)
 
         return [
             SupportingChart(
@@ -1009,22 +1156,17 @@ class SupplySmbLiveService:
         options: TopListOptions,
     ) -> list[FilterChip]:
         top_focus = sum(
-            1 for company in companies if self._priority_code(company.get("company_prospect_label")) in {"P1", "P2"}
+            1 for c in companies if self._priority_code(c.get("best_priority")) in {"P1", "P2"}
         )
-        growth_alerts = sum(1 for app in apps if float(app.get("download_growth_rate_mom") or 0) >= 0.2)
-        ai_follow_up = sum(
-            1
-            for company in companies
-            if (company.get("hq_country_source") or "ST_original") == "ST_original"
-            or (company.get("apps_with_other_exchange_sdk") or 0) > 0
-        )
-        supply_on = sum(1 for company in companies if bool(company.get("is_moloco_supply_visible")))
+        supply_on = sum(1 for c in companies if bool(c.get("any_moloco_supply")))
+        ua_sdk_on = sum(1 for c in companies if bool(c.get("any_active_ua")))
+        p1_apps   = sum(1 for a in apps if self._priority_code(a.get("priority")) == "P1")
 
         chips = [
-            FilterChip(label="P1 + P2 Focus", value=f"{top_focus} companies", tone="blue"),
-            FilterChip(label="Supply Visible", value=f"{supply_on} companies", tone="green"),
-            FilterChip(label="MoM Alerts", value=f"{growth_alerts} fast-growth apps", tone="purple"),
-            FilterChip(label="AI Suggested Follow-up", value=f"{ai_follow_up} accounts"),
+            FilterChip(label="P1 + P2 Focus",   value=f"{top_focus} companies", tone="blue"),
+            FilterChip(label="Supply Visible",   value=f"{supply_on} companies", tone="green"),
+            FilterChip(label="Active UA Networks", value=f"{ua_sdk_on} companies", tone="purple"),
+            FilterChip(label="P1 Prime Apps",    value=f"{p1_apps} apps"),
         ]
 
         if options.search:
@@ -1079,6 +1221,30 @@ class SupplySmbLiveService:
             for index, (label, count) in enumerate(items)
         ]
 
+    def _gaming_by_priority_module(self, companies: list[dict]) -> AnalysisModule:
+        _GAMING_COLORS = {"Gaming": "#3a86ff", "Non-Gaming": "#ff006e", "Unknown": "#94a3b8"}
+        groups: list[AnalysisGroup] = []
+        for tier in ("P1", "P2", "P3"):
+            tier_companies = [c for c in companies if (c.get("best_priority") or "P3") == tier]
+            counter: Counter[str] = Counter(c.get("team_routing") or "Unknown" for c in tier_companies)
+            total = max(sum(counter.values()), 1)
+            segments = [
+                AnalysisRow(
+                    label=label,
+                    value=f"{count} ({round(count / total * 100)}%)",
+                    amount=count,
+                    color=_GAMING_COLORS.get(label, "#94a3b8"),
+                )
+                for label, count in counter.most_common()
+            ]
+            groups.append(AnalysisGroup(label=tier, segments=segments))
+        return AnalysisModule(
+            title="Gaming Mix by Priority",
+            caption="Gaming vs Non-Gaming breakdown per priority tier (P1/P2/P3), based on company team_routing.",
+            chart_type="stacked_group",
+            groups=groups,
+        )
+
     def _build_snapshot_data(
         self,
         companies: list[dict[str, Any]],
@@ -1093,7 +1259,6 @@ class SupplySmbLiveService:
             "p1_count": p_counts.get("P1", 0),
             "p2_count": p_counts.get("P2", 0),
             "p3_count": p_counts.get("P3", 0),
-            "p4_count": p_counts.get("P4", 0),
             "team_routing": dict(
                 Counter(c.get("team_routing") or "Unknown" for c in companies).most_common(8)
             ),
@@ -1106,7 +1271,7 @@ class SupplySmbLiveService:
             "top_companies": [
                 c.get("company_name")
                 for c in companies
-                if self._priority_code(c.get("company_prospect_label")) == "P1"
+                if self._priority_code(c.get("best_priority")) == "P1"
             ][:10],
         }
 
@@ -1116,23 +1281,17 @@ class SupplySmbLiveService:
         apps: list[dict[str, Any]],
         highlights: list[HighlightCard],
         priorities: list[PriorityCard],
-        prev_snapshot: dict[str, Any] | None = None,
+        snapshot_diff: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         try:
             snapshot = self._build_snapshot_data(companies, apps, priorities)
 
-            # Build delta if previous snapshot exists
+            # Build delta from prospect_snapshot WoW diff
             delta: dict[str, Any] = {}
-            if prev_snapshot:
+            if snapshot_diff and (snapshot_diff.get("new") or snapshot_diff.get("dropped")):
                 delta = {
-                    "companies_delta": snapshot["total_companies"] - int(prev_snapshot.get("total_companies") or 0),
-                    "apps_delta": snapshot["total_apps"] - int(prev_snapshot.get("total_apps") or 0),
-                    "p1_delta": snapshot["p1_count"] - int(prev_snapshot.get("p1_count") or 0),
-                    "p2_delta": snapshot["p2_count"] - int(prev_snapshot.get("p2_count") or 0),
-                    "prev_week": str(prev_snapshot.get("week_start_date") or ""),
-                    "prev_total_companies": int(prev_snapshot.get("total_companies") or 0),
-                    "prev_p1_count": int(prev_snapshot.get("p1_count") or 0),
-                    "prev_genre_mix": prev_snapshot.get("genre_mix_json") or {},
+                    "new_apps_this_week": snapshot_diff.get("new", 0),
+                    "dropped_apps_this_week": snapshot_diff.get("dropped", 0),
                 }
 
             prompt = {
@@ -1173,7 +1332,6 @@ class SupplySmbLiveService:
                         "P1": snapshot["p1_count"],
                         "P2": snapshot["p2_count"],
                         "P3": snapshot["p3_count"],
-                        "P4": snapshot["p4_count"],
                     },
                     "team_routing": snapshot["team_routing"],
                     "top_genres": snapshot["genre_mix"],
@@ -1207,39 +1365,60 @@ class SupplySmbLiveService:
             return {}
 
     def _to_company_row(self, company: dict[str, Any]) -> dict[str, Any]:
+        priority = company.get("best_priority") or "P3"
         return {
             "company_name": company.get("company_name") or "Unknown",
-            "priority": self._priority_code(company.get("company_prospect_label")),
-            "company_prospect_label": company.get("company_prospect_label") or "P4 - Cold",
-            "final_hq_country": company.get("final_hq_country") or company.get("sensortower_hq_country") or "Unknown",
+            "priority": priority,
+            "company_prospect_label": priority,
+            "hq_country": company.get("hq_country") or "Unknown",
+            "final_hq_country": company.get("hq_country") or "Unknown",  # alias for compat
+            "website": company.get("website") or "",
             "team_routing": company.get("team_routing") or "Unknown",
+            "app_count": int(company.get("app_count") or 0),
+            "total_apps": int(company.get("app_count") or 0),
+            "os_mix": company.get("os_mix") or "",
+            "genres": company.get("genres") or "",
+            "total_downloads": int(company.get("total_downloads") or 0),
+            "total_downloads_latest_month": int(company.get("total_downloads") or 0),
+            "total_mau": int(company.get("total_mau") or 0),
+            "max_paid_frac": round(float(company.get("max_paid_frac") or 0), 4),
+            "best_priority": priority,
             "monetization_types": company.get("monetization_types") or "Unknown",
-            "total_apps": int(company.get("total_apps") or 0),
-            "total_downloads_latest_month": int(company.get("total_downloads_latest_month") or 0),
-            "is_moloco_supply_visible": bool(company.get("is_moloco_supply_visible")),
-            "moloco_media_cost_30d": int(company.get("moloco_media_cost_usd_30d") or 0),
-            "all_active_networks": company.get("all_active_networks") or "No Active Networks",
-            "apps_with_other_exchange_sdk": int(company.get("apps_with_other_exchange_sdk") or 0),
+            "any_active_ua": bool(company.get("any_active_ua")),
+            "all_ua_networks": company.get("all_ua_networks") or "No Active Networks",
+            "all_active_networks": company.get("all_ua_networks") or "No Active Networks",
+            "is_moloco_supply_visible": bool(company.get("any_moloco_supply")),
+            "any_moloco_supply": bool(company.get("any_moloco_supply")),
+            "moloco_media_cost_30d": int(company.get("total_moloco_cost_30d") or 0),
         }
 
     def _to_app_row(self, app: dict[str, Any]) -> dict[str, Any]:
+        priority = app.get("priority") or "P3"
+        # Extract first country from top_countries JSON array as T1 proxy
+        top_countries_raw = app.get("top_countries") or "[]"
+        try:
+            import json as _json
+            top_countries = _json.loads(top_countries_raw) if isinstance(top_countries_raw, str) else top_countries_raw
+            top_country = top_countries[0] if top_countries else "Unknown"
+        except Exception:
+            top_country = "Unknown"
         return {
             "app_market_bundle": app.get("app_market_bundle") or "",
             "os": app.get("os") or "",
-            "priority": self._priority_code(app.get("prospect_label")),
-            "prospect_label": app.get("prospect_label") or "P4 - Cold",
+            "priority": priority,
+            "prospect_label": priority,
             "app_name": app.get("app_name") or "Unknown",
             "company_name": app.get("company_name") or "Unknown",
             "team_routing": app.get("team_routing") or "Unknown",
             "genre": app.get("genre") or "Unknown",
             "monetization_type": app.get("monetization_type") or "Unknown",
-            "downloads_latest_month": int(app.get("downloads_latest_month") or 0),
-            "download_growth_rate_mom": float(app.get("download_growth_rate_mom") or 0),
+            "downloads_latest_month": int(app.get("st_last_month_downloads") or 0),
+            "download_growth_rate_mom": 0.0,
             "active_ua_networks": app.get("active_ua_networks") or "No Active Networks",
             "is_moloco_supply_visible": bool(app.get("is_moloco_supply_visible")),
-            "moloco_media_cost_usd_30d": int(app.get("moloco_media_cost_usd_30d") or 0),
-            "top_dl_country_t1": app.get("top_dl_country_t1") or app.get("top_dl_country_T1") or "Unknown",
-            "active_other_exchange_sdks": app.get("active_other_exchange_sdks") or "None",
+            "moloco_media_cost_usd_30d": int(app.get("moloco_media_cost_30d") or 0),
+            "top_dl_country_t1": top_country,
+            "active_other_exchange_sdks": "None",
         }
 
     def _fallback_summary(
@@ -1262,67 +1441,55 @@ class SupplySmbLiveService:
             "for direct NBS outreach, agency routing, and AI-assisted follow-up."
         )
 
-    # Chinese-mainland HQ identifiers used in funnel computation
-    _CHN_MAINLAND: frozenset[str] = frozenset({"CN", "CHN", "CHINA"})
-
     def _compute_funnel(self, companies: list[dict], apps: list[dict]) -> list[FunnelStep]:
         """
         Build 4-step selection funnel from in-memory company/app data.
-        All four sets are derived without extra BQ queries.
 
-        Step 1  All qualifying prospects  (Chinese-origin, ≥20K DL, no Moloco, non-domestic — already applied by SQL)
-        Step 2  Supply visible            companies where Moloco already buys their supply
-        Step 3  CHN mainland + visible   mainland China HQ + supply signal (core P1/P2 candidates)
-        Step 4  P1 + P2                  top-priority active follow-up pool
+        Step 1  Cold Prospect Pool  ≥20K DL, international-first, no Moloco SDK/UA — output of pipeline
+        Step 2  Supply Visible      Moloco already buys their exchange inventory (any_moloco_supply)
+        Step 3  UA SDK Present      Has competing UA SDK (AppLovin/ironSource/etc.) — P1+P2 pool
+        Step 4  P1 Prime            paid_frac ≥50% + active UA networks — top outreach priority
         """
         total_cos = len(companies)
         total_apps_count = len(apps)
 
-        # Step 2: supply visible (any HQ)
-        visible_cos = [c for c in companies if c.get("is_moloco_supply_visible")]
+        # Step 2: supply visible (Moloco buys their exchange inventory)
+        visible_cos = [c for c in companies if c.get("any_moloco_supply")]
         visible_names = {c.get("company_name") for c in visible_cos}
         visible_apps = [a for a in apps if (a.get("company_name") or "") in visible_names]
 
-        # Step 3: CHN mainland HQ + supply visible
-        chn_visible_cos = [
-            c for c in visible_cos
-            if (c.get("final_hq_country") or "").upper() in self._CHN_MAINLAND
-        ]
-        chn_visible_names = {c.get("company_name") for c in chn_visible_cos}
-        chn_visible_apps = [a for a in apps if (a.get("company_name") or "") in chn_visible_names]
+        # Step 3: UA SDK present = apps individually prioritised P1 or P2
+        ua_sdk_apps = [a for a in apps if self._priority_code(a.get("priority")) in {"P1", "P2"}]
+        ua_sdk_cos = {a.get("company_name") for a in ua_sdk_apps}
 
-        # Step 4: P1 + P2
-        p1p2_cos = [
-            c for c in companies
-            if (c.get("company_prospect_label") or "").startswith(("P1", "P2"))
-        ]
-        p1p2_names = {c.get("company_name") for c in p1p2_cos}
-        p1p2_apps = [a for a in apps if (a.get("company_name") or "") in p1p2_names]
+        # Step 4: P1 apps only — paid_frac ≥50% + active UA networks
+        p1_apps = [a for a in apps if self._priority_code(a.get("priority")) == "P1"]
+        p1_cos = {a.get("company_name") for a in p1_apps}
 
         return [
             FunnelStep(
-                label="Chinese-Origin Prospects",
-                description="Qualified pool: ≥20K downloads, international-first, no Moloco relationship",
+                label="Cold Prospect Pool",
+                description="≥20K monthly downloads · international-first · no Moloco SDK or UA spend · has monetization (IAA/IAP/Hybrid)",
                 companies=total_cos,
                 apps=total_apps_count,
             ),
             FunnelStep(
                 label="Supply Visible",
-                description="Moloco already buys their supply — strongest cross-sell signal",
+                description="Moloco already buys their exchange inventory — supply relationship exists, direct cross-sell signal",
                 companies=len(visible_cos),
                 apps=len(visible_apps),
             ),
             FunnelStep(
-                label="CHN Mainland HQ",
-                description="Mainland China HQ — filtered from supply-visible pool",
-                companies=len(chn_visible_cos),
-                apps=len(chn_visible_apps),
+                label="UA SDK Present",
+                description="App has AppLovin / ironSource / Mintegral / Pangle etc. — actively monetising on competitor UA networks (paid_frac ≥20%)",
+                companies=len(ua_sdk_cos),
+                apps=len(ua_sdk_apps),
             ),
             FunnelStep(
-                label="P1 + P2 Active Pool",
-                description="Prime and strong-tier — ranked by media cost, downloads, and momentum",
-                companies=len(p1p2_cos),
-                apps=len(p1p2_apps),
+                label="P1 Prime Targets",
+                description="Paid downloads ≥50% + active UA networks confirmed — highest conversion probability",
+                companies=len(p1_cos),
+                apps=len(p1_apps),
             ),
         ]
 
@@ -1330,23 +1497,23 @@ class SupplySmbLiveService:
         return [
             {
                 "title": "Step 1",
-                "subtitle": "Universe",
-                "detail": "Chinese-origin developers with at least 20K latest-month downloads and overseas-first traffic.",
+                "subtitle": "Scale + Market",
+                "detail": "≥20K latest-month downloads (SensorTower). International-first — app's primary download market is not the developer's home country.",
             },
             {
                 "title": "Step 2",
-                "subtitle": "No Moloco relationship",
-                "detail": "Exclude active SDK integrations, active advertiser spend, and known company-level Moloco relationships.",
+                "subtitle": "No Moloco Relationship",
+                "detail": "Exclude apps with any Moloco SDK integration or active UA advertiser spend. Clean cold targets only.",
             },
             {
                 "title": "Step 3",
-                "subtitle": "Supply visible",
-                "detail": "Use supply_demand_overlap and publisher exchange signals to find titles Moloco already buys.",
+                "subtitle": "Supply Signal",
+                "detail": "Check supply_demand_overlap: does Moloco already buy this app's exchange inventory? Visible apps are the strongest cross-sell candidates.",
             },
             {
                 "title": "Step 4",
-                "subtitle": "Priority routing",
-                "detail": "Rank into P1-P4 using supply visibility, media cost, downloads, and momentum.",
+                "subtitle": "UA Intent Scoring",
+                "detail": "Score by UA SDK presence (AppLovin / ironSource / Mintegral / Pangle) and paid download fraction from SensorTower. P1 = paid_frac ≥50% + active networks. P2 = paid_frac ≥20%.",
             },
         ]
 
@@ -1370,14 +1537,14 @@ class SupplySmbLiveService:
 
     def _priority_code(self, label: Any) -> str:
         text = str(label or "")
-        for tier in ("P1", "P2", "P3", "P4"):
+        for tier in ("P1", "P2", "P3"):
             if tier in text:
                 return tier
-        return "P4"
+        return "P3"
 
     def _priority_rank(self, label: Any) -> int:
-        mapping = {"P1": 1, "P2": 2, "P3": 3, "P4": 4}
-        return mapping[self._priority_code(label)]
+        mapping = {"P1": 1, "P2": 2, "P3": 3}
+        return mapping.get(self._priority_code(label), 3)
 
     def _current_month_label(self) -> str:
         return datetime.now(UTC).strftime("%B %Y")

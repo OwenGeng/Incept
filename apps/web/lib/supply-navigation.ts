@@ -22,8 +22,6 @@ export const defaultPageTabs = [
   { label: "Weekly Brief", href: "/supply-smb/no-sdk-no-ua/weekly-brief" },
   { label: "Top Lists", href: "/supply-smb/no-sdk-no-ua/top-lists" },
   { label: "Detailed Analysis", href: "/supply-smb/no-sdk-no-ua/detailed-analysis" },
-  { label: "Leads Pipeline", href: "/supply-smb/leads" },
-  { label: "Bundle Compare", href: "/supply-smb/no-sdk-no-ua/bundle-compare" },
 ];
 
 export const leadsPageTabs = [

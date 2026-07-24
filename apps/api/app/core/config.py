@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     gcp_project_data: str = Field(default="", alias="GCP_PROJECT_DATA")
     bq_write_project: str = Field(default="", alias="BQ_WRITE_PROJECT")
     bq_read_project: str = Field(default="", alias="BQ_READ_PROJECT")
-    bq_dataset_supply_smb_write: str = Field(default="supply_smb", alias="BQ_DATASET_SUPPLY_SMB_WRITE")
-    bq_dataset_config: str = Field(default="config", alias="BQ_DATASET_CONFIG")
+    bq_dataset_supply_smb_write: str = Field(default="Incept", alias="BQ_DATASET_SUPPLY_SMB_WRITE")
+    bq_dataset_config: str = Field(default="Incept", alias="BQ_DATASET_CONFIG")
 
     google_cloud_project: str = Field(default="", alias="GOOGLE_CLOUD_PROJECT")
     google_cloud_location: str = Field(default="global", alias="GOOGLE_CLOUD_LOCATION")

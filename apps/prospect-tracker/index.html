@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supply SMB · Signal Desk</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ink-black: #03045e;
+  --prussian-blue: #073f55;
+  --regal-navy: #0d5773;
+  --school-bus-yellow: #ffc300;
+  --gold: #ffd60a;
+  --ink: var(--ink-black);
+  --ink-soft: #176582;
+  --ink-faint: #58a3c0;
+  --text-1: var(--ink);
+  --text-2: var(--ink-soft);
+  --text-3: var(--ink-faint);
+  --paper: #f4f7fb;
+  --surface: #ffffff;
+  --line: #d8e2ef;
+  --accent: var(--school-bus-yellow);
+  --accent-dark: #e3aa00;
+  --mint: #dceaff;
+  --lime: var(--gold);
+  --moss: var(--regal-navy);
+  --nav: var(--ink-black);
+  --nav-soft: var(--prussian-blue);
+  --radius: 18px;
+  --shadow-sm: 0 2px 0 rgba(24, 33, 30, .04), 0 12px 30px rgba(24, 33, 30, .05);
+  --shadow-md: 0 22px 55px rgba(24, 33, 30, .16);
+  --panel-w: 400px;
+  --s-identified: #52647a; --s-identified-bg: #e8eef5;
+  --s-outreach: #003566; --s-outreach-bg: #dceaff;
+  --s-discussion: #9a4b1f; --s-discussion-bg: #fff0d7;
+  --s-onboarded: #003566; --s-onboarded-bg: #dceaff;
+  --s-churned: #a83d33; --s-churned-bg: #fce5e1;
+  --p1: #7b281a; --p1-bg: #f9d9d1;
+  --p2: #89520d; --p2-bg: #fbe7b8;
+  --p3: #003566; --p3-bg: #dceaff;
+  --p4: #52647a; --p4-bg: #e8eef5;
+}
+
+body {
+  font-family: 'Manrope', sans-serif;
+  background: radial-gradient(circle at 94% 0%, #dceaff 0, transparent 24rem), var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+.topbar { 
+  min-height: 72px;
+  background: var(--nav);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  padding: 12px clamp(20px, 3vw, 48px);
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+}
+.topbar-logo { font-size: 15px; font-weight: 800; letter-spacing: -.04em; display: flex; align-items: center; gap: 10px; }
+.topbar-logo svg { width: 28px; height: 28px; }
+.topbar-logo span { color: #a7bdd8; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.topbar-spacer { flex: 1; }
+.topbar-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 10px 14px; border-radius: 999px; border: 1px solid transparent; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: .01em; transition: transform .16s, background .16s, border-color .16s;
+}
+.topbar-btn:hover { transform: translateY(-1px); }
+.topbar-btn.outline { background: transparent; color: #e2edff; border-color: rgba(226,237,255,.3); }
+.topbar-btn.outline:hover { background: var(--nav-soft); border-color: var(--gold); color: #ffffff; }
+.topbar-icon { font-size: 15px; }
+
+.page-header {
+  max-width: 1640px;
+  margin: 0 auto;
+  padding: clamp(30px, 4vw, 56px) clamp(20px, 3vw, 48px) 0;
+  display: flex; align-items: flex-end; gap: 14px;
+}
+/* .page-header::before { content: 'MARKET INTELLIGENCE / SMB SUPPLY'; align-self: flex-start; color: var(--accent); font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: .12em; font-weight: 500; padding-top: 8px; } */
+.page-title { font-size: clamp(30px, 4vw, 48px); font-weight: 800; letter-spacing: -.065em; line-height: .95; }
+.page-count { background: var(--ink); color: var(--gold); border-radius: 999px; padding: 5px 10px; font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; margin-bottom: 2px; }
+
+.stats-row {
+  max-width: 1640px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.15fr repeat(4, 1fr);
+  gap: 12px;
+  padding: 28px clamp(20px, 3vw, 48px) 22px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px 17px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform .16s, box-shadow .16s, border-color .16s;
+  position: relative;
+  overflow: hidden;
+}
+.stat-card:first-child { background: var(--ink); border-color: var(--ink); color: #ffffff; }
+.stat-card:first-child .stat-label, .stat-card:first-child .stat-sub { color: #a7bdd8; }
+.stat-card:first-child .stat-num { color: var(--gold); }
+.stat-card::after { content: ''; position: absolute; width: 50px; height: 50px; right: -18px; bottom: -20px; border-radius: 50%; background: var(--stripe, var(--mint)); opacity: .4; }
+.stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--stripe, var(--lime)); }
+.stat-card.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stat-label { font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 500; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 12px; }
+.stat-num { font-size: 30px; font-weight: 800; letter-spacing: -.06em; color: var(--ink); line-height: .92; }
+.stat-sub { font-size: 11px; color: var(--ink-faint); margin-top: 8px; }
+
+.filter-bar {
+  max-width: 1640px;
+  margin: 0 auto;
+  padding: 0 clamp(20px, 3vw, 48px) 18px;
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.search-wrap { flex: 1 1 260px; min-width: 220px; max-width: 400px; position: relative; }
+.search-wrap svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); width: 15px; }
+.search-input, .sort-select {
+  border: 1px solid var(--line); border-radius: 12px; font-family: inherit; font-size: 12px; color: var(--ink); background: var(--surface); outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.search-input { width: 100%; padding: 11px 14px 11px 40px; }
+.search-input:focus, .sort-select:focus { border-color: var(--regal-navy); box-shadow: 0 0 0 3px rgba(13,87,115,.12); }
+.filter-pills { display: flex; gap: 5px; flex-wrap: wrap; padding: 4px; background: #e8eef7; border-radius: 12px; }
+.pill { padding: 8px 12px; border-radius: 8px; border: 0; background: transparent; font-family: inherit; font-size: 11px; font-weight: 700; color: var(--ink-soft); cursor: pointer; transition: background .15s, color .15s; white-space: nowrap; }
+.pill:hover { color: var(--ink); }
+.pill.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(24,33,30,.12); }
+.filter-spacer { flex: 1; }
+.sort-select { padding: 10px 32px 10px 12px; cursor: pointer; }
+
+.main-layout { max-width: 1640px; margin: 0 auto; display: flex; padding: 0 clamp(20px, 3vw, 48px) 48px; gap: 16px; position: relative; }
+.table-wrap { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: auto; transition: all .2s; }
+.table { width: 100%; min-width: 880px; border-collapse: collapse; font-size: 12px; }
+.table thead { background: #edf3fb; border-bottom: 1px solid var(--line); }
+.table th { padding: 13px 16px; text-align: left; font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 500; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; user-select: none; }
+.table th.sortable { cursor: pointer; }.table th.sortable:hover { color: var(--accent); }
+.table td { padding: 15px 16px; border-bottom: 1px solid #e7edf6; vertical-align: middle; }
+.table tbody tr { cursor: pointer; transition: background .12s; }.table tbody tr:hover { background: #f3f7fd; }.table tbody tr.selected { background: #e1edff; }.table tbody tr:last-child td { border-bottom: none; }
+.company-cell { max-width: 240px; }.co-name { font-weight: 800; letter-spacing: -.025em; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.co-pub { font-size: 11px; color: var(--ink-faint); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.entity-cell { font-size: 11px; color: var(--ink-soft); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; white-space: nowrap; letter-spacing: .01em; }.badge::before { content: '●'; font-size: 7px; }.badge-identified { color: var(--s-identified); background: var(--s-identified-bg); }.badge-outreach { color: var(--s-outreach); background: var(--s-outreach-bg); }.badge-discussion { color: var(--s-discussion); background: var(--s-discussion-bg); }.badge-onboarded { color: var(--s-onboarded); background: var(--s-onboarded-bg); }.badge-churned { color: var(--s-churned); background: var(--s-churned-bg); }.badge-p1 { color: var(--p1); background: var(--p1-bg); }.badge-p2 { color: var(--p2); background: var(--p2-bg); }.badge-p3 { color: var(--p3); background: var(--p3-bg); }.badge-p4 { color: var(--p4); background: var(--p4-bg); }
+.badge-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 6px; font-size: 10px; font-weight: 700; background: var(--s-identified-bg); color: var(--ink-soft); }.badge-gaming { background: #fff0bd; color: #795500; }.badge-nongaming { background: #dceaff; color: #003566; }.badge-gatherone { background: #e8eef5; color: #001d3d; }
+
+.detail-panel { width: var(--panel-w); background: var(--prussian-blue); color: #ffffff; border: 1px solid var(--prussian-blue); border-radius: var(--radius); box-shadow: var(--shadow-md); display: flex; flex-direction: column; max-height: calc(100vh - 122px); position: sticky; top: 88px; overflow: hidden; flex-shrink: 0; }.detail-panel.hidden { display: none; }
+.panel-header { padding: 20px; border-bottom: 1px solid rgba(255,255,255,.14); display: flex; align-items: flex-start; gap: 10px; }.panel-co-name { font-size: 17px; font-weight: 800; letter-spacing: -.045em; flex: 1; line-height: 1.25; }.panel-pub { font-size: 11px; color: #a7bdd8; margin-top: 5px; }.close-btn { background: rgba(255,255,255,.08); border: none; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; color: #ffffff; font-size: 18px; transition: background .15s; flex-shrink: 0; }.close-btn:hover { background: var(--school-bus-yellow); color: var(--ink-black); }
+.panel-tabs { display: flex; gap: 4px; padding: 10px 14px 0; border-bottom: 1px solid rgba(255,255,255,.14); }.panel-tab { padding: 9px 12px; font-size: 11px; font-weight: 800; color: #a7bdd8; cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }.panel-tab:hover { color: #ffffff; }.panel-tab.active { color: #ffffff; border-bottom-color: var(--gold); }
+.panel-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; }.section-title { font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 500; color: #a7bdd8; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 10px; }.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 12px; }.info-label { font-size: 10px; color: #a7bdd8; font-weight: 600; margin-bottom: 4px; }.info-value { font-size: 12px; color: #ffffff; font-weight: 600; word-break: break-word; }.info-value.mono { font-family: 'DM Mono', monospace; font-size: 11px; }.bg-text { font-size: 12px; color: #e2edff; line-height: 1.65; background: rgba(255,255,255,.07); border-radius: 10px; padding: 12px; }
+.form-group { margin-bottom: 14px; }.form-label { display: block; font-size: 11px; font-weight: 700; color: #e2edff; margin-bottom: 6px; }.form-select, .form-input, .form-textarea { width: 100%; padding: 10px 11px; border: 1px solid rgba(255,255,255,.2); border-radius: 9px; font-family: inherit; font-size: 12px; color: #ffffff; background: rgba(255,255,255,.07); outline: none; }.form-select:focus, .form-input:focus, .form-textarea:focus { border-color: var(--gold); background: rgba(255,255,255,.11); }.form-textarea { resize: vertical; min-height: 80px; line-height: 1.5; }.toggle-group { display: flex; gap: 6px; }.toggle-opt { flex: 1; padding: 8px; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; text-align: center; cursor: pointer; font-size: 12px; font-weight: 700; color: #cbd8eb; background: rgba(255,255,255,.05); }.toggle-opt.selected { background: var(--gold); border-color: var(--gold); color: var(--ink-black); }.save-btn { width: 100%; padding: 12px; border-radius: 10px; border: 0; cursor: pointer; background: var(--gold); color: var(--ink-black); font-family: inherit; font-size: 12px; font-weight: 800; transition: transform .15s, background .15s; }.save-btn:hover { transform: translateY(-1px); background: #ffe45b; }.save-btn:disabled { opacity: .5; cursor: not-allowed; }.save-hint { font-size: 10px; color: #a7bdd8; text-align: center; margin-top: 8px; }
+
+.empty-state { text-align: center; padding: 80px 20px; color: var(--ink-faint); }.empty-icon { font-size: 38px; margin-bottom: 12px; }.empty-title { font-size: 15px; font-weight: 800; color: var(--ink-soft); margin-bottom: 6px; }
+.toast-area { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }.toast { padding: 13px 16px; border-radius: 12px; font-size: 12px; font-weight: 700; box-shadow: var(--shadow-md); max-width: 340px; animation: slide-up .2s ease; }.toast-success { background: var(--regal-navy); color: #ffffff; }.toast-error { background: #9c382d; color: #ffffff; }.toast-info { background: var(--ink-black); color: #ffffff; }@keyframes slide-up { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,8,20,.62); backdrop-filter: blur(6px); z-index: 200; display: flex; align-items: center; justify-content: center; }.modal-overlay.hidden { display: none; }.modal-box { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-md); padding: 28px; max-width: 430px; width: 90%; }.modal-title { font-size: 20px; font-weight: 800; letter-spacing: -.04em; margin-bottom: 8px; }.modal-body { font-size: 13px; color: var(--ink-soft); margin-bottom: 22px; line-height: 1.65; }.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }.modal-btn { padding: 10px 16px; border-radius: 10px; border: 0; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 800; }.modal-btn.cancel { background: #e8eef7; color: var(--ink); }.modal-btn.confirm { background: var(--ink-black); color: #ffffff; }
+.loading-overlay { position: fixed; inset: 0; background: rgba(244,247,251,.86); backdrop-filter: blur(4px); z-index: 300; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }.loading-overlay.hidden { display: none; }.spinner { width: 34px; height: 34px; border: 3px solid #d8e2ef; border-top-color: var(--school-bus-yellow); border-radius: 50%; animation: spin .8s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }.loading-text { font-size: 13px; color: var(--ink-soft); font-weight: 700; }
+@media (max-width: 1050px) { .stats-row { grid-template-columns: repeat(3, 1fr); }.main-layout { flex-direction: column; }.detail-panel { position: fixed; inset: auto 16px 16px; width: auto; max-height: calc(100vh - 32px); z-index: 50; }.filter-spacer { display: none; } }
+@media (max-width: 640px) { .topbar { min-height: 64px; padding: 10px 16px; }.topbar-logo span { display: none; }.topbar-btn { padding: 9px 10px; }.topbar-btn .topbar-icon { display: none; }.stats-row { grid-template-columns: repeat(2, 1fr); padding-top: 20px; }.stats-row .stat-card:first-child { grid-column: span 2; }.page-header::before { display: none; }.page-header { align-items: center; }.filter-bar { align-items: stretch; }.search-wrap { max-width: none; }.filter-pills { width: 100%; }.main-layout { padding-bottom: 24px; } }
+</style>
+</head>
+<body>
+
+<!-- Topbar -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="white" fill-opacity=".15"/><path d="M6 10l3 3 5-5" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Supply SMB <span>/ Signal desk</span>
+  </div>
+  <div class="topbar-spacer"></div>
+  <button class="topbar-btn outline" onclick="showSyncModal()">
+    <span class="topbar-icon">↻</span> Refresh signals
+  </button>
+  <button class="topbar-btn outline" onclick="doGenerateAgency()">
+    <span class="topbar-icon">↓</span> Export agency list
+  </button>
+  <button class="topbar-btn outline" onclick="doCheckLaunch()">
+    <span class="topbar-icon">📡</span> Check launch status
+  </button>
+</div>
+
+<!-- Page header -->
+<div class="page-header">
+  <h1 class="page-title">Prospect radar</h1>
+  <div class="page-count" id="total-badge">—</div>
+</div>
+
+<!-- Stats -->
+<div class="stats-row">
+  <div class="stat-card" style="--stripe:#003566" onclick="filterByStatus('')" id="stat-all">
+    <div class="stat-label">Total</div>
+    <div class="stat-num" id="stat-total">—</div>
+    <div class="stat-sub">All companies</div>
+  </div>
+  <div class="stat-card" style="--stripe:#ffc300" onclick="filterByStatus('Outreach')" id="stat-outreach">
+    <div class="stat-label">Outreach</div>
+    <div class="stat-num" id="stat-n-outreach">—</div>
+    <div class="stat-sub">Being contacted</div>
+  </div>
+  <div class="stat-card" style="--stripe:#ffd60a" onclick="filterByStatus('In Discussion')" id="stat-discussion">
+    <div class="stat-label">In Discussion</div>
+    <div class="stat-num" id="stat-n-discussion">—</div>
+    <div class="stat-sub">Active conversations</div>
+  </div>
+  <div class="stat-card" style="--stripe:#003566" onclick="filterByStatus('Onboarded')" id="stat-onboarded">
+    <div class="stat-label">Onboarded</div>
+    <div class="stat-num" id="stat-n-onboarded">—</div>
+    <div class="stat-sub">Converted</div>
+  </div>
+  <div class="stat-card" style="--stripe:#001d3d" onclick="filterByStatus('')" id="stat-gatherone">
+    <div class="stat-label">Gatherone</div>
+    <div class="stat-num" id="stat-n-gatherone">—</div>
+    <div class="stat-sub">Agency-eligible</div>
+  </div>
+</div>
+
+<!-- Filter bar -->
+<div class="filter-bar">
+  <div class="search-wrap">
+    <svg viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 0a6.5 6.5 0 104.9 10.72l3.44 3.44a.75.75 0 101.06-1.06l-3.44-3.44A6.5 6.5 0 006.5 0zm-5 6.5a5 5 0 1110 0 5 5 0 01-10 0z"/></svg>
+    <input id="search-input" class="search-input" placeholder="Search company, entity, city..." oninput="applyFilters()">
+  </div>
+  <div class="filter-pills">
+    <button class="pill active" data-routing="" onclick="setRoutingFilter(this, '')">All</button>
+    <button class="pill" data-routing="Gaming" onclick="setRoutingFilter(this, 'Gaming')">Gaming</button>
+    <button class="pill" data-routing="Non-Gaming" onclick="setRoutingFilter(this, 'Non-Gaming')">Non-Gaming</button>
+  </div>
+  <div class="filter-spacer"></div>
+  <select class="sort-select" id="status-filter" onchange="applyFilters()">
+    <option value="">All Status</option>
+    <option value="Identified">Identified</option>
+    <option value="Outreach">Outreach</option>
+    <option value="In Discussion">In Discussion</option>
+    <option value="Onboarded">Onboarded</option>
+    <option value="Churned">Churned</option>
+  </select>
+  <select class="sort-select" id="priority-filter" onchange="applyFilters()">
+    <option value="">All Priority</option>
+    <option value="P1">P1</option>
+    <option value="P2">P2</option>
+    <option value="P3">P3</option>
+    <option value="P4">P4</option>
+  </select>
+</div>
+
+<!-- Main layout -->
+<div class="main-layout">
+  <div class="table-wrap" id="table-wrap">
+    <table class="table" id="main-table">
+      <thead>
+        <tr>
+          <th class="sortable" onclick="sortBy('company_name')">Company ↕</th>
+          <th>China Entity</th>
+          <th>Base</th>
+          <th>Team</th>
+          <th>Priority</th>
+          <th>Status</th>
+          <th>Sales / GM</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr><td colspan="8">
+          <div class="empty-state">
+            <div class="spinner" style="margin:0 auto 12px"></div>
+            <div>Loading...</div>
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Detail panel -->
+  <div class="detail-panel hidden" id="detail-panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-co-name" id="panel-co-name">—</div>
+        <div class="panel-pub" id="panel-pub">—</div>
+      </div>
+      <button class="close-btn" onclick="closePanel()">×</button>
+    </div>
+    <div class="panel-tabs">
+      <div class="panel-tab active" onclick="switchTab(this,'info')">Info</div>
+      <div class="panel-tab" onclick="switchTab(this,'annotate')">Annotate</div>
+    </div>
+    <div class="panel-body" id="panel-body">
+      <!-- Filled dynamically -->
+    </div>
+  </div>
+</div>
+
+<!-- Sync confirm modal -->
+<div class="modal-overlay hidden" id="sync-modal">
+  <div class="modal-box">
+    <div class="modal-title">Sync from BigQuery</div>
+    <div class="modal-body">This will pull new companies from <code>cold_prospect_company</code> and append them to the sheet. Existing rows will not be modified.<br><br>Continue?</div>
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="hideSyncModal()">Cancel</button>
+      <button class="modal-btn confirm" onclick="doSyncBQ()">Sync Now</button>
+    </div>
+  </div>
+</div>
+
+<!-- Loading overlay -->
+<div class="loading-overlay hidden" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">Working...</div>
+</div>
+
+<!-- Toast area -->
+<div class="toast-area" id="toast-area"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let allData       = [];
+let filtered      = [];
+let selectedRow   = null;
+let activeTab     = 'info';
+let routingFilter = '';
+let sortKey       = 'company_name';
+let sortDir       = 1;
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', loadData);
+
+function loadData() {
+  google.script.run
+    .withSuccessHandler(onDataLoaded)
+    .withFailureHandler(err => toast('Failed to load: ' + err.message, 'error'))
+    .getCompanies();
+}
+
+function onDataLoaded(data) {
+  allData = data || [];
+  updateStats();
+  applyFilters();
+  toast(`Loaded ${allData.length} companies`, 'success');
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats() {
+  const counts = { 'Outreach': 0, 'In Discussion': 0, 'Onboarded': 0 };
+  let gatherone = 0;
+  allData.forEach(r => {
+    if (counts.hasOwnProperty(r.status)) counts[r.status]++;
+    if (r.is_gatherone === 'Yes') gatherone++;
+  });
+  document.getElementById('stat-total').textContent    = allData.length;
+  document.getElementById('stat-n-outreach').textContent   = counts['Outreach'];
+  document.getElementById('stat-n-discussion').textContent = counts['In Discussion'];
+  document.getElementById('stat-n-onboarded').textContent  = counts['Onboarded'];
+  document.getElementById('stat-n-gatherone').textContent  = gatherone;
+  document.getElementById('total-badge').textContent        = allData.length;
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+function filterByStatus(s) {
+  document.getElementById('status-filter').value = s;
+  applyFilters();
+}
+
+function setRoutingFilter(el, val) {
+  routingFilter = val;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  applyFilters();
+}
+
+function sortBy(key) {
+  if (sortKey === key) sortDir *= -1;
+  else { sortKey = key; sortDir = 1; }
+  applyFilters();
+}
+
+function applyFilters() {
+  const q       = (document.getElementById('search-input').value || '').toLowerCase();
+  const status  = document.getElementById('status-filter').value;
+  const priority = document.getElementById('priority-filter').value;
+
+  filtered = allData.filter(r => {
+    if (q && !`${r.company_name} ${r.publisher_name} ${r.china_entity} ${r.base}`.toLowerCase().includes(q)) return false;
+    if (status && r.status !== status) return false;
+    if (priority && r.demand_priority !== priority) return false;
+    if (routingFilter && r.team_routing !== routingFilter) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const av = (a[sortKey] || '').toString();
+    const bv = (b[sortKey] || '').toString();
+    return av.localeCompare(bv) * sortDir;
+  });
+
+  renderTable();
+}
+
+// ── Render table ──────────────────────────────────────────────────────────────
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">
+      <div class="empty-icon">🔍</div>
+      <div class="empty-title">No results</div>
+      <div>Try adjusting filters or search terms.</div>
+    </div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(r => `
+    <tr onclick="selectRow(${r.rowIndex})" ${selectedRow && selectedRow.rowIndex === r.rowIndex ? 'class="selected"' : ''}>
+      <td>
+        <div class="company-cell">
+          <div class="co-name" title="${esc(r.company_name)}">${esc(r.company_name)}</div>
+          <div class="co-pub">${esc(r.publisher_name)}</div>
+        </div>
+      </td>
+      <td class="entity-cell" title="${esc(r.china_entity)}">${esc(r.china_entity) || '<span style="color:var(--text-3)">—</span>'}</td>
+      <td style="white-space:nowrap;color:var(--text-2)">${esc(r.base) || '—'}</td>
+      <td>${routingBadge(r.team_routing)}</td>
+      <td>${priorityBadge(r.demand_priority)}</td>
+      <td>${statusBadge(r.status)}</td>
+      <td style="font-size:12px;color:var(--text-2)">${esc(r.sales_gm) || '—'}</td>
+      <td style="font-size:12px;color:var(--text-3);white-space:nowrap">${esc(r.updated_at) || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function statusBadge(s) {
+  const map = {
+    'Identified':   'badge-identified',
+    'Outreach':     'badge-outreach',
+    'In Discussion':'badge-discussion',
+    'Onboarded':    'badge-onboarded',
+    'Churned':      'badge-churned',
+  };
+  return `<span class="badge ${map[s] || 'badge-identified'}">${esc(s || 'Identified')}</span>`;
+}
+
+function priorityBadge(p) {
+  const map = { P1:'badge-p1', P2:'badge-p2', P3:'badge-p3', P4:'badge-p4' };
+  if (!p) return '<span style="color:var(--text-3)">—</span>';
+  return `<span class="badge ${map[p] || 'badge-p3'}" style="font-size:10px;padding:2px 8px">${esc(p)}</span>`;
+}
+
+function routingBadge(r) {
+  if (!r) return '<span style="color:var(--text-3)">—</span>';
+  const cls = r.includes('Gaming') ? 'badge-gaming' : 'badge-nongaming';
+  const label = r.includes('Gaming') ? '🎮 Gaming' : '📱 Non-Gaming';
+  return `<span class="badge-tag ${cls}">${label}</span>`;
+}
+
+function stageOptions(current) {
+  const base = ['New', 'Growth - consumer', 'Growth - gaming'];
+  return (current && !base.includes(current)) ? [current, ...base] : base;
+}
+
+function launchBadge(s) {
+  if (s === 'Launched')    return '<span class="badge badge-onboarded">Launched</span>';
+  if (s === 'Not Onboard') return '<span class="badge badge-identified">Not Onboard</span>';
+  return '<span style="color:var(--text-3)">Not checked yet</span>';
+}
+
+// ── Row selection & panel ─────────────────────────────────────────────────────
+function selectRow(rowIndex) {
+  selectedRow = allData.find(r => r.rowIndex === rowIndex) || null;
+  if (!selectedRow) return;
+  renderTable();
+  openPanel();
+}
+
+function openPanel() {
+  document.getElementById('detail-panel').classList.remove('hidden');
+  document.getElementById('panel-co-name').textContent = selectedRow.company_name;
+  document.getElementById('panel-pub').textContent     = selectedRow.publisher_name || '';
+  switchTab(document.querySelector('.panel-tab.active'), activeTab);
+}
+
+function closePanel() {
+  document.getElementById('detail-panel').classList.add('hidden');
+  selectedRow = null;
+  renderTable();
+}
+
+function switchTab(el, tab) {
+  activeTab = tab;
+  document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderPanelBody();
+}
+
+function renderPanelBody() {
+  const body = document.getElementById('panel-body');
+  if (!selectedRow) return;
+  const r = selectedRow;
+
+  if (activeTab === 'info') {
+    body.innerHTML = `
+      <div>
+        <div class="section-title">Company Info</div>
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">China Entity</div>
+            <div class="info-value">${esc(r.china_entity) || '—'}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Base City</div>
+            <div class="info-value">${esc(r.base) || '—'}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Team Routing</div>
+            <div class="info-value">${routingBadge(r.team_routing)}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Demand Priority</div>
+            <div class="info-value">${priorityBadge(r.demand_priority)}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Moloco History</div>
+            <div class="info-value">${esc(r.moloco_history) || '<span style="color:var(--text-3)">None</span>'}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Is Gatherone</div>
+            <div class="info-value">${r.is_gatherone === 'Yes' ? '<span class="badge-tag badge-gatherone">✓ Yes</span>' : '—'}</div>
+          </div>
+          ${r.gatherone_sales ? `
+          <div class="info-item">
+            <div class="info-label">Gatherone Sales</div>
+            <div class="info-value">${esc(r.gatherone_sales)}</div>
+          </div>` : ''}
+          <div class="info-item">
+            <div class="info-label">Launch Status</div>
+            <div class="info-value">${launchBadge(r.launch_status)}</div>
+          </div>
+          ${r.launch_checked_at ? `
+          <div class="info-item">
+            <div class="info-label">Last Checked</div>
+            <div class="info-value" style="color:var(--text-3);font-size:12px">${esc(r.launch_checked_at)}</div>
+          </div>` : ''}
+        </div>
+      </div>
+      ${r.background ? `
+      <div>
+        <div class="section-title">Company Background</div>
+        <div class="bg-text">${esc(r.background)}</div>
+      </div>` : ''}
+      <div>
+        <div class="section-title">Links</div>
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">Website</div>
+            <div class="info-value mono">${r.website ? `<a href="${esc(r.website)}" target="_blank" style="color:var(--accent)">${esc(r.website)}</a>` : '—'}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Bundle IDs</div>
+            <div class="info-value mono" style="font-size:11px">${esc(r.bundle) || '—'}</div>
+          </div>
+        </div>
+      </div>
+      ${r.routing_note ? `
+      <div>
+        <div class="section-title">Routing Note</div>
+        <div class="bg-text">${esc(r.routing_note)}</div>
+      </div>` : ''}
+      ${r.agency_note ? `
+      <div>
+        <div class="section-title">Agency Note</div>
+        <div class="bg-text">${esc(r.agency_note)}</div>
+      </div>` : ''}
+    `;
+  } else {
+    // Annotate tab
+    body.innerHTML = `
+      <div>
+        <div class="section-title">Annotation</div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select id="f-status" class="form-select">
+            ${['Identified','Outreach','In Discussion','Onboarded','Churned']
+              .map(s => `<option value="${s}" ${r.status===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stage Type</label>
+          <select id="f-stage" class="form-select">
+            ${stageOptions(r.stage).map(s => `<option value="${esc(s)}" ${r.stage===s?'selected':''}>${esc(s)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sales / GM Owner</label>
+          <input id="f-sales-gm" class="form-input" placeholder="e.g. Alice Wang / Bob Li" value="${esc(r.sales_gm)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Is Gatherone?</label>
+          <div class="toggle-group">
+            <div class="toggle-opt ${r.is_gatherone==='Yes'?'selected':''}" onclick="toggleGatherone(this,'Yes')">Yes</div>
+            <div class="toggle-opt ${r.is_gatherone!=='Yes'?'selected':''}" onclick="toggleGatherone(this,'No')">No</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Agency Note</label>
+          <textarea id="f-agency-note" class="form-textarea" placeholder="Add agency notes...">${esc(r.agency_note)}</textarea>
+        </div>
+      </div>
+      <div>
+        <button class="save-btn" id="save-btn" onclick="saveAnnotation()">Save Changes</button>
+        ${r.updated_by ? `<div class="save-hint">Last updated by ${esc(r.updated_by)} on ${esc(r.updated_at)}</div>` : ''}
+      </div>
+    `;
+  }
+}
+
+function toggleGatherone(el, val) {
+  document.querySelectorAll('.toggle-opt').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  el.dataset.val = val;
+}
+
+function getGatheroneValue() {
+  const sel = document.querySelector('.toggle-opt.selected');
+  return sel ? (sel.textContent.trim() === 'Yes' ? 'Yes' : 'No') : 'No';
+}
+
+// ── Save annotation ───────────────────────────────────────────────────────────
+function saveAnnotation() {
+  if (!selectedRow) return;
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  const data = {
+    stage:        document.getElementById('f-stage').value,
+    sales_gm:     document.getElementById('f-sales-gm').value.trim(),
+    is_gatherone: getGatheroneValue(),
+    status:       document.getElementById('f-status').value,
+    agency_note:  document.getElementById('f-agency-note').value.trim(),
+  };
+
+  google.script.run
+    .withSuccessHandler(res => {
+      // Update in-memory
+      const idx = allData.findIndex(r => r.rowIndex === selectedRow.rowIndex);
+      if (idx >= 0) Object.assign(allData[idx], data, {
+        updated_by: res.updated_by,
+        updated_at: res.updated_at,
+      });
+      selectedRow = allData[idx];
+      renderTable();
+      updateStats();
+      renderPanelBody();
+      toast('Saved successfully', 'success');
+    })
+    .withFailureHandler(err => {
+      toast('Save failed: ' + err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Save Changes';
+    })
+    .saveAnnotation(selectedRow.rowIndex, data);
+}
+
+// ── BQ sync ───────────────────────────────────────────────────────────────────
+function showSyncModal()  { document.getElementById('sync-modal').classList.remove('hidden'); }
+function hideSyncModal()  { document.getElementById('sync-modal').classList.add('hidden'); }
+
+function doSyncBQ() {
+  hideSyncModal();
+  showLoading('Syncing from BigQuery...');
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      if (res.error) { toast('BQ error: ' + res.error, 'error'); return; }
+      toast(`Added ${res.added} new companies (${res.skipped} already existed)`, 'info');
+      loadData(); // reload
+    })
+    .withFailureHandler(err => {
+      hideLoading();
+      toast('Sync failed: ' + err.message, 'error');
+    })
+    .syncFromBQ();
+}
+
+// ── Agency list ───────────────────────────────────────────────────────────────
+function doGenerateAgency() {
+  showLoading('Generating agency list...');
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      toast(`Agency List updated — ${res.count} companies exported to "Agency List" sheet`, 'success');
+    })
+    .withFailureHandler(err => {
+      hideLoading();
+      toast('Failed: ' + err.message, 'error');
+    })
+    .generateAgencyList();
+}
+
+// ── Launch status check ────────────────────────────────────────────────────────
+function doCheckLaunch() {
+  showLoading('Checking fact_dsp_core for spend...');
+  google.script.run
+    .withSuccessHandler(res => {
+      hideLoading();
+      if (res.error) { toast('BQ error: ' + res.error, 'error'); return; }
+      toast(`Checked ${res.checked} companies — ${res.launched} now launched`, 'success');
+      loadData(); // reload to reflect updated launch_status
+    })
+    .withFailureHandler(err => {
+      hideLoading();
+      toast('Check failed: ' + err.message, 'error');
+    })
+    .checkLaunchStatus();
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function showLoading(msg) {
+  document.getElementById('loading-text').textContent = msg || 'Working...';
+  document.getElementById('loading').classList.remove('hidden');
+}
+function hideLoading() {
+  document.getElementById('loading').classList.add('hidden');
+}
+
+function toast(msg, type = 'info') {
+  const area = document.getElementById('toast-area');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  area.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+</script>
+</body>
+</html>

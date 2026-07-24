@@ -2,8 +2,8 @@
 
 import { useMemo } from "react";
 import { useSession } from "next-auth/react";
-import { ImageIcon, Sparkles, Library, ArrowRight, Zap } from "lucide-react";
-import type { AssetSummary, CreativeThreadSummary, JobSummary, WorkspaceSummary } from "@incept/shared";
+import { ImageIcon, Sparkles, Library, ArrowRight, Video, Zap } from "lucide-react";
+import type { AssetSummary, CreativeThreadSummary, JobSummary } from "@incept/shared";
 import type { AppView } from "./Sidebar";
 import { cn } from "@/lib/utils";
 
@@ -34,9 +34,9 @@ interface HomeViewProps {
   liveAssets: AssetSummary[];
   liveJobs: JobSummary[];
   liveThreads: CreativeThreadSummary[];
-  workspaces: WorkspaceSummary[];
   onViewChange: (view: AppView) => void;
-  onThreadSelect: (workspaceId: string, threadId: string) => void;
+  onThreadSelect: (threadId: string) => void;
+  onOpenCreateSurface: (surface: "image" | "video") => void;
 }
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
@@ -83,9 +83,9 @@ export function HomeView({
   liveAssets,
   liveJobs,
   liveThreads,
-  workspaces,
   onViewChange,
   onThreadSelect,
+  onOpenCreateSurface,
 }: HomeViewProps) {
   const { data: session } = useSession();
   const firstName =
@@ -102,11 +102,11 @@ export function HomeView({
     (j) => j.status === "running" || j.status === "queued"
   ).length;
 
-  // ── Recent projects (filter blank ones, max 4) ──
+  // ── Recent threads (filter blank ones, max 4) ──
   const recentThreads = useMemo(() => {
     const assetMap = new Map(liveAssets.map((asset) => [asset.id, asset]));
     return liveThreads
-      .filter((thread) => thread.assetCount > 0 || thread.jobCount > 0) // hide empty projects
+      .filter((thread) => thread.assetCount > 0 || thread.jobCount > 0)
       .map((thread) => {
         const cover = thread.coverAssetId
           ? assetMap.get(thread.coverAssetId)
@@ -115,7 +115,6 @@ export function HomeView({
           : undefined;
         return {
           threadId: thread.id,
-          workspaceId: thread.workspaceId,
           title: thread.title,
           createdAt: thread.updatedAt,
           thumbnail: cover?.url ?? thread.previewUrl,
@@ -147,7 +146,7 @@ export function HomeView({
         <StatCard
           label="Created today"
           value={todayCount}
-          sub={todayCount > 0 ? "new this session" : "start generating"}
+          sub={todayCount > 0 ? "new today" : "start generating"}
         />
         <StatCard
           label="Running"
@@ -158,10 +157,10 @@ export function HomeView({
       </div>
 
       {/* ── Quick actions ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button
           type="button"
-          onClick={() => onViewChange("Create")}
+          onClick={() => onOpenCreateSurface("image")}
           className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 text-left transition-colors hover:bg-muted/60"
         >
           <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-soft-accent text-accent">
@@ -170,6 +169,20 @@ export function HomeView({
           <div>
             <p className="text-sm font-medium">Generate Images</p>
             <p className="text-[11px] text-muted-foreground">Image &amp; endcard</p>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onOpenCreateSurface("video")}
+          className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 text-left transition-colors hover:bg-muted/60"
+        >
+          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-soft-accent text-accent">
+            <Video className="size-4" />
+          </div>
+          <div>
+            <p className="text-sm font-medium">Generate Videos</p>
+            <p className="text-[11px] text-muted-foreground">Veo scaffold</p>
           </div>
         </button>
 
@@ -204,14 +217,14 @@ export function HomeView({
         </button>
       </div>
 
-      {/* ── Recent projects ── */}
+      {/* ── Recent threads ── */}
       {recentThreads.length > 0 && (
         <div>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Recent Projects</h2>
+            <h2 className="text-sm font-semibold">Recent Threads</h2>
             <button
               type="button"
-              onClick={() => onViewChange("Create")}
+              onClick={() => onViewChange("Image")}
               className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
               View all
@@ -224,7 +237,7 @@ export function HomeView({
               <button
                 key={s.threadId}
                 type="button"
-                onClick={() => onThreadSelect(s.workspaceId, s.threadId)}
+                onClick={() => onThreadSelect(s.threadId)}
                 className="group flex flex-col gap-2 rounded-2xl border border-border bg-card p-3 text-left transition-colors hover:border-border/60 hover:bg-muted/40"
               >
                 {/* Thumbnail */}
@@ -271,7 +284,7 @@ export function HomeView({
           </div>
           <button
             type="button"
-            onClick={() => onViewChange("Create")}
+            onClick={() => onViewChange("Image")}
             className="rounded-xl bg-foreground px-5 py-2.5 text-sm font-medium text-background transition-opacity hover:opacity-80"
           >
             Start creating

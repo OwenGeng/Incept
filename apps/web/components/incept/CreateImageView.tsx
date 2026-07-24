@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type DragEvent,
   type SetStateAction,
 } from "react";
 import {
@@ -26,40 +27,47 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { AssetRole, AssetSummary, CreativeThreadSummary, InceptUser, JobSummary, ThemeCreatePresetSummary } from "@incept/shared";
+import type { AssetRole, AssetSummary, CreativeThreadSummary, InceptUser, JobSummary, RemediationAnalysisResult, ThemeCreatePresetSummary } from "@incept/shared";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { addTextToImage, cancelJob, createImageGenerationJob, createKakaoBizboardJob, createThemeCreatePreset, createThemeCreateReport, deleteAssets, deleteThread, downloadAssetFile, downloadAssetsZip, draftThemeCreateReport, editImage, generateGifFromAsset, listAssets, listThemeCreatePresets, listThreads, outpaintImage, removeBackground, renameThread, uploadAsset } from "@/lib/incept-api";
+import { addTextToImage, analyzeRemediationAssets, cancelJob, createImageGenerationJob, createKakaoBizboardJob, createThemeCreatePreset, createThemeCreateReport, deleteAssets, deleteThread, downloadAssetFile, downloadAssetsZip, draftThemeCreateReport, generateGifFromAsset, getAssetFileExtension, listAssets, listThemeCreatePresets, listThreads, outpaintImage, removeBackground, renameThread, uploadAsset, type ContentScope } from "@/lib/incept-api";
 import {
-  buildKakaoDefaultMainCopy,
   buildKakaoDisclosure,
-  buildKakaoSubtitle,
   composeKakaoBizboard,
+  KAKAO_DEFAULT_MAIN_COPY,
+  KAKAO_DEFAULT_SUBTITLE,
   KAKAO_DEFAULT_DISCLOSURE,
   KAKAO_GACHA_DISCLOSURE,
-  KAKAO_SUBTITLE_SUFFIX,
   loadSpoqaFonts,
   validateKakaoBizboardInputs,
 } from "@/lib/kakao-compositor";
-import { InpaintingCanvas } from "@/components/incept/InpaintingCanvas";
 import { DocsButton, FeedbackButton } from "@/components/incept/FeedbackButton";
 import { KakaoFlow } from "@/components/incept/KakaoFlow";
+import { WorkbenchShell } from "@/components/incept/WorkbenchShell";
+import { WorkbenchFooterActions } from "@/components/incept/WorkbenchFooterActions";
 
-// 鈹€鈹€鈹€ Types 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Types
 
 type CreativeMode = "image" | "endcard";
 type OutputFormat = "static" | "gif";
 type ProviderId = "openai" | "gemini";
-type ActiveChip = "model" | "sizes" | "format" | "variants" | null;
-type CreateFlow = "resize" | "theme_create" | "kakao";
-type DraftAssetPreview = { id: string; url: string; name: string; file: File; role: AssetRole };
-type ResizeSourceAsset = { id: string | null; url: string; name: string; file?: File };
+type ActiveChip = "model" | "sizes" | "format" | "variants" | "presets" | null;
+type CreateFlow = "resize" | "theme_create" | "kakao" | "remediation";
+type DraftAssetPreview = { id: string; url: string; name: string; file?: File; role: AssetRole };
+type ResizeSourceAsset = {
+  id: string | null;
+  url: string;
+  name: string;
+  file?: File;
+  width?: number;
+  height?: number;
+};
 type AssetBucketState = Partial<Record<AssetRole, DraftAssetPreview[]>>;
-type ThemeCreateMode = "style_modify" | "style_transfer" | "asset_text_replace";
+type ThemeCreateMode = "style_modify" | "style_transfer";
 
-// 鈹€鈹€鈹€ Constants 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Constants
 
-// 鈹€鈹€鈹€ Size definitions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Size definitions
 
 // Sizes grouped by family for the Resize task UI (endcard included as 4th group)
 const RESIZE_SIZE_GROUPS = [
@@ -91,21 +99,22 @@ const ENDCARD_SIZES = [
   { id: "480x480", label: "Square 1:1" },
 ];
 const ENDCARD_SIZE_IDS = ENDCARD_SIZES.map((s) => s.id);
-const DEFAULT_IMAGE_SIZES = ["1200x628", "300x250", "320x480"];
-const MAX_RESIZE_SOURCE_IMAGES = 5;
+const DEFAULT_IMAGE_SIZES: string[] = [];
+const MAX_RESIZE_SOURCE_IMAGES = 10;
+const MAX_REMEDIATION_SOURCE_IMAGES = 10;
 
-// 鈹€鈹€鈹€ Create flow tabs 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Create flow tabs
 
 const CREATE_FLOW_TABS: Array<{ id: CreateFlow; label: string; blurb: string }> = [
   { id: "resize",       label: "Resize",       blurb: "Adapt one image to multiple ad sizes. Background and style stay identical." },
-  { id: "theme_create", label: "Theme Create", blurb: "Modify a source creative using one of three Gemini image workflows." },
-  { id: "kakao",        label: "Kakao",        blurb: "Batch-generate Kakao Bizboard banners (1029脳258) from your ad creatives." },
+  { id: "theme_create", label: "Theme Create", blurb: "Run one of two Gemini image workflows, then turn strong outputs into reusable style presets." },
+  { id: "kakao",        label: "Kakao",        blurb: "Batch-generate Kakao Bizboard banners (1029x258) from your ad creatives." },
+  { id: "remediation",  label: "Remediation",  blurb: "Upload risky creatives and generate safer variants without losing the core campaign idea." },
 ];
 
 const THEME_CREATE_MODES: Array<{ id: ThemeCreateMode; label: string; blurb: string }> = [
   { id: "style_modify", label: "Style Modify", blurb: "Keep the exact layout of one source image and transform its artistic style." },
   { id: "style_transfer", label: "Style Transfer", blurb: "Use Image 1 for content and Image 2 only for visual style DNA." },
-  { id: "asset_text_replace", label: "Asset & Text Replace", blurb: "Replace a logo, replace one element, and rewrite one text string." },
 ];
 
 const THEME_CREATE_WORLD_CUP_2026_PROMPT = `You are modifying [Image 1] to fit the global "2026 FIFA World Cup Tournament" premium broadcast campaign aesthetic.
@@ -117,26 +126,20 @@ Instructions:
 4. Add dynamic, high-energy overlay elements: sharp motion-blur lighting streaks, flying stadium turf particles, and a subtle rain of golden celebration confetti in the atmosphere.
 5. Enhance the main subjects from [Image 1] with dramatic rim lighting (backlighting) from the stadium lights to make them pop out. The final image must look like an official, high-stakes sports betting or championship broadcast graphic.`;
 
-const THEME_CREATE_POSITION_OPTIONS = [
-  { value: "top-left", label: "Top Left" },
-  { value: "top-right", label: "Top Right" },
-  { value: "center", label: "Center" },
-  { value: "bottom-left", label: "Bottom Left" },
-  { value: "bottom-right", label: "Bottom Right" },
-] as const;
+const SHOW_THEME_CREATE_PRESET_CHIP = false;
 
-// Flat list of supported models 鈥?provider shown as sub-text prefix
+// Flat list of supported models, with provider shown as sub-text prefix
 const ALL_MODELS: Array<{
   id: string;
   provider: ProviderId;
   short: string;
   sub: string;
 }> = [
-  { id: "gemini-3.1-flash-image", provider: "gemini", short: "Gemini 3.1 Flash", sub: "Google 路 Fastest" },
-  { id: "gpt-image-2",            provider: "openai", short: "GPT Image 2",      sub: "OpenAI 路 Latest" },
+  { id: "gemini-3.1-flash-image", provider: "gemini", short: "Gemini 3.1 Flash", sub: "Google - Fastest" },
+  { id: "gpt-image-2",            provider: "openai", short: "GPT Image 2",      sub: "OpenAI - Latest" },
 ];
 
-// 鈹€鈹€鈹€ Props 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Props
 
 export interface CreateImageViewProps {
   liveAssets: AssetSummary[];
@@ -146,14 +149,14 @@ export interface CreateImageViewProps {
   liveThreads: CreativeThreadSummary[];
   setLiveThreads: Dispatch<SetStateAction<CreativeThreadSummary[]>>;
   currentUser: InceptUser;
+  contentScope: ContentScope;
   activeWorkspaceId: string;
-  activeWorkspaceTitle?: string;
   activeThreadId?: string | null;
   onThreadSelect?: (id: string | null) => void;
   onJobCreated: (job: JobSummary) => void;
 }
 
-// 鈹€鈹€鈹€ Helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Helpers
 
 function formatDateGroup(iso: string): string {
   const d = new Date(iso);
@@ -169,10 +172,31 @@ function formatThreadMode(mode: CreateFlow): string {
   if (mode === "resize") return "Resize";
   if (mode === "kakao") return "Kakao";
   if (mode === "theme_create") return "Theme Create";
+  if (mode === "remediation") return "Remediation";
   return "Free Create";
 }
 
-// 鈹€鈹€鈹€ Dropdown panel (shared wrapper) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+async function getImageDimensionsFromFile(file: File): Promise<{ width: number; height: number } | null> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const dimensions = await new Promise<{ width: number; height: number } | null>((resolve) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => resolve(null);
+      image.src = objectUrl;
+    });
+    return dimensions;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function buildSizeLabel(width?: number, height?: number): string | null {
+  if (!width || !height) return null;
+  return `${width}x${height}`;
+}
+
+// Dropdown panel shared wrapper
 // Each chip wraps its button + this panel in a <div className="relative">
 // The panel floats above the chip via absolute positioning.
 
@@ -233,6 +257,28 @@ function DropdownItem({
 
 function DropdownDivider() {
   return <div className="my-1 h-px bg-border" />;
+}
+
+function buildThemeCreatePresetName(mode: ThemeCreateMode, styleName: string, promptValue: string) {
+  const normalizedStyleName = styleName.trim();
+  if (normalizedStyleName) return normalizedStyleName;
+  const normalizedPrompt = promptValue.trim();
+  if (!normalizedPrompt) {
+    return mode === "style_modify" ? "Style Modify Preset" : "Style Transfer Preset";
+  }
+  return normalizedPrompt.split("\n")[0]?.trim().slice(0, 80) || (mode === "style_modify" ? "Style Modify Preset" : "Style Transfer Preset");
+}
+
+function buildThemeCreatePresetSummary(mode: ThemeCreateMode, styleDetails: string, promptValue: string) {
+  const normalizedStyleDetails = styleDetails.trim();
+  if (normalizedStyleDetails) return normalizedStyleDetails;
+  const normalizedPrompt = promptValue.replace(/\s+/g, " ").trim();
+  if (!normalizedPrompt) {
+    return mode === "style_modify"
+      ? "Reusable style-modification preset captured from a successful Theme Create run."
+      : "Reusable style-transfer preset captured from a successful Theme Create run.";
+  }
+  return normalizedPrompt.slice(0, 180);
 }
 
 function AssetBucketUploader({
@@ -314,26 +360,58 @@ function ThemeAssetInput({
   file,
   onPick,
   onClear,
+  onPreview,
   required,
+  onDropFiles,
 }: {
   title: string;
   hint: string;
   file: DraftAssetPreview | null;
   onPick: (file: File | null) => void;
   onClear: () => void;
+  onPreview?: (file: DraftAssetPreview) => void;
   required?: boolean;
+  onDropFiles?: (files: FileList | File[]) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   return (
-    <div className="rounded-xl border border-border bg-background/60 p-3">
+    <div
+      className={cn(
+        "rounded-xl border bg-background/60 p-3 transition-colors",
+        isDragOver ? "border-accent bg-soft-accent/10" : "border-border"
+      )}
+      onDragOver={(event) => {
+        if (!onDropFiles || !Array.from(event.dataTransfer.types).includes("Files")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+        setIsDragOver(true);
+      }}
+      onDragLeave={(event) => {
+        if (!onDropFiles) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const related = event.relatedTarget as Node | null;
+        if (related && event.currentTarget.contains(related)) return;
+        setIsDragOver(false);
+      }}
+      onDrop={(event) => {
+        if (!onDropFiles) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragOver(false);
+        onDropFiles(event.dataTransfer.files);
+      }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium text-foreground">{title}</p>
             {required && <Badge variant="secondary" className="text-[10px]">Required</Badge>}
           </div>
-          <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{hint}</p>
+          {hint ? <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{hint}</p> : null}
         </div>
         <button
           type="button"
@@ -357,9 +435,14 @@ function ThemeAssetInput({
 
       {file ? (
         <div className="mt-3 flex items-center gap-3 rounded-lg border border-border bg-card/80 p-2">
-          <div className="size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-[#07111F]">
+          <button
+            type="button"
+            onClick={() => onPreview?.(file)}
+            className="size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-[#07111F] transition-transform hover:scale-[1.02]"
+            title="Preview image"
+          >
             <img src={file.url} alt={file.name} className="h-full w-full object-cover" />
-          </div>
+          </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium text-foreground">{file.name}</p>
           </div>
@@ -378,7 +461,53 @@ function ThemeAssetInput({
   );
 }
 
-// 鈹€鈹€鈹€ Chip button 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+function ThemeDraftPreviewModal({
+  file,
+  onClose,
+}: {
+  file: DraftAssetPreview;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[75] flex items-center justify-center bg-black/85 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex max-h-[92vh] max-w-[92vw] flex-col overflow-hidden rounded-2xl bg-card shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+          <p className="truncate text-xs font-semibold text-foreground">{file.name}</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto bg-[#07111F]">
+          <img
+            src={file.url}
+            alt={file.name}
+            className="block max-h-[80vh] max-w-[90vw] object-contain"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Chip button
 
 function ChipButton({
   label,
@@ -406,7 +535,7 @@ function ChipButton({
   );
 }
 
-// 鈹€鈹€鈹€ Image zoom modal 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Image zoom modal
 
 function ZoomModal({
   asset,
@@ -423,9 +552,9 @@ function ZoomModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const fmt = asset.type === "gif" ? "GIF" : "PNG";
+  const fmt = getAssetFileExtension(asset).toUpperCase();
   const label = asset.width && asset.height
-    ? `${asset.width}脳${asset.height} 路 ${fmt}`
+    ? `${asset.width}x${asset.height} - ${fmt}`
     : fmt;
   const canRegenerate = Boolean(onRegenerate && (asset.parentAssetId || asset.rootAssetId) && asset.width && asset.height);
 
@@ -465,27 +594,42 @@ function ZoomModal({
         </div>
         {/* Image */}
         <div className="min-h-0 flex-1 overflow-auto">
-          <img
-            src={asset.url}
-            alt={asset.title}
-            className="block max-h-[80vh] max-w-[90vw] object-contain"
-          />
+          {asset.type === "video" ? (
+            <video
+              src={asset.url}
+              controls
+              playsInline
+              className="block max-h-[80vh] max-w-[90vw] object-contain"
+            />
+          ) : (
+            <img
+              src={asset.url}
+              alt={asset.title}
+              className="block max-h-[80vh] max-w-[90vw] object-contain"
+            />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// 鈹€鈹€鈹€ Generation card 鈥?3-column image grid + prompt + action buttons 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Generation card: 3-column image grid, prompt, and action buttons
 
-function KakaoBatchModal({
+type KakaoBuilderAsset = {
+  id: string;
+  url: string;
+  title?: string;
+  type: "image" | "video" | "audio" | "gif" | "report" | "playable";
+  threadId?: string | null;
+};
+
+export function KakaoBatchModal({
   assets,
   submitting,
   appIconUrl,
-  appName,
   mainCopy,
   appDownloadCopy,
-  dspName,
   gacha,
   previewUrl,
   validationErrors,
@@ -493,17 +637,19 @@ function KakaoBatchModal({
   onClose,
   onSubmit,
   onAppIconChange,
-  setAppName,
   setGacha,
+  onSubtitleChange,
   onMainCopyChange,
+  onApplyChanges,
+  previewBusy,
+  previewAssetIndex,
+  onPreviewAssetChange,
 }: {
-  assets: AssetSummary[];
+  assets: KakaoBuilderAsset[];
   submitting: boolean;
   appIconUrl: string | null;
-  appName: string;
   mainCopy: string;
   appDownloadCopy: string;
-  dspName: string;
   gacha: boolean;
   previewUrl: string | null;
   validationErrors: string[];
@@ -511,64 +657,182 @@ function KakaoBatchModal({
   onClose: () => void;
   onSubmit: () => void;
   onAppIconChange: (file: File | null) => void;
-  setAppName: Dispatch<SetStateAction<string>>;
   setGacha: Dispatch<SetStateAction<boolean>>;
+  onSubtitleChange: (value: string) => void;
   onMainCopyChange: (value: string) => void;
+  onApplyChanges: () => void;
+  previewBusy: boolean;
+  previewAssetIndex: number;
+  onPreviewAssetChange: (assetIndex: number) => void;
 }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && !submitting) onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, submitting]);
-
   const firstAsset = assets[0] ?? null;
+  const currentPreviewAsset = assets[previewAssetIndex] ?? firstAsset ?? null;
+  const [showGuideline, setShowGuideline] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
+  const canCreate = !submitting && validationErrors.length === 0 && !!appIconUrl && !!firstAsset;
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4"
-      onClick={() => {
-        if (!submitting) onClose();
-      }}
+      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/80 p-4 md:items-center"
+      aria-modal="true"
+      role="dialog"
     >
       <div
-        className="grid max-h-[92vh] w-full max-w-6xl gap-0 overflow-hidden rounded-3xl border border-white/10 bg-[#07111F] shadow-2xl lg:grid-cols-[1.15fr_0.85fr]"
-        onClick={(e) => e.stopPropagation()}
+        className="my-4 grid h-[calc(100vh-2rem)] max-h-[900px] w-full max-w-6xl gap-0 overflow-hidden rounded-3xl border border-border bg-white shadow-2xl lg:grid-cols-[minmax(0,1fr)_305px]"
       >
-        <div className="flex min-h-0 flex-col border-b border-white/10 lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
+        <div className="flex min-h-0 flex-col bg-muted/25">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
             <div>
-              <p className="text-sm font-semibold text-white">Kakao Bizboard Batch</p>
-              <p className="mt-1 text-xs text-white/60">
-                {assets.length === 1
-                  ? "1 cleaned image selected"
-                  : `${assets.length} cleaned images selected`}
+              <p className="text-sm font-semibold text-foreground">Kakao Bizboard Batch</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {assets.length === 1 ? "1 cleaned image selected" : `${assets.length} cleaned images selected`}
               </p>
             </div>
             <button
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="rounded-full p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             >
               <X className="size-4" />
             </button>
           </div>
 
-          <div className="grid min-h-0 flex-1 gap-5 overflow-auto p-5">
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+            <div className="flex flex-wrap items-center gap-6">
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={showGuideline}
+                  onChange={(e) => setShowGuideline(e.target.checked)}
+                  className="size-4 rounded border-border bg-transparent"
+                />
+                Guidelines
+              </label>
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={showGrid}
+                  onChange={(e) => setShowGrid(e.target.checked)}
+                  className="size-4 rounded border-border bg-transparent"
+                />
+                Grid background
+              </label>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-foreground">Selected Sources</p>
+                <p className="text-xs text-muted-foreground">{assets.length} / 10 selected</p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                One subtitle and main copy setting will be applied across all selected cleaned images.
+                Click a thumbnail to preview that source in the Bizboard frame.
+              </p>
+              <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+                {assets.map((asset, index) => {
+                  const selected = currentPreviewAsset === asset;
+                  return (
+                    <button
+                      key={asset.id}
+                      type="button"
+                      onClick={() => onPreviewAssetChange(index)}
+                      className={cn(
+                        "group relative w-28 shrink-0 overflow-hidden rounded-2xl border-2 bg-white text-left transition-all",
+                        selected
+                          ? "border-accent shadow-[0_0_0_1px_hsl(var(--accent)/0.18)]"
+                          : "border-border hover:border-foreground/20"
+                      )}
+                    >
+                      <div className="aspect-[4/3] bg-white">
+                        {asset.type === "video" ? (
+                          <video
+                            src={asset.url}
+                            className="h-full w-full object-cover"
+                            muted
+                            playsInline
+                            preload="metadata"
+                          />
+                        ) : (
+                          <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
+                        )}
+                      </div>
+                      <div className="border-t border-border bg-card px-2 py-2">
+                        <p className="truncate text-[11px] font-medium text-foreground">
+                          {asset.title || `Source ${index + 1}`}
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          {selected ? "Previewing" : `Source ${index + 1}`}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {showGuideline && (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
+                Kakao title and subtitle must stay inside the fixed left copy safe area. The blue/red guide box mirrors the company preview.
+              </div>
+            )}
+
+            <div className="flex justify-center">
+              <div className="relative w-full max-w-[760px] overflow-hidden bg-white">
+                {showGrid && (
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 opacity-30"
+                    style={{
+                      backgroundSize: "10px, 30px, 10px 10px, 30px 30px",
+                      backgroundImage:
+                        "linear-gradient(90deg, #00111111 1px, transparent 1px), linear-gradient(90deg, #00111111 1px, transparent 1px), linear-gradient(#00111111 1px, transparent 1px), linear-gradient(#00111111 1px, transparent 1px)",
+                    }}
+                  />
+                )}
+                {previewBusy ? (
+                  <div className="grid aspect-[1029/258] place-items-center border border-dashed border-border bg-background">
+                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : previewUrl ? (
+                  <img src={previewUrl} alt="Kakao Bizboard preview" className="relative block w-full" />
+                ) : currentPreviewAsset ? (
+                  <div className="grid aspect-[1029/258] place-items-center border border-dashed border-border bg-background text-sm text-muted-foreground">
+                    Apply changes to generate the Kakao preview.
+                  </div>
+                ) : (
+                  <div className="grid aspect-[1029/258] place-items-center border border-dashed border-border bg-background text-sm text-muted-foreground">
+                    Select cleaned assets first.
+                  </div>
+                )}
+                {showGuideline && (
+                  <div className="pointer-events-none absolute inset-0">
+                    <div className="ml-[32.8%] h-full w-[28.7%] border-l border-dashed border-red-500 border-r border-dashed border-blue-500" />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-col border-l border-border bg-white">
+          <div className="border-b border-border px-5 py-4">
+            <p className="text-sm font-semibold text-foreground">Image Settings</p>
+          </div>
+
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 pr-3">
+            <div className="grid gap-4">
               <label className="grid gap-2">
-                <span className="text-xs font-medium text-white/80">App Icon</span>
-                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-xl bg-white/10">
+                <span className="text-xs font-medium text-muted-foreground">App Icon</span>
+                <div className="flex items-center gap-3 rounded-md border border-border bg-background px-2 py-2">
+                  <div className="grid size-[54px] shrink-0 place-items-center overflow-hidden border border-border bg-white">
                     {appIconUrl ? (
-                      <img src={appIconUrl} alt="App icon" className="h-full w-full object-cover" />
+                      <img src={appIconUrl} alt="App icon" className="h-full w-full object-contain" />
                     ) : (
-                      <ImageIcon className="size-5 text-white/40" />
+                      <ImageIcon className="size-5 text-muted-foreground/50" />
                     )}
                   </div>
-                  <label className="cursor-pointer rounded-xl border border-white/15 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-white/10">
+                  <label className="cursor-pointer rounded-md border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                     Upload Icon
                     <input
                       type="file"
@@ -579,65 +843,78 @@ function KakaoBatchModal({
                   </label>
                 </div>
               </label>
+            </div>
 
-              <label className="grid gap-2">
-                <span className="text-xs font-medium text-white/80">App Name</span>
-                <input
-                  value={appName}
-                  onChange={(e) => setAppName(e.target.value)}
-                  placeholder="APP_NAME"
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/35 focus:border-white/25"
-                />
-              </label>
+            <div className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Current Preview Source</span>
+              {currentPreviewAsset ? (
+                <div className="overflow-hidden border border-border bg-white">
+                  <div className="aspect-[4/3]">
+                    {currentPreviewAsset.type === "video" ? (
+                      <video
+                        src={currentPreviewAsset.url}
+                        className="h-full w-full object-cover"
+                        muted
+                        playsInline
+                        preload="metadata"
+                      />
+                    ) : (
+                      <img
+                        src={currentPreviewAsset.url}
+                        alt={currentPreviewAsset.title}
+                        className="h-full w-full object-contain bg-white"
+                      />
+                    )}
+                  </div>
+                  <div className="px-2 py-2">
+                    <p className="truncate text-[11px] font-medium text-foreground">{currentPreviewAsset.title}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">This source is currently shown in the preview.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                  No selected source.
+                </div>
+              )}
             </div>
 
             <label className="grid gap-2">
-              <span className="text-xs font-medium text-white/80">Subtitle Preview</span>
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white">
-                {appDownloadCopy || `APP_NAME ${KAKAO_SUBTITLE_SUFFIX}`}
-              </div>
-              <span className="text-[11px] text-white/45">
-                The suffix {KAKAO_SUBTITLE_SUFFIX} must stay unchanged.
-              </span>
+              <span className="text-xs font-medium text-muted-foreground">Subtitle</span>
+              <input
+                value={appDownloadCopy}
+                onChange={(e) => onSubtitleChange(e.target.value)}
+                placeholder={KAKAO_DEFAULT_SUBTITLE}
+                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/20"
+              />
             </label>
 
             <label className="grid gap-2">
-              <span className="text-xs font-medium text-white/80">Main Copy</span>
+              <span className="text-xs font-medium text-muted-foreground">Main Copy</span>
               <input
                 value={mainCopy}
                 onChange={(e) => onMainCopyChange(e.target.value)}
-                placeholder={buildKakaoDefaultMainCopy(appName) || "APP_NAME 출시"}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/35 focus:border-white/25"
+                placeholder={KAKAO_DEFAULT_MAIN_COPY}
+                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/20"
               />
-              <span className="text-[11px] text-white/45">
-                Default copy is {buildKakaoDefaultMainCopy(appName) || "APP_NAME 출시"}, but you can fully replace it.
-              </span>
-              <span className="text-[11px] text-white/45">Width: {Math.round(mainCopyWidthPx)}px</span>
+              <span className="text-[11px] text-muted-foreground">Width: {Math.round(mainCopyWidthPx)}px</span>
             </label>
 
-            <label className="grid gap-2">
-              <span className="text-xs font-medium text-white/80">Moloco Disclosure</span>
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white">
-                {dspName}
-              </div>
-            </label>
-
-            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white">
+            <label className="flex items-center gap-3 text-sm text-foreground">
               <input
                 type="checkbox"
                 checked={gacha}
                 onChange={(e) => setGacha(e.target.checked)}
-                className="size-4 rounded border-white/20 bg-transparent"
+                className="size-4 rounded border-border bg-transparent"
               />
-              Use gacha disclosure: {KAKAO_GACHA_DISCLOSURE}
+              Show includes gacha contents
             </label>
 
             {validationErrors.length > 0 && (
-              <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3">
-                <p className="text-xs font-medium text-amber-100">Please fix these first</p>
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3">
+                <p className="text-xs font-medium text-amber-900">Please fix these first</p>
                 <div className="mt-2 space-y-1">
                   {validationErrors.map((message) => (
-                    <p key={message} className="text-xs text-amber-50/90">
+                    <p key={message} className="text-xs text-amber-800">
                       {message}
                     </p>
                   ))}
@@ -645,74 +922,46 @@ function KakaoBatchModal({
               </div>
             )}
 
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-              <p className="text-xs font-medium text-white/80">Selected Sources</p>
-              <div className="mt-3 grid grid-cols-3 gap-3 md:grid-cols-4">
-                {assets.map((asset) => (
-                  <div key={asset.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                    <div className="aspect-[4/3]">
-                      <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
-                    </div>
-                    <div className="px-2 py-2">
-                      <p className="truncate text-[11px] text-white/70">{asset.title}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="w-[156px]">
+              <button
+                type="button"
+                onClick={onApplyChanges}
+                disabled={previewBusy || !appIconUrl || !firstAsset}
+                className={cn(
+                  "w-full rounded-xl px-4 py-2 text-sm font-semibold transition-all",
+                  previewBusy || !appIconUrl || !firstAsset
+                    ? "cursor-not-allowed bg-muted text-muted-foreground"
+                    : "border border-border bg-background text-foreground hover:bg-muted"
+                )}
+              >
+                {previewBusy ? "Applying..." : "Apply Changes"}
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
+          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-4 py-4">
             <button
               type="button"
               onClick={onClose}
               disabled={submitting}
-              className="rounded-xl border border-white/15 px-4 py-2 text-sm font-medium text-white/75 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={onSubmit}
-              disabled={submitting || validationErrors.length > 0 || !appIconUrl || !firstAsset}
+              disabled={!canCreate}
               className={cn(
-                "flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all",
-                submitting || validationErrors.length > 0 || !appIconUrl || !firstAsset
-                  ? "cursor-not-allowed bg-white/10 text-white/35"
-                  : "bg-accent text-white hover:opacity-85"
+                "flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition-all",
+                canCreate
+                  ? "bg-accent text-white hover:opacity-85"
+                  : "cursor-not-allowed bg-muted text-muted-foreground"
               )}
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               {submitting ? "Creating..." : `Create ${assets.length} Kakao Assets`}
             </button>
-          </div>
-        </div>
-
-        <div className="flex min-h-0 flex-col bg-[#0B1728]">
-          <div className="border-b border-white/10 px-5 py-4">
-            <p className="text-sm font-semibold text-white">Preview</p>
-            <p className="mt-1 text-xs text-white/55">Uses the first selected image as the live preview.</p>
-          </div>
-          <div className="flex min-h-0 flex-1 items-center justify-center p-5">
-            {previewUrl ? (
-              <img
-                src={previewUrl}
-                alt="Kakao Bizboard preview"
-                className="w-full rounded-2xl border border-white/10 bg-white shadow-2xl"
-              />
-            ) : firstAsset ? (
-              <div className="w-full rounded-2xl border border-dashed border-white/15 bg-white/5 p-4">
-                <img
-                  src={firstAsset.url}
-                  alt={firstAsset.title}
-                  className="max-h-[60vh] w-full rounded-xl object-contain"
-                />
-              </div>
-            ) : (
-              <div className="grid h-full w-full place-items-center rounded-2xl border border-dashed border-white/15 text-sm text-white/45">
-                Select cleaned assets first.
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -727,7 +976,9 @@ function GenerationCard({
   isGenerating,
   selectedAssetIds,
   onToggleSelect,
-  onSetWorking,
+  onUseAsSource,
+  onUseAsReference,
+  onUseForResize,
   onRegenerate,
   onRegenerateAsset,
   onHide,
@@ -739,7 +990,9 @@ function GenerationCard({
   isGenerating?: boolean;
   selectedAssetIds?: Set<string>;
   onToggleSelect?: (assetId: string) => void;
-  onSetWorking?: (asset: AssetSummary) => void;
+  onUseAsSource?: (asset: AssetSummary) => void;
+  onUseAsReference?: (asset: AssetSummary) => void;
+  onUseForResize?: (asset: AssetSummary) => void;
   onRegenerate?: () => void;
   onRegenerateAsset?: (asset: AssetSummary) => void;
   onHide?: () => void;
@@ -761,16 +1014,15 @@ function GenerationCard({
 
   const realAssets = assets.filter((a) => a.url && !a.url.includes("placeholder"));
   if (realAssets.length === 0) return null;
-  const firstWorkingAsset = realAssets[0];
   function fmtLabel(a: AssetSummary) {
-    const size = a.width && a.height ? `${a.width}脳${a.height}` : "";
-    const fmt  = a.type === "gif" ? "GIF" : "PNG";
-    return size ? `${size} 路 ${fmt}` : fmt;
+    const size = a.width && a.height ? `${a.width}x${a.height}` : "";
+    const fmt  = getAssetFileExtension(a).toUpperCase();
+    return size ? `${size} - ${fmt}` : fmt;
   }
 
   return (
     <div className="group col-span-3 flex gap-2">
-      {/* 鈹€鈹€ Images in 3-column grid 鈹€鈹€ */}
+      {/* Images in 3-column grid */}
       <div className="min-w-0 flex-1">
         <div className="grid grid-cols-3 gap-3">
           {realAssets.map((a) => {
@@ -795,7 +1047,7 @@ function GenerationCard({
                   </button>
                 )}
 
-                {/* Image tile 鈥?click to zoom */}
+                {/* Image tile: click to zoom */}
                 <div
                   className={cn(
                     "relative cursor-zoom-in overflow-hidden border bg-[#07111F]",
@@ -806,17 +1058,16 @@ function GenerationCard({
                   style={{ aspectRatio: Math.min(Math.max(r, 0.3), 4) }}
                   onClick={() => onZoom?.(a)}
                 >
-                  <img src={a.url} alt={a.title} className="h-full w-full object-cover transition-transform group-hover/img:scale-[1.02]" />
-
-                  {/* Use as working image 鈥?first image only */}
-                  {a.id === firstWorkingAsset.id && (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); onSetWorking?.(a); }}
-                      className="absolute left-2 top-2 hidden rounded-lg bg-accent/90 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm hover:bg-accent group-hover:flex"
-                    >
-                      Use
-                    </button>
+                  {a.type === "video" ? (
+                    <video
+                      src={a.url}
+                      className="h-full w-full object-cover transition-transform group-hover/img:scale-[1.02]"
+                      muted
+                      playsInline
+                      preload="metadata"
+                    />
+                  ) : (
+                    <img src={a.url} alt={a.title} className="h-full w-full object-cover transition-transform group-hover/img:scale-[1.02]" />
                   )}
 
                   {canRegenerateAsset && (
@@ -836,6 +1087,50 @@ function GenerationCard({
                       <Maximize2 className="size-4 text-white" />
                     </div>
                   </div>
+
+                  {(onUseAsSource || onUseAsReference || onUseForResize) && (
+                    <div className="absolute bottom-2 left-2 right-2 z-10 hidden max-w-[calc(100%-16px)] grid-cols-2 gap-1 group-hover/img:grid">
+                      {onUseAsSource && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUseAsSource(a);
+                          }}
+                          className="rounded-lg border border-white/20 bg-black/60 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm hover:bg-black/75"
+                          style={{ gridColumn: onUseAsReference ? "span 1 / span 1" : "1 / -1" }}
+                        >
+                          Use as Source
+                        </button>
+                      )}
+                      {onUseAsReference && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUseAsReference(a);
+                          }}
+                          className="rounded-lg border border-white/20 bg-black/60 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm hover:bg-black/75"
+                          style={{ gridColumn: onUseAsSource ? "span 1 / span 1" : "1 / -1" }}
+                        >
+                          Use as Reference
+                        </button>
+                      )}
+                      {onUseForResize && a.type === "image" && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onUseForResize(a);
+                          }}
+                          className="rounded-lg border border-white/20 bg-black/60 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm hover:bg-black/75"
+                          style={{ gridColumn: "1 / -1" }}
+                        >
+                          Resize
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Size + format label */}
@@ -858,7 +1153,7 @@ function GenerationCard({
         </div>
       </div>
 
-      {/* 鈹€鈹€ Action buttons (right column, appear on hover) 鈹€鈹€ */}
+      {/* Action buttons in the right column, shown on hover */}
       <div className="flex shrink-0 flex-col items-center gap-1.5 pt-1 opacity-0 transition-opacity group-hover:opacity-100">
         {onRegenerate && (
           <button
@@ -885,7 +1180,93 @@ function GenerationCard({
   );
 }
 
-// 鈹€鈹€鈹€ Main component 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+function RemediationReviewCard({
+  asset,
+  analysis,
+  onRemediate,
+  onHide,
+  onZoom,
+}: {
+  asset: AssetSummary;
+  analysis: RemediationAnalysisResult;
+  onRemediate: () => void;
+  onHide?: () => void;
+  onZoom?: (asset: AssetSummary) => void;
+}) {
+  const riskTone =
+    analysis.overall_risk === "high" || analysis.overall_risk === "extreme"
+      ? "border-red-200 bg-red-50 text-red-700"
+      : analysis.overall_risk === "medium" || analysis.overall_risk === "serious"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : "border-emerald-200 bg-emerald-50 text-emerald-700";
+
+  return (
+    <div className="group col-span-3 flex gap-3">
+      <div className="min-w-0 flex-1 rounded-2xl border border-border bg-card p-4">
+        <div className="flex gap-4">
+          <button
+            type="button"
+            onClick={() => onZoom?.(asset)}
+            className="h-28 w-40 shrink-0 overflow-hidden rounded-xl border border-border bg-[#07111F]"
+          >
+            <img src={asset.url} alt={asset.title} className="h-full w-full object-cover" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-blue-700">
+                Scan Result
+              </span>
+              <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em]", riskTone)}>
+                {analysis.overall_risk} risk
+              </span>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-foreground">{asset.title}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{analysis.summary}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {analysis.violations.length > 0 ? (
+                analysis.violations.map((violation, index) => (
+                  <span
+                    key={`${asset.id}_${violation.category}_${index}`}
+                    className="rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground"
+                  >
+                    {violation.category.replace(/_/g, " ")}
+                  </span>
+                ))
+              ) : (
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                  No violations
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-col items-center gap-1.5 pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          type="button"
+          title="Remediate"
+          onClick={onRemediate}
+          className="rounded-lg border border-accent/30 bg-soft-accent/40 p-2 text-accent transition-colors hover:bg-soft-accent"
+        >
+          <Sparkles className="size-4" />
+        </button>
+        {onHide && (
+          <button
+            type="button"
+            title="Hide"
+            onClick={onHide}
+            className="rounded-lg border border-border bg-card p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <EyeOff className="size-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Main component
 
 export function CreateImageView({
   liveAssets,
@@ -895,13 +1276,13 @@ export function CreateImageView({
   liveThreads,
   setLiveThreads,
   currentUser,
+  contentScope,
   activeWorkspaceId,
-  activeWorkspaceTitle,
   activeThreadId,
   onThreadSelect,
   onJobCreated,
 }: CreateImageViewProps) {
-  // 鈹€鈹€ Form state 鈹€鈹€
+  // Form state
   const [mode, setMode] = useState<CreativeMode>("image");
   const [createFlow, setCreateFlow] = useState<CreateFlow>("resize");
   const [prompt, setPrompt] = useState("");
@@ -909,69 +1290,75 @@ export function CreateImageView({
   const [selectedSizes, setSelectedSizes] = useState<string[]>(DEFAULT_IMAGE_SIZES);
   const [format, setFormat] = useState<OutputFormat>("static");
 
-  // 鈹€鈹€ Additional GIF output (Resize mode add-on) 鈹€鈹€
+  // Additional GIF output for Resize mode
   const [includeGif, setIncludeGif] = useState(false);
+  const [includeResizeGachaDisclosure, setIncludeResizeGachaDisclosure] = useState(false);
 
-  // 鈹€鈹€ Resize source image 鈹€鈹€
+  // Resize source images
   const [resizeSourceAssets, setResizeSourceAssets] = useState<ResizeSourceAsset[]>([]);
   const resizeFileRef = useRef<HTMLInputElement>(null);
+  const [remediationSourceAssets, setRemediationSourceAssets] = useState<ResizeSourceAsset[]>([]);
+  const [remediationAnalyses, setRemediationAnalyses] = useState<Record<string, RemediationAnalysisResult>>({});
+  const [remediationScanning, setRemediationScanning] = useState(false);
   const [showDevPromptOverride, setShowDevPromptOverride] = useState(false);
   const [resizePromptOverrides, setResizePromptOverrides] = useState<Record<string, string>>({});
   const [resizeNegativePromptOverride, setResizeNegativePromptOverride] = useState("");
   const [variants, setVariants] = useState<1 | 2>(1);
   const [activeChip, setActiveChip] = useState<ActiveChip>(null);
+  const [isDragUploading, setIsDragUploading] = useState(false);
 
   // Derive provider from selected model
   const activeModel = ALL_MODELS.find((m) => m.id === modelId) ?? ALL_MODELS[0];
   const provider = activeModel.provider;
 
-  // 鈹€鈹€ Theme Create 鈹€鈹€
+  // Theme Create
   const [themeCreateMode, setThemeCreateMode] = useState<ThemeCreateMode>("style_modify");
   const [themeCreateAssets, setThemeCreateAssets] = useState<AssetBucketState>({});
   const [themeCreateStyleName, setThemeCreateStyleName] = useState("");
   const [themeCreateStyleDetails, setThemeCreateStyleDetails] = useState("");
-  const [themeCreateLogoPosition, setThemeCreateLogoPosition] = useState("top-left");
-  const [themeCreateElementPosition, setThemeCreateElementPosition] = useState("top-right");
-  const [themeCreateOldText, setThemeCreateOldText] = useState("");
-  const [themeCreateNewText, setThemeCreateNewText] = useState("");
-  const [themeCreateFontStyle, setThemeCreateFontStyle] = useState("");
   const [themeCreatePresets, setThemeCreatePresets] = useState<ThemeCreatePresetSummary[]>([]);
   const [themeCreatePresetLoading, setThemeCreatePresetLoading] = useState(false);
+  const [, setThemeCreatePresetPreviewId] = useState<string | null>(null);
+  const [themeCreatePreviewFile, setThemeCreatePreviewFile] = useState<DraftAssetPreview | null>(null);
   const [themeCreatePresetName, setThemeCreatePresetName] = useState("");
   const [themeCreatePresetDescription, setThemeCreatePresetDescription] = useState("");
   const [themeCreatePresetSaving, setThemeCreatePresetSaving] = useState(false);
-  const [themeCreatePresetFeedback, setThemeCreatePresetFeedback] = useState<string | null>(null);
+  const [, setThemeCreatePresetFeedback] = useState<string | null>(null);
   const [themeCreateDrafting, setThemeCreateDrafting] = useState(false);
 
-  // 鈹€鈹€ Generation state 鈹€鈹€
+  // Generation state
   const [generating, setGenerating] = useState(false);
   const [uploadingSource, setUploadingSource] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
+  const [workbenchExpanded, setWorkbenchExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 鈹€鈹€ Session 鈹€鈹€
+  const [psdInfo, setPsdInfo] = useState<string | null>(null);
+  // Session
 
-  // 鈹€鈹€ Working image ("current working object", drives edit vs generate) 鈹€鈹€
+  // Working image ("current working object", drives edit vs generate)
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
-  const [downloadPrefix, setDownloadPrefix] = useState("incept");
   const [downloading, setDownloading] = useState(false);
+  const [assetPanelSelectMode, setAssetPanelSelectMode] = useState(false);
   const [hiddenJobIds, setHiddenJobIds] = useState<Set<string>>(new Set());
   const [zoomedAsset, setZoomedAsset] = useState<AssetSummary | null>(null);
   const [kakaoBatchOpen, setKakaoBatchOpen] = useState(false);
+  const [kakaoBatchAssets, setKakaoBatchAssets] = useState<KakaoBuilderAsset[]>([]);
   const [kakaoBatchSubmitting, setKakaoBatchSubmitting] = useState(false);
   const [kakaoBatchAppIconUrl, setKakaoBatchAppIconUrl] = useState<string | null>(null);
-  const [kakaoBatchAppName, setKakaoBatchAppName] = useState("");
-  const [kakaoBatchMainCopy, setKakaoBatchMainCopy] = useState("");
-  const [kakaoBatchMainCopyCustomized, setKakaoBatchMainCopyCustomized] = useState(false);
-  const [kakaoBatchAppDownloadCopy, setKakaoBatchAppDownloadCopy] = useState("闉庤啒妫庨澒?闋囨洢婢?>");
+  const [kakaoBatchMainCopy, setKakaoBatchMainCopy] = useState(KAKAO_DEFAULT_MAIN_COPY);
+  const [kakaoBatchAppDownloadCopy, setKakaoBatchAppDownloadCopy] = useState(KAKAO_DEFAULT_SUBTITLE);
   const [kakaoBatchDspName, setKakaoBatchDspName] = useState(KAKAO_DEFAULT_DISCLOSURE);
   const [kakaoBatchGacha, setKakaoBatchGacha] = useState(false);
   const [kakaoBatchPreviewUrl, setKakaoBatchPreviewUrl] = useState<string | null>(null);
   const [kakaoBatchValidationErrors, setKakaoBatchValidationErrors] = useState<string[]>([]);
   const [kakaoBatchMainCopyWidthPx, setKakaoBatchMainCopyWidthPx] = useState(0);
+  const [kakaoBatchPreviewBusy, setKakaoBatchPreviewBusy] = useState(false);
+  const [kakaoBatchPreviewAssetIndex, setKakaoBatchPreviewAssetIndex] = useState(0);
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const lastSelectionSignatureRef = useRef("");
 
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(activeThreadId ?? null);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
@@ -996,6 +1383,8 @@ export function CreateImageView({
   function appendResizeSourceFiles(files: FileList | File[] | null) {
     if (!files) return;
     const incoming = Array.from(files).slice(0, MAX_RESIZE_SOURCE_IMAGES);
+    const hasPsd = incoming.some((f) => f.name.toLowerCase().endsWith(".psd"));
+    if (hasPsd) setPsdInfo("PSD detected, converting to PNG on upload…");
     setResizeSourceAssets((prev) => {
       const remaining = Math.max(0, MAX_RESIZE_SOURCE_IMAGES - prev.length);
       const additions = incoming.slice(0, remaining).map((file) => ({
@@ -1008,44 +1397,199 @@ export function CreateImageView({
     });
   }
 
+  async function appendRemediationSourceFiles(files: FileList | File[] | null) {
+    if (!files) return;
+    const incoming = Array.from(files).slice(0, MAX_REMEDIATION_SOURCE_IMAGES);
+    const additionsWithDimensions = await Promise.all(
+      incoming.map(async (file) => {
+        const dimensions = await getImageDimensionsFromFile(file);
+        return {
+          id: null,
+          url: URL.createObjectURL(file),
+          name: file.name,
+          file,
+          width: dimensions?.width,
+          height: dimensions?.height,
+        };
+      })
+    );
+    setRemediationAnalyses({});
+    setRemediationSourceAssets((prev) => {
+      const remaining = Math.max(0, MAX_REMEDIATION_SOURCE_IMAGES - prev.length);
+      const additions = additionsWithDimensions.slice(0, remaining);
+      return [...prev, ...additions];
+    });
+  }
+
+  function appendThemeCreateFiles(
+    files: FileList | File[] | null,
+    targetRole?: "upload" | "reference_ad"
+  ) {
+    setIsDragUploading(false);
+    if (!files) return;
+    const incoming = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (incoming.length === 0) return;
+
+    if (targetRole) {
+      const targetFile = incoming[0] ?? null;
+      if (targetFile) {
+        setSingleThemeAsset(targetRole, targetFile);
+      }
+      return;
+    }
+
+    const nextUpload = incoming[0] ?? null;
+    const nextReference = incoming[1] ?? null;
+
+    if (nextUpload) {
+      setSingleThemeAsset("upload", nextUpload);
+    }
+    if (nextReference) {
+      setSingleThemeAsset("reference_ad", nextReference);
+    }
+  }
+
+  function handleCreateFlowDrop(files: FileList | File[] | null) {
+    if (!files) return;
+    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+
+    if (createFlow === "resize") {
+      appendResizeSourceFiles(imageFiles);
+      return;
+    }
+    if (createFlow === "remediation") {
+      void appendRemediationSourceFiles(imageFiles);
+      return;
+    }
+    if (createFlow === "theme_create") {
+      appendThemeCreateFiles(imageFiles);
+      return;
+    }
+  }
+
+  function handleWorkbenchDragOver(event: DragEvent<HTMLDivElement>) {
+    if (createFlow === "kakao") return;
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragUploading(true);
+  }
+
+  function handleWorkbenchDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (createFlow === "kakao") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const related = event.relatedTarget as Node | null;
+    if (related && event.currentTarget.contains(related)) return;
+    setIsDragUploading(false);
+  }
+
+  function handleWorkbenchDrop(event: DragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragUploading(false);
+    handleCreateFlowDrop(event.dataTransfer.files);
+  }
+
   function removeResizeSourceAsset(index: number) {
     setResizeSourceAssets((prev) => prev.filter((_, assetIndex) => assetIndex !== index));
+  }
+
+  function removeRemediationSourceAsset(index: number) {
+    setRemediationSourceAssets((prev) => {
+      const next = prev.filter((_, assetIndex) => assetIndex !== index);
+      const nextKeys = new Set(next.map((asset, nextIndex) => asset.id ?? `${asset.name}_${nextIndex}`));
+      setRemediationAnalyses((current) =>
+        Object.fromEntries(Object.entries(current).filter(([key]) => nextKeys.has(key)))
+      );
+      return next;
+    });
+  }
+
+  function remediationAssetKey(asset: ResizeSourceAsset, index: number) {
+    return asset.id ?? `${asset.name}_${index}`;
+  }
+
+  function remediationOutputSize(asset: ResizeSourceAsset) {
+    return buildSizeLabel(asset.width, asset.height);
+  }
+
+  function remediationRiskTone(risk?: string) {
+    switch ((risk ?? "").toLowerCase()) {
+      case "high":
+      case "severe":
+      case "extreme":
+        return "border-red-200 bg-red-50 text-red-700";
+      case "medium":
+      case "serious":
+        return "border-amber-200 bg-amber-50 text-amber-700";
+      case "low":
+        return "border-sky-200 bg-sky-50 text-sky-700";
+      default:
+        return "border-border bg-muted text-muted-foreground";
+    }
+  }
+
+  function openDraftPreviewFromSourceAsset(asset: ResizeSourceAsset, index: number) {
+    setThemeCreatePreviewFile({
+      id: asset.id ?? `source_${index}`,
+      url: asset.url,
+      name: asset.name,
+      file: asset.file,
+      role: "upload",
+    });
+  }
+
+  function setResizeSourceFromExistingAsset(asset: AssetSummary) {
+    setResizeSourceAssets((prev) => {
+      prev.forEach((item) => {
+        if (item.url.startsWith("blob:")) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+      return [{
+        id: asset.id,
+        url: asset.url,
+        name:
+          asset.title ||
+          `${asset.width ?? ""}x${asset.height ?? ""}`.replace(/^x|x$/g, "") ||
+          "Resize source",
+      }];
+    });
+    setCreateFlow("resize");
   }
 
   function buildThemeCreatePresetTemplate(): string {
     if (themeCreateMode === "style_modify") {
       return prompt.trim();
     }
-    if (themeCreateMode === "style_transfer") {
-      return [
-        themeCreateStyleName.trim(),
-        themeCreateStyleDetails.trim(),
-        prompt.trim(),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-    }
     return [
       prompt.trim(),
-      `Logo position: ${themeCreateLogoPosition}`,
-      `Element position: ${themeCreateElementPosition}`,
-      themeCreateOldText.trim() ? `Old text: ${themeCreateOldText.trim()}` : "",
-      themeCreateNewText.trim() ? `New text: ${themeCreateNewText.trim()}` : "",
-      themeCreateFontStyle.trim() ? `Font style: ${themeCreateFontStyle.trim()}` : "",
+      themeCreateStyleName.trim(),
+      themeCreateStyleDetails.trim(),
     ]
       .filter(Boolean)
-      .join("\n");
+      .join("\n\n");
   }
 
-  useEffect(() => {
-    if (!kakaoBatchMainCopyCustomized) {
-      setKakaoBatchMainCopy(buildKakaoDefaultMainCopy(kakaoBatchAppName));
-    }
-  }, [kakaoBatchAppName, kakaoBatchMainCopyCustomized]);
-
-  useEffect(() => {
-    setKakaoBatchAppDownloadCopy(buildKakaoSubtitle(kakaoBatchAppName));
-  }, [kakaoBatchAppName]);
+  function applyThemeCreatePreset(preset: {
+    promptTemplate: string;
+    styleName?: string;
+    styleDetails?: string;
+    name: string;
+    description: string;
+  }) {
+    setPrompt(preset.promptTemplate);
+    setThemeCreateStyleName(preset.styleName ?? preset.name);
+    setThemeCreateStyleDetails(preset.styleDetails ?? preset.description);
+    setThemeCreatePresetName(preset.name);
+    setThemeCreatePresetDescription(preset.description);
+    setThemeCreatePresetPreviewId(null);
+    setActiveChip(null);
+  }
 
   useEffect(() => {
     setKakaoBatchDspName(buildKakaoDisclosure(kakaoBatchGacha));
@@ -1077,19 +1621,17 @@ export function CreateImageView({
   }, [activeWorkspaceId, createFlow, themeCreateMode]);
 
   useEffect(() => {
-    if (!kakaoBatchOpen) return;
+    const hasReference = Boolean(themeCreateAssets.reference_ad?.[0]);
+    setThemeCreateMode(hasReference ? "style_transfer" : "style_modify");
+  }, [themeCreateAssets.reference_ad]);
 
-    loadSpoqaFonts().catch(() => {});
-
-    const firstAsset = liveAssets.find(
-      (asset) =>
-        asset.workspaceId === activeWorkspaceId &&
-        selectedAssetIds.has(asset.id) &&
-        asset.type !== "gif" &&
-        asset.url &&
-        !asset.url.includes("placeholder")
-    );
-    if (!firstAsset) {
+  async function rebuildKakaoBatchPreview() {
+    if (!kakaoBatchOpen || kakaoBatchAssets.length === 0) return;
+    const previewAsset =
+      kakaoBatchAssets[kakaoBatchPreviewAssetIndex] ??
+      kakaoBatchAssets[0] ??
+      null;
+    if (!previewAsset) {
       setKakaoBatchValidationErrors(["Select at least one cleaned image."]);
       setKakaoBatchMainCopyWidthPx(0);
       setKakaoBatchPreviewUrl((prev) => {
@@ -1098,12 +1640,10 @@ export function CreateImageView({
       });
       return;
     }
-    const previewAsset = firstAsset;
 
-    let cancelled = false;
-    let nextPreviewUrl: string | null = null;
-
-    async function buildPreview() {
+    setKakaoBatchPreviewBusy(true);
+    try {
+      await loadSpoqaFonts().catch(() => {});
       const validation = await validateKakaoBizboardInputs({
         thumbnailUrl: previewAsset.url,
         appIconUrl: kakaoBatchAppIconUrl,
@@ -1111,8 +1651,6 @@ export function CreateImageView({
         mainCopy: kakaoBatchMainCopy,
         gacha: kakaoBatchGacha,
       });
-      if (cancelled) return;
-
       setKakaoBatchValidationErrors(validation.errors);
       setKakaoBatchMainCopyWidthPx(validation.mainCopyWidthPx);
 
@@ -1131,17 +1669,12 @@ export function CreateImageView({
         mainCopy: kakaoBatchMainCopy,
         gacha: kakaoBatchGacha,
       });
-      if (cancelled) return;
-
-      nextPreviewUrl = URL.createObjectURL(blob);
+      const nextPreviewUrl = URL.createObjectURL(blob);
       setKakaoBatchPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return nextPreviewUrl;
       });
-    }
-
-    buildPreview().catch((err) => {
-      if (cancelled) return;
+    } catch (err) {
       setKakaoBatchValidationErrors([
         err instanceof Error ? err.message : "Kakao preview generation failed.",
       ]);
@@ -1149,23 +1682,18 @@ export function CreateImageView({
         if (prev) URL.revokeObjectURL(prev);
         return null;
       });
-    });
+    } finally {
+      setKakaoBatchPreviewBusy(false);
+    }
+  }
 
-    return () => {
-      cancelled = true;
-      if (nextPreviewUrl) URL.revokeObjectURL(nextPreviewUrl);
-    };
-  }, [
-    kakaoBatchOpen,
-    kakaoBatchAppIconUrl,
-    kakaoBatchMainCopy,
-    kakaoBatchAppDownloadCopy,
-    kakaoBatchDspName,
-    kakaoBatchGacha,
-    selectedAssetIds,
-    liveAssets,
-    activeWorkspaceId,
-  ]);
+  useEffect(() => {
+    if (!kakaoBatchOpen || kakaoBatchAssets.length === 0) return;
+    rebuildKakaoBatchPreview();
+    // intentionally only when the modal opens or selected assets change;
+    // follow company flow and apply field edits through an explicit button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kakaoBatchOpen, kakaoBatchAssets, kakaoBatchPreviewAssetIndex]);
 
   function handleKakaoBatchIconChange(file: File | null) {
     setKakaoBatchAppIconUrl((prev) => {
@@ -1181,7 +1709,7 @@ export function CreateImageView({
     const blobUrl = URL.createObjectURL(file);
     setWorkingImage({ assetId: null, url: blobUrl, label: file.name });
     try {
-      const uploaded = await uploadAsset(file, activeWorkspaceId, "working");
+      const uploaded = await uploadAsset(file, activeWorkspaceId, "working", currentThreadIdForWrites);
       if (uploaded) {
         setWorkingImage((prev) =>
           prev ? { ...prev, assetId: uploaded.id } : null
@@ -1192,25 +1720,10 @@ export function CreateImageView({
     }
   }
 
-  function setWorkingImageFromAsset(asset: AssetSummary) {
-    setWorkingImage({
-      assetId: asset.id,
-      url: asset.url,
-      label: asset.theme ?? asset.title ?? "Generated",
-      width: asset.width,
-      height: asset.height,
-    });
-    if (asset.threadId) {
-      setSelectedThreadId(asset.threadId);
-      onThreadSelect?.(asset.threadId);
-    }
-    setActiveOp(null);
-  }
-
-  // 鈹€鈹€ Operation handlers (require workingImage.assetId) 鈹€鈹€
+  // Operation handlers that require workingImage.assetId
   function requireAssetId(): string | null {
     const id = workingImage?.assetId ?? null;
-    if (!id) setError("Image is still uploading 鈥?please wait a moment.");
+    if (!id) setError("Image is still uploading - please wait a moment.");
     return id;
   }
 
@@ -1227,10 +1740,10 @@ export function CreateImageView({
       const res = await outpaintImage({
         workspaceId: activeWorkspaceId, assetId: id,
         direction, ratio,
-        threadId: selectedThreadId ?? undefined,
+        threadId: currentThreadIdForWrites,
         outputSizes: selectedSizes,
       });
-      const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running...", lineageKey: res.lineage_key };
+      const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running...", lineageKey: res.lineage_key, threadId: res.thread_id ?? currentThreadIdForWrites };
       setCurrentJobId(res.job_id);
       if (res.thread_id) {
         setSelectedThreadId(res.thread_id);
@@ -1254,10 +1767,10 @@ export function CreateImageView({
       const res = await removeBackground({
         workspaceId: activeWorkspaceId,
         assetId: id,
-        threadId: selectedThreadId ?? undefined,
+        threadId: currentThreadIdForWrites,
         outputSizes: selectedSizes,
       });
-      const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running...", lineageKey: res.lineage_key };
+      const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running...", lineageKey: res.lineage_key, threadId: res.thread_id ?? currentThreadIdForWrites };
       setCurrentJobId(res.job_id);
       if (res.thread_id) {
         setSelectedThreadId(res.thread_id);
@@ -1284,10 +1797,10 @@ export function CreateImageView({
         assetId: id,
         text: baseText,
         position: textPosition,
-        threadId: selectedThreadId ?? undefined,
+        threadId: currentThreadIdForWrites,
         outputSizes: selectedSizes,
       });
-      const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running...", lineageKey: res.lineage_key };
+      const job = { id: res.job_id, jobId: res.job_id, title: res.title, toolId: res.tool_id, status: res.status, progress: res.progress, eta: "Running...", lineageKey: res.lineage_key, threadId: res.thread_id ?? currentThreadIdForWrites };
       setCurrentJobId(res.job_id);
       if (res.thread_id) {
         setSelectedThreadId(res.thread_id);
@@ -1303,18 +1816,8 @@ export function CreateImageView({
     }
   }
 
-  // 鈹€鈹€ Inpainting canvas 鈹€鈹€
-  const [editTarget, setEditTarget] = useState<{
-    assetId: string;
-    url: string;
-    width: number;
-    height: number;
-    theme?: string;
-  } | null>(null);
-  const [editSubmitting, setEditSubmitting] = useState(false);
-
-  // 鈹€鈹€ Right assets panel 鈹€鈹€
-  // Only real assets that belong to the current workspace (project)
+  // Right assets panel
+  // Only real assets that belong to the current thread container
   const downloadableAssets = liveAssets.filter(
     (a) =>
       a.jobId &&
@@ -1322,9 +1825,19 @@ export function CreateImageView({
       !a.url.includes("placeholder") &&
       a.workspaceId === activeWorkspaceId
   );
-  const currentProjectSessions = [...liveThreads]
-    .filter((thread) => thread.workspaceId === activeWorkspaceId)
+  const currentThreads = [...liveThreads]
+    .filter(
+      (thread) =>
+        thread.workspaceId === activeWorkspaceId &&
+        thread.generationMode !== "video"
+    )
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const currentThreadsWithHistory = currentThreads.filter(
+    (thread) => (thread.jobCount ?? 0) > 0 || (thread.assetCount ?? 0) > 0
+  );
+  const currentThreadIdForWrites = startingNewSession
+    ? undefined
+    : selectedThreadId ?? currentThreads[0]?.id ?? undefined;
 
   const allSelected =
     downloadableAssets.length > 0 &&
@@ -1333,6 +1846,14 @@ export function CreateImageView({
   const selectedGifEligibleAssets = selectedAssets.filter((asset) => asset.type !== "gif");
   const selectedKakaoEligibleAssets = selectedAssets.filter((asset) => asset.type !== "gif");
   const selectedKakaoPreviewAsset = selectedKakaoEligibleAssets[0] ?? null;
+
+  useEffect(() => {
+    const nextSignature = selectedAssets
+      .map((asset) => asset.id)
+      .join("|");
+    if (lastSelectionSignatureRef.current === nextSignature) return;
+    lastSelectionSignatureRef.current = nextSignature;
+  }, [selectedAssets]);
 
   function toggleAsset(id: string) {
     setSelectedAssetIds((prev) => {
@@ -1360,7 +1881,7 @@ export function CreateImageView({
         if (!asset) throw new Error("Selected asset not found.");
         await downloadAssetFile(asset);
       } else {
-        await downloadAssetsZip(ids, downloadPrefix || "incept");
+        await downloadAssetsZip(ids);
       }
     } catch (err) {
       console.error("Download failed:", err);
@@ -1379,7 +1900,7 @@ export function CreateImageView({
         const response = await generateGifFromAsset({
           workspaceId: activeWorkspaceId,
           assetId: asset.id,
-          threadId: asset.threadId ?? selectedThreadId ?? undefined,
+          threadId: asset.threadId ?? currentThreadIdForWrites,
         });
         lastResponse = response;
         const job: JobSummary = {
@@ -1391,6 +1912,7 @@ export function CreateImageView({
           progress: response.progress,
           eta: response.status === "completed" ? "Completed" : "Running...",
           lineageKey: response.lineage_key,
+          threadId: response.thread_id ?? asset.threadId ?? currentThreadIdForWrites,
         };
         setLiveJobs((prev) => [job, ...prev]);
         onJobCreated(job);
@@ -1412,22 +1934,35 @@ export function CreateImageView({
     }
   }
 
-  function handleOpenKakaoBatch() {
-    if (selectedKakaoEligibleAssets.length === 0) return;
+  function handleOpenKakaoBatch(assetsOverride?: KakaoBuilderAsset[]) {
+    const nextAssets = assetsOverride?.length
+      ? assetsOverride
+      : selectedKakaoEligibleAssets.map((asset) => ({
+          id: asset.id,
+          url: asset.url,
+          title: asset.title,
+          type: asset.type,
+          threadId: asset.threadId ?? null,
+        }));
+    if (nextAssets.length === 0) return;
+    setKakaoBatchAssets(nextAssets);
+    setKakaoBatchPreviewAssetIndex(0);
+    setKakaoBatchAppDownloadCopy((prev) => prev.trim() || KAKAO_DEFAULT_SUBTITLE);
+    setKakaoBatchMainCopy((prev) => prev.trim() || KAKAO_DEFAULT_MAIN_COPY);
     setKakaoBatchOpen(true);
   }
 
   async function handleGenerateKakaoSelected() {
-    if (selectedKakaoEligibleAssets.length === 0) return;
+    if (kakaoBatchAssets.length === 0) return;
     setKakaoBatchSubmitting(true);
     setGenerating(true);
     setError(null);
 
-    let nextThreadId = selectedThreadId ?? undefined;
+    let nextThreadId = currentThreadIdForWrites;
     const queuedJobs: JobSummary[] = [];
 
     try {
-      for (const asset of selectedKakaoEligibleAssets) {
+      for (const asset of kakaoBatchAssets) {
         const blob = await composeKakaoBizboard({
           thumbnailUrl: asset.url,
           appIconUrl: kakaoBatchAppIconUrl,
@@ -1441,7 +1976,7 @@ export function CreateImageView({
         const file = new File([blob], `${safeName}_kakao_bizboard_1029x258.png`, {
           type: "image/png",
         });
-        const uploaded = await uploadAsset(file, activeWorkspaceId, "upload");
+        const uploaded = await uploadAsset(file, activeWorkspaceId, "upload", nextThreadId ?? currentThreadIdForWrites);
         if (!uploaded) {
           throw new Error(`Bizboard upload failed for ${asset.title}`);
         }
@@ -1454,7 +1989,7 @@ export function CreateImageView({
           appDownloadCopy: kakaoBatchAppDownloadCopy,
           dspName: kakaoBatchDspName,
           gacha: kakaoBatchGacha,
-          threadId: asset.threadId ?? nextThreadId,
+          threadId: nextThreadId ?? currentThreadIdForWrites,
         });
 
         queuedJobs.push({
@@ -1466,8 +2001,9 @@ export function CreateImageView({
           progress: response.progress,
           eta: response.status === "completed" ? "Completed" : "Running...",
           lineageKey: response.lineage_key,
+          threadId: response.thread_id ?? nextThreadId ?? currentThreadIdForWrites,
         });
-        nextThreadId = response.thread_id ?? asset.threadId ?? nextThreadId;
+        nextThreadId = response.thread_id ?? nextThreadId ?? currentThreadIdForWrites;
       }
 
       if (queuedJobs.length === 0) {
@@ -1485,6 +2021,7 @@ export function CreateImageView({
       setLiveJobs((prev) => [...queuedJobs.reverse(), ...prev]);
       queuedJobs.forEach((job) => onJobCreated(job));
       setKakaoBatchOpen(false);
+      setKakaoBatchAssets([]);
     } catch (err) {
       setGenerating(false);
       setError(err instanceof Error ? err.message : String(err));
@@ -1502,7 +2039,7 @@ export function CreateImageView({
       const response = await generateGifFromAsset({
         workspaceId: activeWorkspaceId,
         assetId,
-        threadId: threadId ?? selectedThreadId ?? undefined,
+        threadId: threadId ?? currentThreadIdForWrites,
       });
       const job: JobSummary = {
         id: response.job_id,
@@ -1513,6 +2050,7 @@ export function CreateImageView({
         progress: response.progress,
         eta: response.status === "completed" ? "Completed" : "Running...",
         lineageKey: response.lineage_key,
+        threadId: response.thread_id ?? (threadId ?? currentThreadIdForWrites) ?? undefined,
       };
       setCurrentJobId(response.job_id);
       if (response.thread_id) {
@@ -1535,7 +2073,7 @@ export function CreateImageView({
     if (!sourceId && sourceAsset.file) {
       setUploadingSource(true);
       try {
-        const uploaded = await uploadAsset(sourceAsset.file, activeWorkspaceId, "upload");
+        const uploaded = await uploadAsset(sourceAsset.file, activeWorkspaceId, "upload", currentThreadIdForWrites);
         if (uploaded) {
           sourceId = uploaded.id;
           setResizeSourceAssets((prev) =>
@@ -1550,7 +2088,7 @@ export function CreateImageView({
       setError("Upload a source image first.");
       return;
     }
-    await triggerGifJob(sourceId, selectedThreadId);
+    await triggerGifJob(sourceId, currentThreadIdForWrites);
   }
 
   async function handleRegenerate(entry: (typeof jobEntries)[number]) {
@@ -1598,9 +2136,14 @@ export function CreateImageView({
         preserve_layout: true,
         use_reference_style: true,
         client_asset_ids: [],
-        thread_id: entry.threadId || selectedThreadId || undefined,
+        thread_id: entry.threadId || currentThreadIdForWrites,
         generation_mode: "resize",
         include_gif: false,
+        resize_include_gacha_disclosure: Boolean(
+          outputSizes.includes("1200x600") && entry.assets.some(
+            (asset) => asset.analysis?.resize_include_gacha_disclosure === true
+          )
+        ),
         resize_prompt_overrides: Object.fromEntries(
           outputSizes
             .map((size) => [size, resizePromptOverrides[size]?.trim() ?? ""])
@@ -1618,6 +2161,7 @@ export function CreateImageView({
         progress: response.progress,
         eta: response.status === "completed" ? "Completed" : "Running...",
         lineageKey: response.lineage_key,
+        threadId: response.thread_id ?? (entry.threadId || currentThreadIdForWrites) ?? undefined,
       };
       setCurrentJobId(response.job_id);
       if (response.thread_id) {
@@ -1674,9 +2218,12 @@ export function CreateImageView({
         preserve_layout: true,
         use_reference_style: true,
         client_asset_ids: [],
-        thread_id: asset.threadId || selectedThreadId || undefined,
+        thread_id: asset.threadId || currentThreadIdForWrites,
         generation_mode: "resize",
         include_gif: false,
+        resize_include_gacha_disclosure: Boolean(
+          targetSize === "1200x600" && asset.analysis?.resize_include_gacha_disclosure === true
+        ),
         resize_prompt_overrides: resizePromptOverrides[targetSize]?.trim()
           ? { [targetSize]: resizePromptOverrides[targetSize].trim() }
           : undefined,
@@ -1692,6 +2239,7 @@ export function CreateImageView({
         progress: response.progress,
         eta: response.status === "completed" ? "Completed" : "Running...",
         lineageKey: response.lineage_key,
+        threadId: response.thread_id ?? (asset.threadId || currentThreadIdForWrites) ?? undefined,
       };
       setCurrentJobId(response.job_id);
       if (response.thread_id) {
@@ -1714,8 +2262,8 @@ export function CreateImageView({
     try {
       await deleteAssets(ids);
       const [assets, threads] = await Promise.all([
-        listAssets(activeWorkspaceId),
-        listThreads(activeWorkspaceId),
+        listAssets(activeWorkspaceId, contentScope),
+        listThreads(activeWorkspaceId, contentScope),
       ]);
       setLiveAssets(assets);
       setLiveThreads(threads);
@@ -1725,17 +2273,31 @@ export function CreateImageView({
     }
   }
 
-  // 鈹€鈹€ Session selection (can be driven externally from the global sidebar) 鈹€鈹€
+  // Session selection, which can be driven externally from the global sidebar
   useEffect(() => {
-    if (activeThreadId) {
+    if (activeThreadId && currentThreads.some((thread) => thread.id === activeThreadId)) {
       setSelectedThreadId(activeThreadId);
       setStartingNewSession(false);
       return;
     }
     if (!startingNewSession) {
-      setSelectedThreadId(currentProjectSessions[0]?.id ?? null);
+      setSelectedThreadId(currentThreadsWithHistory[0]?.id ?? currentThreads[0]?.id ?? null);
     }
-  }, [activeThreadId, activeWorkspaceId, liveThreads, startingNewSession]);
+  }, [activeThreadId, activeWorkspaceId, currentThreads, currentThreadsWithHistory, startingNewSession]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listAssets(activeWorkspaceId, contentScope), listThreads(activeWorkspaceId, contentScope)])
+      .then(([assets, threads]) => {
+        if (cancelled) return;
+        setLiveAssets(assets);
+        setLiveThreads(threads);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, contentScope, setLiveAssets, setLiveThreads]);
 
   useEffect(() => {
     setSelectedAssetIds(new Set());
@@ -1745,7 +2307,7 @@ export function CreateImageView({
     setStartingNewSession(false);
   }, [activeWorkspaceId]);
 
-  // 鈹€鈹€ Ref for click-outside detection 鈹€鈹€
+  // Ref for click-outside detection
   const barRef = useRef<HTMLDivElement>(null);
 
   // Reset sizes on mode change
@@ -1753,18 +2315,38 @@ export function CreateImageView({
     setSelectedSizes(mode === "endcard" ? ENDCARD_SIZE_IDS : DEFAULT_IMAGE_SIZES);
   }, [mode]);
 
+  useEffect(() => {
+    if (!selectedSizes.includes("1200x600")) {
+      setIncludeResizeGachaDisclosure(false);
+    }
+  }, [selectedSizes]);
+
   // Watch liveJobs for completion
   useEffect(() => {
     if (!currentJobId || !generating) return;
     const job = liveJobs.find((j) => (j.jobId ?? j.id) === currentJobId);
     if (!job) return;
     if (job.status === "completed") {
-      Promise.all([listAssets(activeWorkspaceId), listThreads(activeWorkspaceId)])
+      Promise.all([listAssets(activeWorkspaceId, contentScope), listThreads(activeWorkspaceId, contentScope)])
         .then(([a, threads]) => {
           setLiveAssets(a);
           setLiveThreads(threads);
         })
         .catch(() => {});
+      if (job.threadId) {
+        setSelectedThreadId(job.threadId);
+        setStartingNewSession(false);
+        onThreadSelect?.(job.threadId);
+      }
+      if (createFlow === "theme_create") {
+        const nextPresetName = buildThemeCreatePresetName(themeCreateMode, themeCreateStyleName, prompt);
+        const nextPresetSummary = buildThemeCreatePresetSummary(themeCreateMode, themeCreateStyleDetails, prompt);
+        setThemeCreatePresetName((prev) => prev.trim() || nextPresetName);
+        setThemeCreatePresetDescription((prev) => prev.trim() || nextPresetSummary);
+        setThemeCreatePresetFeedback(
+          "Theme Create output is ready. Review the result, then draft a style report or save it directly as a preset asset."
+        );
+      }
       setGenerating(false);
       setCurrentJobId(null);
     }
@@ -1773,7 +2355,20 @@ export function CreateImageView({
       setCurrentJobId(null);
       setError(job.message ?? "Generation failed. Check your API credentials and try again.");
     }
-  }, [liveJobs, currentJobId, generating, activeWorkspaceId, setLiveAssets, setLiveThreads]);
+  }, [
+    liveJobs,
+    currentJobId,
+    generating,
+    activeWorkspaceId,
+    contentScope,
+    setLiveAssets,
+    setLiveThreads,
+    createFlow,
+    themeCreateMode,
+    themeCreateStyleName,
+    themeCreateStyleDetails,
+    prompt,
+  ]);
 
   // Close chip panel on outside click
   useEffect(() => {
@@ -1787,7 +2382,7 @@ export function CreateImageView({
     return () => document.removeEventListener("mousedown", handler);
   }, [activeChip]);
 
-  // Theme Create always generates at 1200x628
+  // Theme Create always generates a single 1200x628 output.
   useEffect(() => {
     if (createFlow === "theme_create") {
       setSelectedSizes(["1200x628"]);
@@ -1795,7 +2390,13 @@ export function CreateImageView({
   }, [createFlow]);
 
   useEffect(() => {
-    if (createFlow === "resize" || createFlow === "kakao") {
+    if (createFlow === "remediation") {
+      setVariants(2);
+    }
+  }, [createFlow]);
+
+  useEffect(() => {
+    if (createFlow === "resize" || createFlow === "kakao" || createFlow === "remediation") {
       setModelId("gemini-3.1-flash-image");
       setActiveChip((prev) => (prev === "model" ? null : prev));
     }
@@ -1826,48 +2427,14 @@ export function CreateImageView({
     setError("Generation cancelled.");
   }
 
-  async function handleEditSubmit(maskDataUrl: string, editPrompt: string) {
-    if (!editTarget) return;
-    setEditSubmitting(true);
-    try {
-      const response = await editImage({
-        workspaceId: activeWorkspaceId,
-        assetId: editTarget.assetId,
-        maskDataUrl,
-        prompt: editPrompt,
-        theme: editTarget.theme,
-        threadId: selectedThreadId ?? undefined,
-        outputSizes: selectedSizes,
-      });
-      const job = {
-        id: response.job_id,
-        jobId: response.job_id,
-        title: response.title,
-        toolId: response.tool_id,
-        status: response.status,
-        progress: response.progress,
-        eta: "Running...",
-        lineageKey: response.lineage_key,
-      };
-      if (response.thread_id) {
-        setSelectedThreadId(response.thread_id);
-        setStartingNewSession(false);
-        onThreadSelect?.(response.thread_id);
-      }
-      setLiveJobs((prev) => [job, ...prev]);
-      onJobCreated(job);
-      setEditTarget(null);
-    } catch (err) {
-      setError(`Edit failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setEditSubmitting(false);
-    }
-  }
-
   function setSingleThemeAsset(role: AssetRole, file: File | null) {
     setThemeCreateAssets((prev) => {
       const existing = prev[role] ?? [];
-      existing.forEach((item) => URL.revokeObjectURL(item.url));
+      existing.forEach((item) => {
+        if (item.url.startsWith("blob:")) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
       const next = { ...prev };
       if (!file) {
         delete next[role];
@@ -1884,6 +2451,28 @@ export function CreateImageView({
     });
   }
 
+  function setThemeAssetFromExistingAsset(role: AssetRole, asset: AssetSummary) {
+    setThemeCreateAssets((prev) => {
+      const existing = prev[role] ?? [];
+      existing.forEach((item) => {
+        if (item.url.startsWith("blob:")) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+      return {
+        ...prev,
+        [role]: [{
+          id: asset.id,
+          url: asset.url,
+          name: asset.title || `${asset.width ?? ""}x${asset.height ?? ""}`.replace(/^x|x$/g, "") || "Theme asset",
+          role,
+        }],
+      };
+    });
+    setThemeCreatePreviewFile(null);
+    setCreateFlow("theme_create");
+  }
+
   function hasRoleAssets(bucket: AssetBucketState, role: AssetRole) {
     return (bucket[role] ?? []).length > 0;
   }
@@ -1893,7 +2482,12 @@ export function CreateImageView({
     for (const role of Object.keys(bucket) as AssetRole[]) {
       const drafts = bucket[role] ?? [];
       for (const draft of drafts) {
-        const asset = await uploadAsset(draft.file, activeWorkspaceId, role);
+        if (draft.id && !draft.file) {
+          uploaded[role] = [...(uploaded[role] ?? []), draft.id];
+          continue;
+        }
+        if (!draft.file) continue;
+        const asset = await uploadAsset(draft.file, activeWorkspaceId, role, currentThreadIdForWrites);
         if (!asset) continue;
         uploaded[role] = [...(uploaded[role] ?? []), asset.id];
       }
@@ -1924,8 +2518,6 @@ export function CreateImageView({
       const sourceAssetId = themeCreateAssets.upload?.[0]?.id ?? undefined;
       const referenceAssetIds = [
         themeCreateAssets.reference_ad?.[0]?.id,
-        themeCreateAssets.client_logo?.[0]?.id,
-        themeCreateAssets.brand_element?.[0]?.id,
       ].filter((value): value is string => Boolean(value));
       const baseTags = [
         "theme-create",
@@ -1939,6 +2531,7 @@ export function CreateImageView({
         prompt_template: template,
         source_asset_id: sourceAssetId,
         reference_asset_ids: referenceAssetIds,
+        source_job_id: latestThemeCreateEntry?.id,
         recommended_preset_name: name,
         visual_dna: themeCreateStyleDetails.trim() ? [themeCreateStyleDetails.trim()] : [],
         composition_rules: themeCreateMode === "style_modify" ? ["Preserve original layout and subject placement."] : [],
@@ -1960,6 +2553,7 @@ export function CreateImageView({
         tags: report.tags,
         taxonomy: report.taxonomy,
         source_report_id: report.id,
+        source_job_id: latestThemeCreateEntry?.id,
         source_asset_id: sourceAssetId,
       });
       setThemeCreatePresets((prev) => [preset, ...prev.filter((item) => item.id !== preset.id)]);
@@ -1985,13 +2579,14 @@ export function CreateImageView({
     setThemeCreateDrafting(true);
     setThemeCreatePresetFeedback(null);
     try {
-      for (const role of ["upload", "reference_ad", "client_logo", "brand_element"] as AssetRole[]) {
+      for (const role of ["upload", "reference_ad"] as AssetRole[]) {
         const drafts = nextAssets[role] ?? [];
         for (let index = 0; index < drafts.length; index++) {
-          if (!drafts[index]?.id && drafts[index]?.file) {
-            const uploaded = await uploadAsset(drafts[index].file, activeWorkspaceId, role);
+          const draft = drafts[index];
+          if (draft && !draft.id && draft.file) {
+            const uploaded = await uploadAsset(draft.file, activeWorkspaceId, role, currentThreadIdForWrites);
             if (uploaded) {
-              drafts[index] = { ...drafts[index], id: uploaded.id, url: uploaded.url };
+              drafts[index] = { ...draft, id: uploaded.id, url: uploaded.url };
             }
           }
         }
@@ -2007,8 +2602,6 @@ export function CreateImageView({
       }
       const referenceAssetIds = [
         nextAssets.reference_ad?.[0]?.id,
-        nextAssets.client_logo?.[0]?.id,
-        nextAssets.brand_element?.[0]?.id,
       ].filter((value): value is string => Boolean(value));
 
       const draft = await draftThemeCreateReport({
@@ -2019,11 +2612,6 @@ export function CreateImageView({
         reference_asset_ids: referenceAssetIds,
         style_name: themeCreateStyleName.trim() || themeCreatePresetName.trim() || undefined,
         style_details: themeCreateStyleDetails.trim() || undefined,
-        logo_position: themeCreateLogoPosition,
-        element_position: themeCreateElementPosition,
-        old_text: themeCreateOldText.trim() || undefined,
-        new_text: themeCreateNewText.trim() || undefined,
-        font_style: themeCreateFontStyle.trim() || undefined,
       });
 
       setThemeCreatePresetName(draft.recommended_preset_name ?? draft.title);
@@ -2034,7 +2622,7 @@ export function CreateImageView({
       if (!themeCreateStyleDetails.trim() && draft.visual_dna.length > 0) {
         setThemeCreateStyleDetails(draft.visual_dna.join(", "));
       }
-      setThemeCreatePresetFeedback("Draft report generated. Review the preset name and summary, then save.");
+      setThemeCreatePresetFeedback("Style report drafted. Review the preset asset name and summary, then save it into the reusable library.");
     } catch (err) {
       setThemeCreatePresetFeedback(err instanceof Error ? err.message : "Failed to draft report.");
     } finally {
@@ -2042,7 +2630,166 @@ export function CreateImageView({
     }
   }
 
-  // 鈹€鈹€ Generate / Edit router 鈹€鈹€
+  async function ensureUploadedRemediationSources() {
+    const nextSources: ResizeSourceAsset[] = [...remediationSourceAssets];
+    setUploadingSource(true);
+    try {
+      for (let index = 0; index < nextSources.length; index++) {
+        let sourceId = nextSources[index]?.id ?? null;
+        const sourceFile = nextSources[index]?.file;
+        if (!sourceId && sourceFile) {
+          const uploaded = await uploadAsset(sourceFile, activeWorkspaceId, "upload", currentThreadIdForWrites);
+          if (uploaded) {
+            sourceId = uploaded.id;
+            nextSources[index] = {
+              ...nextSources[index],
+              id: uploaded.id,
+              url: uploaded.url,
+              width: uploaded.width,
+              height: uploaded.height,
+            };
+          }
+        }
+        if (!sourceId) {
+          throw new Error(`Upload failed for ${nextSources[index]?.name ?? `image ${index + 1}`}`);
+        }
+      }
+      setRemediationSourceAssets(nextSources);
+      return nextSources;
+    } finally {
+      setUploadingSource(false);
+    }
+  }
+
+  async function handleAnalyzeRemediation() {
+    if (remediationScanning || generating) return;
+    if (remediationSourceAssets.length === 0) {
+      setError("Upload at least one source image to analyze.");
+      return;
+    }
+
+    setRemediationScanning(true);
+    setError(null);
+    try {
+      const uploadedSources = await ensureUploadedRemediationSources();
+      const sourceIds = uploadedSources.map((asset) => asset.id).filter((value): value is string => Boolean(value));
+      const response = await analyzeRemediationAssets({
+        workspace_id: activeWorkspaceId,
+        source_asset_ids: sourceIds,
+        prompt: prompt.trim(),
+        created_by: currentUser.id,
+      });
+
+      const nextAnalyses = Object.fromEntries(
+        response.results.map((result) => [result.asset_id, result])
+      );
+      setRemediationAnalyses(nextAnalyses);
+      const [assets, threads] = await Promise.all([
+        listAssets(activeWorkspaceId, contentScope),
+        listThreads(activeWorkspaceId, contentScope),
+      ]);
+      setLiveAssets(assets);
+      setLiveThreads(threads);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to analyze remediation assets.");
+    } finally {
+      setRemediationScanning(false);
+    }
+  }
+
+  async function handleBulkRemediate(
+    targets: Array<{ asset: AssetSummary | ResizeSourceAsset; analysis: RemediationAnalysisResult }>
+  ) {
+    if (targets.length === 0) {
+      setGenerating(false);
+      setError("No scanned remediation items are ready to fix.");
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+    setCurrentJobId(null);
+    setLastPrompt("Image Remediation");
+    try {
+      let nextThreadId = currentThreadIdForWrites;
+      const queuedJobs: JobSummary[] = [];
+
+      for (const target of targets) {
+        const assetId = target.asset.id ?? null;
+        if (!assetId) {
+          const assetLabel = "name" in target.asset ? target.asset.name : target.asset.title;
+          throw new Error(`Missing source asset ID for ${assetLabel ?? "remediation source"}`);
+        }
+        const outputSize = buildSizeLabel(target.asset.width, target.asset.height);
+        const response = await createImageGenerationJob({
+          workspace_id: activeWorkspaceId,
+          prompt: prompt.trim() || "Remediate policy violations while preserving valid layout and branding.",
+          provider: "gemini",
+          model: "gemini-3.1-flash-image",
+          variants,
+          aspect_ratio: "multi-size",
+          created_by: currentUser.id,
+          source_asset_ids: [assetId],
+          reference_asset_ids: [],
+          client_asset_ids: [],
+          output_sizes: outputSize ? [outputSize] : [],
+          output_format: "image",
+          generation_mode: "remediation",
+          remediation_analysis: [target.analysis],
+          thread_id: nextThreadId ?? undefined,
+          source_asset_id: assetId,
+          theme: "Image Remediation",
+        });
+
+        queuedJobs.push({
+          id: response.job_id,
+          jobId: response.job_id,
+          title: response.title,
+          toolId: response.tool_id,
+          status: response.status,
+          progress: response.progress,
+          eta: response.status === "completed" ? "Completed" : "Running...",
+          lineageKey: response.lineage_key,
+          threadId: response.thread_id ?? nextThreadId,
+        });
+        nextThreadId = response.thread_id ?? nextThreadId;
+      }
+
+      if (queuedJobs.length === 0) {
+        throw new Error("No remediation jobs were created.");
+      }
+      if (nextThreadId) {
+        setSelectedThreadId(nextThreadId);
+        setStartingNewSession(false);
+        onThreadSelect?.(nextThreadId);
+      }
+      setLiveJobs((prev) => [...queuedJobs.reverse(), ...prev]);
+      queuedJobs.forEach((job) => onJobCreated(job));
+      setCurrentJobId(queuedJobs[queuedJobs.length - 1]?.jobId ?? null);
+    } catch (err) {
+      setGenerating(false);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+    }
+  }
+
+  async function handleRemediateFromHistory(asset: AssetSummary, analysis: RemediationAnalysisResult) {
+    setCreateFlow("remediation");
+    setRemediationSourceAssets([
+      {
+        id: asset.id,
+        url: asset.url,
+        name: asset.title,
+        width: asset.width ?? undefined,
+        height: asset.height ?? undefined,
+      },
+    ]);
+    setRemediationAnalyses({ [asset.id]: analysis });
+    setPrompt("");
+    await handleBulkRemediate([{ asset, analysis }]);
+  }
+
+  // Generate / edit router
   async function handleGenerate() {
     if (generating) return;
 
@@ -2051,26 +2798,29 @@ export function CreateImageView({
 
     setGenerating(true);
     setError(null);
+    setPsdInfo(null);
     setCurrentJobId(null);
     setLastPrompt(
       createFlow === "resize"
         ? `Resize to ${sizes.join(", ")}`
         : createFlow === "theme_create"
-        ? `Theme Create 路 ${THEME_CREATE_MODES.find((item) => item.id === themeCreateMode)?.label ?? "Theme Create"}`
+        ? `Theme Create - ${THEME_CREATE_MODES.find((item) => item.id === themeCreateMode)?.label ?? "Theme Create"}`
+        : createFlow === "remediation"
+        ? `Image Remediation - ${prompt.trim() || "Safer policy-aligned variant"}`
         : prompt.trim() || createFlow.replace("_", " ")
     );
 
     try {
       let response: Awaited<ReturnType<typeof createImageGenerationJob>>;
 
-      // 鈹€鈹€ RESIZE TASK 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+      // Resize task
       if (createFlow === "resize") {
         if (resizeSourceAssets.length === 0) {
           setGenerating(false);
           setError("Upload at least one source image to resize.");
           return;
         }
-        let nextThreadId = selectedThreadId ?? undefined;
+        let nextThreadId = currentThreadIdForWrites;
         const queuedJobs: JobSummary[] = [];
         const nextSources = [...resizeSourceAssets];
         setUploadingSource(true);
@@ -2079,7 +2829,7 @@ export function CreateImageView({
             let sourceId = nextSources[index]?.id ?? null;
             const sourceFile = nextSources[index]?.file;
             if (!sourceId && sourceFile) {
-              const uploaded = await uploadAsset(sourceFile, activeWorkspaceId, "upload");
+              const uploaded = await uploadAsset(sourceFile, activeWorkspaceId, "upload", currentThreadIdForWrites);
               if (uploaded) {
                 sourceId = uploaded.id;
                 nextSources[index] = { ...nextSources[index], id: uploaded.id };
@@ -2107,6 +2857,8 @@ export function CreateImageView({
               thread_id: nextThreadId,
               generation_mode: "resize",
               include_gif: includeGif,
+              resize_include_gacha_disclosure:
+                selectedSizes.includes("1200x600") && includeResizeGachaDisclosure,
               resize_prompt_overrides: Object.fromEntries(
                 sizes
                   .map((size) => [size, resizePromptOverrides[size]?.trim() ?? ""])
@@ -2123,6 +2875,7 @@ export function CreateImageView({
               progress: response.progress,
               eta: response.status === "completed" ? "Completed" : "Running...",
               lineageKey: response.lineage_key,
+              threadId: response.thread_id ?? nextThreadId,
             });
             nextThreadId = response.thread_id ?? nextThreadId;
           }
@@ -2140,15 +2893,54 @@ export function CreateImageView({
         }
         setLiveJobs((prev) => [...queuedJobs.reverse(), ...prev]);
         queuedJobs.forEach((job) => onJobCreated(job));
-        setGenerating(false);
-        setCurrentJobId(null);
+        setCurrentJobId(queuedJobs[queuedJobs.length - 1]?.jobId ?? null);
+        return;
+      }
+
+      if (createFlow === "remediation") {
+        if (remediationSourceAssets.length === 0) {
+          setGenerating(false);
+          setError("Upload at least one source image to remediate.");
+          return;
+        }
+        const nextSources = await ensureUploadedRemediationSources();
+        const analyzedTargets = nextSources
+          .map((asset, index) => {
+            const assetId = asset.id;
+            if (!assetId) return null;
+            const analysis = remediationAnalyses[assetId] ?? remediationAnalyses[remediationAssetKey(asset, index)];
+            if (!analysis || analysis.violations.length === 0) return null;
+            return { asset, analysis };
+          })
+          .filter((item): item is { asset: ResizeSourceAsset; analysis: RemediationAnalysisResult } => Boolean(item));
+
+        const allScanned =
+          nextSources.length > 0 &&
+          nextSources.every((asset, index) => {
+            const assetId = asset.id;
+            return Boolean(assetId && (remediationAnalyses[assetId] ?? remediationAnalyses[remediationAssetKey(asset, index)]));
+          });
+
+        if (!allScanned) {
+          setGenerating(false);
+          await handleAnalyzeRemediation();
+          return;
+        }
+
+        if (analyzedTargets.length === 0) {
+          setGenerating(false);
+          setError("Scan completed, but no policy violations were found to remediate.");
+          return;
+        }
+
+        await handleBulkRemediate(analyzedTargets);
         return;
       }
 
       else {
         const uploaded = await uploadRoleBuckets(themeCreateAssets);
         const sourceIds = flattenUploaded(uploaded, ["upload"]);
-        const referenceIds = flattenUploaded(uploaded, ["reference_ad", "client_logo", "brand_element"]);
+        const referenceIds = flattenUploaded(uploaded, ["reference_ad"]);
 
         if (!sourceIds.length) {
           setGenerating(false);
@@ -2170,23 +2962,10 @@ export function CreateImageView({
           return;
         }
 
-        if (themeCreateMode === "asset_text_replace") {
-          if (referenceIds.length < 2) {
-            setGenerating(false);
-            setError("Asset & Text Replace requires both a new logo image and a new element image.");
-            return;
-          }
-          if (!themeCreateOldText.trim() || !themeCreateNewText.trim() || !themeCreateFontStyle.trim()) {
-            setGenerating(false);
-            setError("Asset & Text Replace requires old text, new text, and font style.");
-            return;
-          }
-        }
-
         const modeLabel = THEME_CREATE_MODES.find((item) => item.id === themeCreateMode)?.label ?? "Theme Create";
         response = await createImageGenerationJob({
           workspace_id: activeWorkspaceId,
-          prompt: `Theme Create 路 ${modeLabel}`,
+          prompt: prompt.trim() || `Theme Create - ${modeLabel}`,
           provider,
           model: modelId,
           variants,
@@ -2200,16 +2979,11 @@ export function CreateImageView({
           preserve_layout: false,
           use_reference_style: false,
           client_asset_ids: [],
-          thread_id: selectedThreadId ?? undefined,
+        thread_id: currentThreadIdForWrites,
           generation_mode: "theme_create",
           theme_create_mode: themeCreateMode,
-          theme_create_style_name: themeCreateMode === "style_modify" ? prompt.trim() : themeCreateStyleName.trim() || undefined,
-          theme_create_style_details: themeCreateMode === "style_modify" ? prompt.trim() : themeCreateStyleDetails.trim() || undefined,
-          theme_create_logo_position: themeCreateLogoPosition,
-          theme_create_element_position: themeCreateElementPosition,
-          theme_create_old_text: themeCreateOldText.trim() || undefined,
-          theme_create_new_text: themeCreateNewText.trim() || undefined,
-          theme_create_font_style: themeCreateFontStyle.trim() || undefined,
+          theme_create_style_name: themeCreateStyleName.trim() || (themeCreateMode === "style_modify" ? prompt.trim() : undefined),
+          theme_create_style_details: themeCreateStyleDetails.trim() || undefined,
         });
       }
 
@@ -2222,6 +2996,7 @@ export function CreateImageView({
         progress: response.progress,
         eta: response.status === "completed" ? "Completed" : "Running...",
         lineageKey: response.lineage_key,
+        threadId: response.thread_id ?? currentThreadIdForWrites,
       };
       setCurrentJobId(response.job_id);
       if (response.thread_id) {
@@ -2235,8 +3010,8 @@ export function CreateImageView({
 
       if (response.status === "completed") {
         const [newAssets, newThreads] = await Promise.all([
-          listAssets(activeWorkspaceId),
-          listThreads(activeWorkspaceId),
+          listAssets(activeWorkspaceId, contentScope),
+          listThreads(activeWorkspaceId, contentScope),
         ]);
         setLiveAssets(newAssets);
         setLiveThreads(newThreads);
@@ -2256,7 +3031,7 @@ export function CreateImageView({
     }
   }
 
-  // 鈹€鈹€ History data 鈹€鈹€
+  // History data
   const generatedAssets = liveAssets.filter((a) => a.jobId);
   const liveJobMap = new Map(liveJobs.map((job) => [job.jobId ?? job.id, job]));
   const jobEntries = Array.from(
@@ -2276,9 +3051,16 @@ export function CreateImageView({
         assets: assets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
         title: liveJobMap.get(jobId)?.title ?? assets[0]?.theme ?? "Generation",
         promptText: (() => {
+          const isThemeCreate = Boolean(assets[0]?.analysis?.theme_create_mode);
           const requestPrompt = assets[0]?.analysis?.request_prompt;
           if (typeof requestPrompt === "string" && requestPrompt.trim()) {
             return requestPrompt.trim();
+          }
+          if (!isThemeCreate) {
+            const actualThemeCreatePrompt = assets[0]?.analysis?.actual_theme_create_prompt;
+            if (typeof actualThemeCreatePrompt === "string" && actualThemeCreatePrompt.trim()) {
+              return actualThemeCreatePrompt.trim();
+            }
           }
           const sourcePrompt = assets[0]?.analysis?.source_prompt;
           if (typeof sourcePrompt === "string" && sourcePrompt.trim()) {
@@ -2297,7 +3079,7 @@ export function CreateImageView({
     threadJobsMap.set(entry.threadId, current);
   }
   const threadAssetMap = new Map<string, AssetSummary[]>();
-  for (const asset of generatedAssets) {
+  for (const asset of liveAssets) {
     if (!asset.threadId) continue;
     const current = threadAssetMap.get(asset.threadId) ?? [];
     current.push(asset);
@@ -2309,25 +3091,63 @@ export function CreateImageView({
       assets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     );
   }
-  const threadMap = new Map(currentProjectSessions.map((thread) => [thread.id, thread]));
-  const sortedThreads = currentProjectSessions;
+  const threadMap = new Map(currentThreads.map((thread) => [thread.id, thread]));
   const threadDateGroups: Array<{ date: string; threads: CreativeThreadSummary[] }> = [];
 
-  // 鈹€鈹€ Chip labels 鈹€鈹€
+  // Chip labels
   const selectedThread = selectedThreadId ? threadMap.get(selectedThreadId) ?? null : null;
   const selectedThreadAssets = selectedThreadId ? threadAssetMap.get(selectedThreadId) ?? [] : [];
   const selectedThreadJobs = selectedThreadId ? threadJobsMap.get(selectedThreadId) ?? [] : [];
-  const sessionTitle = startingNewSession
-    ? "New Session"
-    : selectedThread?.title ?? currentProjectSessions[0]?.title ?? "New Session";
-  // When starting a new project: show empty canvas
+  const threadTitle = startingNewSession
+    ? "New Thread"
+    : selectedThread?.title ?? currentThreads[0]?.title ?? "New Thread";
+  // When starting a new thread: show empty canvas
   // When a thread is selected: show only that thread's jobs
-  // Otherwise (no thread, not new): show all workspace jobs
-  const projectJobEntries = startingNewSession
+  // Otherwise (no thread, not new): show all thread jobs
+  const visibleJobEntries = startingNewSession
     ? []
     : selectedThreadId
     ? jobEntries.filter((e) => e.threadId === selectedThreadId)
     : jobEntries;
+  const remediationReviewEntries = (startingNewSession
+    ? []
+    : (selectedThreadId ? liveAssets.filter((asset) => asset.threadId === selectedThreadId) : liveAssets)
+        .filter((asset) => !asset.jobId && asset.analysis?.remediation_analysis && asset.type === "image")
+        .map((asset) => ({
+          id: `scan_${asset.id}`,
+          asset,
+          analysis: asset.analysis?.remediation_analysis as RemediationAnalysisResult,
+          createdAt: asset.createdAt,
+        }))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  );
+  const assetBackedJobIds = new Set(jobEntries.map((entry) => entry.id));
+  const pendingVisibleJobEntries = (startingNewSession
+    ? []
+    : liveJobs.filter((job) => {
+        const jobKey = job.jobId ?? job.id;
+        if (assetBackedJobIds.has(jobKey)) return false;
+        if (!(job.status === "running" || job.status === "queued" || job.status === "pending")) return false;
+        if (selectedThreadId) return job.threadId === selectedThreadId;
+        return true;
+      }).map((job) => ({
+        id: job.jobId ?? job.id,
+        threadId: job.threadId ?? "",
+        createdAt: new Date().toISOString(),
+        assets: [] as AssetSummary[],
+        title: job.title || lastPrompt || "Generating...",
+        promptText: job.message,
+        isGenerating: true,
+      }))
+  );
+  const renderJobEntries = [...pendingVisibleJobEntries, ...visibleJobEntries];
+  const latestThemeCreateEntry = visibleJobEntries.find((entry) =>
+    entry.assets.some(
+      (asset) =>
+        typeof asset.analysis?.theme_create_mode === "string" &&
+        (asset.analysis.theme_create_mode === "style_modify" || asset.analysis.theme_create_mode === "style_transfer")
+    )
+  );
 
   const sizesLabel =
     selectedSizes.length === 0 ? "Sizes"
@@ -2339,28 +3159,42 @@ export function CreateImageView({
     (
       themeCreateMode === "style_modify"
         ? prompt.trim().length > 0
-        : themeCreateMode === "style_transfer"
-        ? hasRoleAssets(themeCreateAssets, "reference_ad")
-        : hasRoleAssets(themeCreateAssets, "client_logo") &&
-          hasRoleAssets(themeCreateAssets, "brand_element") &&
-          themeCreateOldText.trim().length > 0 &&
-          themeCreateNewText.trim().length > 0 &&
-          themeCreateFontStyle.trim().length > 0
+        : hasRoleAssets(themeCreateAssets, "reference_ad")
     );
 
   const resizeReady = createFlow === "resize" && resizeSourceAssets.length > 0 && selectedSizes.length > 0;
+  const remediationAnalyzedCount = remediationSourceAssets.filter((asset, index) =>
+    Boolean(remediationAnalyses[remediationAssetKey(asset, index)])
+  ).length;
   const orderedSelectedResizeSizes = RESIZE_SIZE_ORDER.filter((size) => selectedSizes.includes(size));
   const hasAnyResizeOverride =
     orderedSelectedResizeSizes.some((size) => (resizePromptOverrides[size] ?? "").trim().length > 0) ||
     resizeNegativePromptOverride.trim().length > 0;
+  const showImageWorkbenchSection = createFlow === "theme_create" || createFlow === "kakao" || createFlow === "resize" || createFlow === "remediation";
+  const isKakaoFlow = createFlow === "kakao";
+  const remediationFlaggedCount = remediationSourceAssets.filter((asset, index) => {
+    const key = remediationAssetKey(asset, index);
+    const analysis = remediationAnalyses[asset.id ?? key];
+    return Boolean(analysis && analysis.violations.length > 0);
+  }).length;
+  const remediationAllScanned =
+    remediationSourceAssets.length > 0 &&
+    remediationAnalyzedCount === remediationSourceAssets.length;
+  const remediationPrimaryActionLabel =
+    remediationAllScanned && remediationFlaggedCount > 0
+      ? `Remediate${remediationFlaggedCount > 1 ? ` ${remediationFlaggedCount}` : ""}`
+      : "Scan";
 
   const canGenerate =
     !generating &&
+    !remediationScanning &&
     (
       createFlow === "resize"
         ? resizeReady
         : createFlow === "theme_create"
         ? themeCreateReady
+        : createFlow === "remediation"
+        ? remediationSourceAssets.length > 0 && (!remediationAllScanned || remediationFlaggedCount > 0)
         : false
     );
   const activeRunningJob =
@@ -2382,19 +3216,20 @@ export function CreateImageView({
     ? "Preparing"
     : "Finalizing";
 
-  // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+
   return (
     <>
     <div className="flex flex-1 min-w-0 h-screen overflow-hidden bg-background">
 
-      {/* 鈹€鈹€ Main column 鈹€鈹€ */}
+      {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 
-      {/* 鈹€鈹€ Header 鈹€鈹€ */}
+      {/* Header */}
       <div className="shrink-0 border-b px-8 pb-0 pt-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <h1 className="font-display text-2xl font-semibold">Image &amp; Video</h1>
+            <ImageIcon className="size-5" />
+            <h1 className="font-display text-2xl font-semibold">Image</h1>
             <Badge variant="secondary" className="text-xs">Beta</Badge>
           </div>
           <div className="flex items-center gap-2 pb-1">
@@ -2417,7 +3252,7 @@ export function CreateImageView({
           </div>
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-3 pb-4">
-          {/* 鈹€鈹€ Project switcher 鈹€鈹€ */}
+          {/* Thread switcher */}
         <div ref={sessionMenuRef} className="relative flex items-center gap-2">
             {/* Dropdown button */}
             <button
@@ -2425,11 +3260,11 @@ export function CreateImageView({
               onClick={() => setSessionMenuOpen((open) => !open)}
               className="flex w-52 items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-left text-sm font-semibold text-foreground transition-colors hover:border-foreground/20"
             >
-              <span className="min-w-0 flex-1 truncate">{sessionTitle}</span>
+              <span className="min-w-0 flex-1 truncate">{threadTitle}</span>
               <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", sessionMenuOpen && "rotate-180")} />
             </button>
 
-            {/* New Project 鈥?solid black button, always visible */}
+            {/* New Thread: solid black button, always visible */}
             <button
               type="button"
               onClick={() => {
@@ -2445,23 +3280,23 @@ export function CreateImageView({
               className="flex items-center gap-1.5 rounded-xl bg-foreground px-3 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-80"
             >
               <span className="text-base leading-none">+</span>
-              New Project
+              New Thread
             </button>
 
             {sessionMenuOpen && (
               <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-80 rounded-2xl border border-border bg-card p-2 shadow-2xl">
                 <div className="px-2 py-1">
                   <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Projects
+                    Threads
                   </p>
                 </div>
                 <div className="mt-1 max-h-72 space-y-1 overflow-y-auto pr-0.5 [scrollbar-width:thin]">
-                  {currentProjectSessions.filter(t => t.assetCount > 0).length === 0 ? (
+                  {currentThreads.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border bg-background/70 px-3 py-4 text-xs text-muted-foreground">
-                      No projects yet. Start generating to create your first project.
+                      No threads yet. Start generating to create your first thread.
                     </div>
                   ) : (
-                    currentProjectSessions.filter(t => t.assetCount > 0).map((thread) => (
+                    currentThreads.map((thread) => (
                       <div key={thread.id} className="group relative">
                         {renamingThreadId === thread.id ? (
                           /* Inline rename input */
@@ -2469,7 +3304,7 @@ export function CreateImageView({
                             onSubmit={async (e) => {
                               e.preventDefault();
                               await renameThread(thread.id, renameValue);
-                              const updated = await listThreads(activeWorkspaceId);
+                              const updated = await listThreads(activeWorkspaceId, contentScope);
                               setLiveThreads(updated);
                               setRenamingThreadId(null);
                             }}
@@ -2502,12 +3337,12 @@ export function CreateImageView({
                           >
                             <p className="truncate pr-10 text-sm font-medium text-foreground">{thread.title}</p>
                             <p className="mt-1 text-[11px] text-muted-foreground">
-                              {thread.jobCount} runs 路 {thread.assetCount} assets
+                              {thread.jobCount} runs - {thread.assetCount} assets
                             </p>
                           </button>
                         )}
 
-                        {/* Rename + Delete 鈥?appear on hover */}
+                        {/* Rename and delete actions shown on hover */}
                         {renamingThreadId !== thread.id && (
                           <div className="absolute right-2 top-2 hidden items-center gap-1 group-hover:flex">
                             <button
@@ -2524,18 +3359,25 @@ export function CreateImageView({
                             </button>
                             <button
                               type="button"
-                              title="Delete project"
+                              title="Delete thread"
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 if (!confirm(`Delete "${thread.title}"? This cannot be undone.`)) return;
                                 await deleteThread(thread.id);
-                                if (selectedThreadId === thread.id) {
-                                  setSelectedThreadId(null);
-                                  setStartingNewSession(true);
-                                  onThreadSelect?.(null);
-                                }
-                                const updated = await listThreads(activeWorkspaceId);
+                                const updated = await listThreads(activeWorkspaceId, contentScope);
                                 setLiveThreads(updated);
+                                if (selectedThreadId === thread.id) {
+                                  const nextThread = updated.find((item) => item.id !== thread.id) ?? null;
+                                  if (nextThread) {
+                                    setSelectedThreadId(nextThread.id);
+                                    setStartingNewSession(false);
+                                    onThreadSelect?.(nextThread.id);
+                                  } else {
+                                    setSelectedThreadId(null);
+                                    setStartingNewSession(true);
+                                    onThreadSelect?.(null);
+                                  }
+                                }
                               }}
                               className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                             >
@@ -2551,60 +3393,97 @@ export function CreateImageView({
             )}
           </div>
           <Badge variant="secondary" className="text-[10px]">
-            Continuous History
+            Thread History
           </Badge>
           <span className="hidden text-xs text-muted-foreground">
             {selectedThread
-              ? `${selectedThreadAssets.length} assets 路 ${selectedThreadJobs.length} runs`
+              ? `${selectedThreadAssets.length} assets - ${selectedThreadJobs.length} runs`
               : startingNewSession
-              ? "Start a fresh session inside this project."
-              : currentProjectSessions.length === 0
-              ? "No sessions yet in this project."
-              : "Select a session to continue editing."}
+              ? "Start a fresh thread."
+              : currentThreads.length === 0
+              ? "No threads yet."
+              : "Select a thread to continue editing."}
           </span>
           <span className="text-xs text-muted-foreground">
             {downloadableAssets.length > 0
-              ? `${downloadableAssets.length} assets 路 ${projectJobEntries.length} runs in this project`
-              : "All new generations and edits stay inside this project until you switch projects."}
+              ? `${downloadableAssets.length} assets - ${visibleJobEntries.length} runs in this thread view`
+              : "All new generations and edits stay inside thread history."}
           </span>
         </div>
       </div>
 
-      {/* 鈹€鈹€ Content 鈹€鈹€ */}
+      {/* Content */}
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
         <div className="mx-auto max-w-4xl">
-          {/* Generating placeholder 鈥?occupies one grid cell */}
-          {isTaskRunning && (
-            <GenerationCard assets={[]} title={lastPrompt || "Generating..."} isGenerating />
-          )}
-
-          {/* Generation stream 鈥?each card spans full width with internal 3-col grid */}
+          {/* Generation stream, each card spans full width with an internal 3-column grid */}
           <div className="grid grid-cols-3 gap-6">
-          {projectJobEntries
-            .filter((e) => !hiddenJobIds.has(e.id))
-            .map((jobEntry) => (
-              <GenerationCard
-                key={jobEntry.id}
-                assets={jobEntry.assets}
-                title={jobEntry.title}
-                promptText={jobEntry.promptText}
-                selectedAssetIds={selectedAssetIds}
-                onToggleSelect={toggleAsset}
-                onSetWorking={setWorkingImageFromAsset}
-                onRegenerate={
-                  jobEntry.assets.some((asset) => asset.parentAssetId || asset.rootAssetId)
-                    ? () => handleRegenerate(jobEntry)
-                    : undefined
-                }
-                onRegenerateAsset={
-                  jobEntry.assets.some((asset) => asset.parentAssetId || asset.rootAssetId)
-                    ? handleRegenerateAsset
-                    : undefined
-                }
-                onHide={() => setHiddenJobIds((prev) => new Set([...prev, jobEntry.id]))}
+          {remediationReviewEntries
+            .filter((entry) => !hiddenJobIds.has(entry.id))
+            .map((entry) => (
+              <RemediationReviewCard
+                key={entry.id}
+                asset={entry.asset}
+                analysis={entry.analysis}
+                onRemediate={() => void handleRemediateFromHistory(entry.asset, entry.analysis)}
+                onHide={() => setHiddenJobIds((prev) => new Set([...prev, entry.id]))}
                 onZoom={setZoomedAsset}
               />
             ))}
+          {renderJobEntries
+            .filter((e) => !hiddenJobIds.has(e.id))
+            .map((jobEntry) => {
+              if ("isGenerating" in jobEntry && jobEntry.isGenerating) {
+                return (
+                  <GenerationCard
+                    key={jobEntry.id}
+                    assets={[]}
+                    title={jobEntry.title}
+                    promptText={jobEntry.promptText}
+                    isGenerating
+                  />
+                );
+              }
+              const isThemeCreateEntry = jobEntry.assets.some(
+                (asset) =>
+                  typeof asset.analysis?.theme_create_mode === "string" &&
+                  (asset.analysis.theme_create_mode === "style_modify" || asset.analysis.theme_create_mode === "style_transfer")
+              );
+              return (
+                <GenerationCard
+                  key={jobEntry.id}
+                  assets={jobEntry.assets}
+                  title={jobEntry.title}
+                  promptText={jobEntry.promptText}
+                  selectedAssetIds={selectedAssetIds}
+                  onToggleSelect={toggleAsset}
+                  onUseAsSource={
+                    isThemeCreateEntry
+                      ? (asset) => setThemeAssetFromExistingAsset("upload", asset)
+                      : undefined
+                  }
+                  onUseAsReference={
+                    isThemeCreateEntry
+                      ? (asset) => setThemeAssetFromExistingAsset("reference_ad", asset)
+                      : undefined
+                  }
+                  onUseForResize={
+                    (asset) => setResizeSourceFromExistingAsset(asset)
+                  }
+                  onRegenerate={
+                    jobEntry.assets.some((asset) => asset.parentAssetId || asset.rootAssetId)
+                      ? () => handleRegenerate(jobEntry)
+                      : undefined
+                  }
+                  onRegenerateAsset={
+                    jobEntry.assets.some((asset) => asset.parentAssetId || asset.rootAssetId)
+                      ? handleRegenerateAsset
+                      : undefined
+                  }
+                  onHide={() => setHiddenJobIds((prev) => new Set([...prev, jobEntry.id]))}
+                  onZoom={setZoomedAsset}
+                />
+              );
+            })}
           </div>
 
           {hiddenJobIds.size > 0 && (
@@ -2619,9 +3498,11 @@ export function CreateImageView({
             </div>
           )}
 
-          {/* Empty state 鈥?shown when grid is empty */}
-          {!isTaskRunning && projectJobEntries.filter((e) => !hiddenJobIds.has(e.id)).length === 0 && (
-            <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-border bg-muted/20 text-center">
+          {/* Empty state shown when the grid is empty */}
+          {!isTaskRunning &&
+            remediationReviewEntries.filter((entry) => !hiddenJobIds.has(entry.id)).length === 0 &&
+            renderJobEntries.filter((e) => !hiddenJobIds.has(e.id)).length === 0 && (
+            <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-border bg-muted/20 text-center">
               <div className="grid size-16 place-items-center rounded-2xl border-2 border-dashed border-border bg-muted/40">
                 <ImageIcon className="size-7 text-muted-foreground/40" />
               </div>
@@ -2637,11 +3518,21 @@ export function CreateImageView({
 
       </div>
 
-      {/* 鈹€鈹€ Bottom input bar 鈥?floats over history 鈹€鈹€ */}
-      <div className="relative min-h-0 shrink-0 overflow-visible bg-background px-6 pb-6 pt-3" style={{ maxHeight: "calc(100svh - 120px)" }}>
+      {/* Bottom input bar floating over history */}
+      <div className="relative min-h-0 shrink-0 overflow-visible bg-background px-6 pb-4 pt-2" style={{ maxHeight: "calc(100svh - 120px)" }}>
         {/* Gradient fade so history content dissolves into the bar */}
         <div className="pointer-events-none absolute inset-x-0 bottom-full h-16 bg-gradient-to-t from-background to-transparent" />
-        <div className="mx-auto max-w-2xl">
+        <div className="mx-auto max-w-5xl">
+
+          {/* PSD info banner */}
+          {psdInfo && (
+            <div className="mb-2 flex items-start gap-2 rounded-xl border border-accent/30 bg-soft-accent px-3 py-2.5">
+              <p className="flex-1 text-xs text-accent">{psdInfo}</p>
+              <button type="button" onClick={() => setPsdInfo(null)} className="shrink-0">
+                <X className="size-3.5 text-accent" />
+              </button>
+            </div>
+          )}
 
           {/* Error banner */}
           {error && (
@@ -2653,7 +3544,7 @@ export function CreateImageView({
             </div>
           )}
 
-          {/* 鈹€鈹€ Input card 鈹€鈹€ */}
+          {/* Input card */}
           {isTaskRunning && (
             <div className="mb-2 overflow-hidden rounded-xl border border-accent/25 bg-soft-accent/50 px-3 py-2.5">
               <div className="flex items-center gap-2">
@@ -2683,277 +3574,102 @@ export function CreateImageView({
             </div>
           )}
 
-          <div
+          <WorkbenchShell
             ref={barRef}
-            className="rounded-2xl border border-border bg-card shadow-[0_2px_16px_rgba(0,0,0,0.06)] transition-shadow focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.10)] flex flex-col"
-            style={{ maxHeight: "calc(100svh - 220px)" }}
+            expanded={workbenchExpanded}
+            onToggleExpanded={() => setWorkbenchExpanded((prev) => !prev)}
+            className={cn(
+              "focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.10)]",
+              isDragUploading && "border-accent bg-soft-accent/10 shadow-[0_0_0_1px_rgba(34,197,94,0.18)]"
+            )}
+            onDragOver={handleWorkbenchDragOver}
+            onDragLeave={handleWorkbenchDragLeave}
+            onDrop={handleWorkbenchDrop}
+            overlay={isDragUploading && createFlow !== "kakao" ? (
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[28px] border-2 border-dashed border-accent bg-background/70 backdrop-blur-[1px]">
+                <div className="rounded-full border border-accent/30 bg-card px-4 py-2 text-sm font-medium text-accent">
+                  Drop images to upload
+                </div>
+              </div>
+            ) : null}
           >
-
             {/* Task type tabs: Resize | Theme Create */}
-            <div className="shrink-0 flex items-center gap-1 px-4 pt-3 pb-2 border-b border-border">
+            <div className="shrink-0 border-b border-border px-4 pt-3">
               {CREATE_FLOW_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setCreateFlow(tab.id)}
                   className={cn(
-                    "rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all",
+                    "relative px-3.5 pb-3 text-sm font-medium transition-colors",
                     createFlow === tab.id
-                      ? "bg-foreground text-background shadow-sm"
+                      ? "font-semibold text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   {tab.label}
+                  {createFlow === tab.id ? (
+                    <span className="absolute bottom-0 left-0 h-0.5 w-full rounded-full bg-foreground" />
+                  ) : null}
                 </button>
               ))}
             </div>
 
-            {/* Scrollable form sections 鈥?keeps textarea+chips always visible */}
-            <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
+            {/* Scrollable form sections to keep textarea and chips visible */}
+            <div
+              className={cn(
+                "overflow-y-auto [scrollbar-width:thin]",
+                isKakaoFlow
+                  ? "min-h-0 flex-1"
+                  : showImageWorkbenchSection
+                  ? workbenchExpanded
+                    ? "h-[260px] flex-none"
+                    : "h-[132px] flex-none"
+                  : "h-0 min-h-0 flex-none overflow-hidden"
+              )}
+            >
 
             {createFlow === "theme_create" && (
-              <div className="space-y-4 border-t border-border px-4 py-3">
-                <div className="flex flex-wrap gap-2">
-                  {THEME_CREATE_MODES.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setThemeCreateMode(item.id)}
-                      className={cn(
-                        "rounded-xl border px-3 py-2 text-left transition-colors",
-                        themeCreateMode === item.id
-                          ? "border-foreground bg-foreground text-background"
-                          : "border-border bg-background/60 text-foreground hover:border-foreground/20"
-                      )}
-                    >
-                      <p className="text-sm font-medium">{item.label}</p>
-                      <p className={cn("mt-1 text-[11px] leading-5", themeCreateMode === item.id ? "text-background/80" : "text-muted-foreground")}>
-                        {item.blurb}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
+              <div className="space-y-3 border-t border-border px-4 py-3">
+                <div className="grid gap-2 md:grid-cols-2">
                   <ThemeAssetInput
                     title="Source Image"
-                    hint="Image 1"
+                    hint=""
                     required
                     file={themeCreateAssets.upload?.[0] ?? null}
+                    onPreview={setThemeCreatePreviewFile}
                     onPick={(file) => setSingleThemeAsset("upload", file)}
                     onClear={() => setSingleThemeAsset("upload", null)}
+                    onDropFiles={(files) => appendThemeCreateFiles(files, "upload")}
                   />
 
-                  {themeCreateMode === "style_transfer" && (
-                    <ThemeAssetInput
-                      title="Reference Image"
-                      hint="Image 2"
-                      required
-                      file={themeCreateAssets.reference_ad?.[0] ?? null}
-                      onPick={(file) => setSingleThemeAsset("reference_ad", file)}
-                      onClear={() => setSingleThemeAsset("reference_ad", null)}
-                    />
-                  )}
-
-                  {themeCreateMode === "asset_text_replace" && (
-                    <>
-                      <ThemeAssetInput
-                        title="Reference Image A"
-                        hint="Image 2 路 New Logo"
-                        required
-                        file={themeCreateAssets.client_logo?.[0] ?? null}
-                        onPick={(file) => setSingleThemeAsset("client_logo", file)}
-                        onClear={() => setSingleThemeAsset("client_logo", null)}
-                      />
-                      <ThemeAssetInput
-                        title="Reference Image B"
-                        hint="Image 3 路 New Button / Element"
-                        required
-                        file={themeCreateAssets.brand_element?.[0] ?? null}
-                        onPick={(file) => setSingleThemeAsset("brand_element", file)}
-                        onClear={() => setSingleThemeAsset("brand_element", null)}
-                      />
-                    </>
-                  )}
+                  <ThemeAssetInput
+                    title="Reference Image"
+                    hint=""
+                    file={themeCreateAssets.reference_ad?.[0] ?? null}
+                    onPreview={setThemeCreatePreviewFile}
+                    onPick={(file) => setSingleThemeAsset("reference_ad", file)}
+                    onClear={() => setSingleThemeAsset("reference_ad", null)}
+                    onDropFiles={(files) => appendThemeCreateFiles(files, "reference_ad")}
+                  />
                 </div>
-
-                <div className="rounded-2xl border border-border bg-background/60 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Preset Library</p>
-                      <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                        Load saved GM presets into Theme Create, then keep growing the reusable style library.
-                      </p>
-                    </div>
-                    {themeCreateMode === "style_modify" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPrompt(THEME_CREATE_WORLD_CUP_2026_PROMPT);
-                          setThemeCreateStyleName("2026 World Cup Edition");
-                          setThemeCreateStyleDetails("Packed stadium lights, championship greens and golds, sports-broadcast energy.");
-                        }}
-                        className="rounded-xl border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                      >
-                        2026 World Cup Edition
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {themeCreatePresetLoading ? (
-                      <div className="rounded-xl border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                        Loading presets...
-                      </div>
-                    ) : themeCreatePresets.length > 0 ? (
-                      themeCreatePresets.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => {
-                            setPrompt(preset.promptTemplate);
-                            setThemeCreateStyleName(preset.styleName ?? preset.name);
-                            setThemeCreateStyleDetails(preset.styleDetails ?? preset.description);
-                          }}
-                          className="rounded-xl border border-border bg-card px-3 py-2 text-left transition-colors hover:border-foreground/20 hover:bg-muted"
-                        >
-                          <p className="text-sm font-medium text-foreground">{preset.name}</p>
-                          <p className="mt-1 max-w-[260px] text-[11px] leading-5 text-muted-foreground">
-                            {preset.description || "Saved Theme Create preset"}
-                          </p>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="rounded-xl border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                        No saved presets for this mode yet.
-                      </div>
-                    )}
-                  </div>
-
-                  {(currentUser.role === "manager" || currentUser.role === "admin") && (
-                    <div className="mt-4 grid gap-3 md:grid-cols-[1.1fr,1.4fr,auto,auto]">
-                      <input
-                        value={themeCreatePresetName}
-                        onChange={(e) => setThemeCreatePresetName(e.target.value)}
-                        placeholder="Preset name"
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
-                      />
-                      <input
-                        value={themeCreatePresetDescription}
-                        onChange={(e) => setThemeCreatePresetDescription(e.target.value)}
-                        placeholder="Short report / preset summary"
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void handleDraftThemeCreateReport()}
-                        disabled={themeCreateDrafting}
-                        className={cn(
-                          "rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-                          themeCreateDrafting
-                            ? "cursor-not-allowed border border-border bg-muted text-muted-foreground"
-                            : "border border-border bg-background text-foreground hover:bg-muted"
-                        )}
-                      >
-                        {themeCreateDrafting ? "Drafting..." : "Draft Report"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleSaveThemeCreatePreset()}
-                        disabled={themeCreatePresetSaving}
-                        className={cn(
-                          "rounded-xl px-3 py-2 text-sm font-medium transition-colors",
-                          themeCreatePresetSaving
-                            ? "cursor-not-allowed border border-border bg-muted text-muted-foreground"
-                            : "border border-border bg-foreground text-background hover:opacity-90"
-                        )}
-                      >
-                        {themeCreatePresetSaving ? "Saving..." : "Save as Preset"}
-                      </button>
-                    </div>
-                  )}
-
-                  {themeCreatePresetFeedback && (
-                    <p className="mt-2 text-xs text-muted-foreground">{themeCreatePresetFeedback}</p>
-                  )}
-                </div>
-
-                {themeCreateMode === "asset_text_replace" && (
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                        Logo Position
-                      </label>
-                      <select
-                        value={themeCreateLogoPosition}
-                        onChange={(e) => setThemeCreateLogoPosition(e.target.value)}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/40"
-                      >
-                        {THEME_CREATE_POSITION_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                        Element Position
-                      </label>
-                      <select
-                        value={themeCreateElementPosition}
-                        onChange={(e) => setThemeCreateElementPosition(e.target.value)}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none focus:border-accent/40"
-                      >
-                        {THEME_CREATE_POSITION_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                        Old Text
-                      </label>
-                      <input
-                        value={themeCreateOldText}
-                        onChange={(e) => setThemeCreateOldText(e.target.value)}
-                        placeholder="Text currently shown in Image 1"
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                        New Text
-                      </label>
-                      <input
-                        value={themeCreateNewText}
-                        onChange={(e) => setThemeCreateNewText(e.target.value)}
-                        placeholder="Exact replacement text"
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
-                      />
-                    </div>
-                    <div className="space-y-1 md:col-span-2">
-                      <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                        Font Style
-                      </label>
-                      <input
-                        value={themeCreateFontStyle}
-                        onChange={(e) => setThemeCreateFontStyle(e.target.value)}
-                        placeholder="bold sans-serif, elegant serif, condensed display..."
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-accent/40"
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
             {/* Resize source image thumbnail chip */}
             {createFlow === "resize" && resizeSourceAssets.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-4 pb-1 pt-0">
+              <div className="border-t border-border px-4 py-3">
+                <div className="flex flex-wrap gap-1.5">
                 {resizeSourceAssets.map((asset, index) => (
                   <div key={`${asset.name}-${index}`} className="group relative flex items-center gap-2 rounded-lg border border-accent/40 bg-soft-accent/30 px-2 py-1">
-                    <div className="size-7 shrink-0 overflow-hidden rounded-md border border-accent/20">
+                    <button
+                      type="button"
+                      onClick={() => openDraftPreviewFromSourceAsset(asset, index)}
+                      className="size-7 shrink-0 overflow-hidden rounded-md border border-accent/20 transition-transform hover:scale-[1.03]"
+                      title="Preview image"
+                    >
                       <img src={asset.url} alt="" className="h-full w-full object-cover" />
-                    </div>
+                    </button>
                     <span className="max-w-[120px] truncate text-xs text-foreground">{asset.name}</span>
                     <button type="button" onClick={() => removeResizeSourceAsset(index)} className="text-muted-foreground hover:text-foreground">
                       <X className="size-3" />
@@ -2973,6 +3689,96 @@ export function CreateImageView({
                 >
                   Generate GIF
                 </button>
+                </div>
+              </div>
+            )}
+
+            {createFlow === "resize" && resizeSourceAssets.length === 0 && (
+              <div className="border-t border-border px-4 py-3">
+                <div className="flex min-h-[72px] items-center rounded-xl border border-dashed border-border bg-background/50 px-3 text-sm text-muted-foreground">
+                  Tap + below to upload one source image, then choose your target sizes.
+                </div>
+              </div>
+            )}
+
+            {createFlow === "remediation" && remediationSourceAssets.length > 0 && (
+              <div className="border-t border-border px-4 py-3">
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Source Images</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {remediationAnalyzedCount > 0
+                          ? remediationAllScanned
+                            ? remediationFlaggedCount > 0
+                              ? `${remediationAnalyzedCount}/${remediationSourceAssets.length} scanned. ${remediationFlaggedCount} image${remediationFlaggedCount > 1 ? "s are" : " is"} ready. Use the Remediate button below to fix them in one batch.`
+                              : `${remediationAnalyzedCount}/${remediationSourceAssets.length} scanned. No policy violations were found.`
+                            : `${remediationAnalyzedCount}/${remediationSourceAssets.length} scanned. Click Scan again after uploading more images.`
+                          : "Upload one or more creatives, then click Scan to detect policy violations."}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                      {remediationSourceAssets.length}/{MAX_REMEDIATION_SOURCE_IMAGES}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {remediationSourceAssets.map((asset, index) => {
+                      const key = remediationAssetKey(asset, index);
+                      const analysis = remediationAnalyses[key];
+                      const sourceSize = remediationOutputSize(asset);
+
+                      return (
+                        <div
+                          key={`analysis_${asset.name}_${index}`}
+                          className="group relative flex items-center gap-2 rounded-lg border border-border bg-background px-2 py-1.5"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => openDraftPreviewFromSourceAsset(asset, index)}
+                            className="size-9 shrink-0 overflow-hidden rounded-md border border-border transition-transform hover:scale-[1.03]"
+                            title="Preview image"
+                          >
+                            <img src={asset.url} alt={asset.name} className="h-full w-full object-cover" />
+                          </button>
+                          <div className="min-w-0">
+                            <p className="max-w-[140px] truncate text-xs font-medium text-foreground">{asset.name}</p>
+                            <div className="mt-0.5 flex items-center gap-1.5">
+                              {sourceSize ? (
+                                <span className="text-[10px] text-muted-foreground">{sourceSize}</span>
+                              ) : null}
+                              <span
+                                className={cn(
+                                  "rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+                                  analysis
+                                    ? remediationRiskTone(analysis.overall_risk)
+                                    : "border-border bg-muted text-muted-foreground"
+                                )}
+                              >
+                                {analysis ? `${analysis.overall_risk} risk` : "Pending"}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeRemediationSourceAsset(index)}
+                            className="text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            <X className="size-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {createFlow === "remediation" && remediationSourceAssets.length === 0 && (
+              <div className="border-t border-border px-4 py-3">
+                <div className="flex min-h-[72px] items-center rounded-xl border border-dashed border-border bg-background/50 px-3 text-sm text-muted-foreground">
+                  Tap + below to upload creatives. We will scan each image first, then generate a compliant version in the same original size.
+                </div>
               </div>
             )}
 
@@ -3076,31 +3882,35 @@ export function CreateImageView({
               multiple
               className="sr-only"
               onChange={(e) => {
-                appendResizeSourceFiles(e.target.files);
+                if (createFlow === "resize") {
+                  appendResizeSourceFiles(e.target.files);
+                } else if (createFlow === "remediation") {
+                  void appendRemediationSourceFiles(e.target.files);
+                }
                 e.target.value = "";
               }}
             />
             {/* Kakao Bizboard batch flow */}
             {createFlow === "kakao" && (
-              <div className="flex-1">
+              <div className="h-full">
                 <KakaoFlow
                   activeWorkspaceId={activeWorkspaceId}
+                  currentThreadId={currentThreadIdForWrites ?? null}
+                  onThreadResolved={(threadId) => {
+                    setSelectedThreadId(threadId);
+                    setStartingNewSession(false);
+                    onThreadSelect?.(threadId);
+                  }}
                   onAssetsCreated={() => {
-                    Promise.all([listAssets(activeWorkspaceId), listThreads(activeWorkspaceId)])
+                    Promise.all([listAssets(activeWorkspaceId, contentScope), listThreads(activeWorkspaceId, contentScope)])
                       .then(([a, t]) => {
                         setLiveAssets(a);
                         setLiveThreads(t);
-                        const latestThread = [...t].sort(
-                          (left, right) =>
-                            new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
-                        )[0];
-                        if (latestThread?.id) {
-                          setSelectedThreadId(latestThread.id);
-                          setStartingNewSession(false);
-                          onThreadSelect?.(latestThread.id);
-                        }
                       })
                       .catch(() => {});
+                  }}
+                  onOpenBuilder={(assets) => {
+                    handleOpenKakaoBatch(assets);
                   }}
                 />
               </div>
@@ -3108,18 +3918,15 @@ export function CreateImageView({
 
             </div>{/* end scrollable form sections */}
 
-            {/* Textarea 鈥?hidden only for Kakao */}
             {createFlow !== "kakao" && <textarea
               value={prompt}
               onChange={(e) => {
-                const value = e.target.value;
-                setPrompt(value);
-                if (createFlow === "theme_create" && themeCreateMode === "style_modify") {
-                  setThemeCreateStyleName(value);
-                  setThemeCreateStyleDetails(value);
-                }
+                setPrompt(e.target.value);
               }}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) {
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey && canGenerate) {
                   e.preventDefault();
                   handleGenerate();
@@ -3132,27 +3939,31 @@ export function CreateImageView({
                     : "Tap + to upload a source image, then send to resize..."
                   : createFlow === "theme_create"
                   ? themeCreateMode === "style_modify"
-                    ? "Describe the new artistic style and visual treatment you want..."
+                    ? "Write the full style-modification prompt here. Example: the 2026 World Cup broadcast treatment."
                     : themeCreateMode === "style_transfer"
-                    ? "Optional direction for how Image 1 should inherit the style of Image 2..."
-                    : "Optional instruction for the replacement task..."
+                    ? "Optional extra direction. Leave blank to use the standard zero-loss style transfer prompt."
+                    : "Theme Create prompt..."
+                  : createFlow === "remediation"
+                  ? remediationSourceAssets.length > 0
+                    ? "Optional note for the remediation pass. Each image will keep its original uploaded size."
+                    : "Tap + to upload creatives. We will scan violations first, then remediate each image at its original size."
                   : mode === "image"
                   ? "Describe the image you want to generate..."
                   : "Describe your endcard creative..."
               }
-              rows={3}
-              className="w-full resize-none bg-transparent px-4 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+              rows={2}
+              className="h-[72px] w-full resize-none bg-transparent px-4 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
             />}
 
-            {/* 鈹€鈹€ Chip row (hidden for Kakao) 鈹€鈹€ */}
+            {/* Chip row, hidden for Kakao */}
             {createFlow !== "kakao" &&
-            <div className="flex items-center gap-1.5 px-4 pb-3 pt-1">
+            <div className="flex items-center gap-1.5 px-4 pb-3 pt-2">
 
               {/* Model chip */}
               {createFlow === "theme_create" ? (
                 <div className="relative">
                   <ChipButton
-                    label={`Model 路 ${activeModel.short}`}
+                    label="Model"
                     active={activeChip === "model"}
                     onClick={() => toggleChip("model")}
                   />
@@ -3173,22 +3984,22 @@ export function CreateImageView({
                 </div>
               ) : (
                 <div className="flex items-center rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  Model 路 Gemini 3.1 Flash
+                  Model - Gemini 3.1 Flash
                 </div>
               )}
 
-              {/* Size chip 鈥?multi-select for Resize, fixed 1200x628 for Theme Create */}
+              {/* Size chip: multi-select for Resize, fixed single output for Theme Create, original-size output for Remediation */}
               {createFlow === "resize" ? (
                 <div className="relative">
                   <ChipButton
-                    label={`Size 路 ${selectedSizes.length || "0"}`}
+                    label={`Size - ${selectedSizes.length || "0"}`}
                     active={activeChip === "sizes"}
                     onClick={() => toggleChip("sizes")}
                   />
                   {activeChip === "sizes" && (
                     <DropdownPanel className="left-0 w-52">
                       <p className="px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">
-                        Target Sizes 鈥?{selectedSizes.length} selected
+                        Target Sizes - {selectedSizes.length} selected
                       </p>
                       <div className="max-h-72 overflow-y-auto [scrollbar-width:thin]">
                         {RESIZE_SIZE_GROUPS.map((group) => (
@@ -3214,13 +4025,32 @@ export function CreateImageView({
                     </DropdownPanel>
                   )}
                 </div>
+              ) : createFlow === "remediation" ? (
+                <div className="flex items-center rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  Output - Original size
+                </div>
               ) : (
                 <div className="flex items-center rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  1200脳628
+                  1200x628
                 </div>
               )}
 
-              {/* GIF toggle 鈥?Resize only */}
+              {createFlow === "resize" && selectedSizes.includes("1200x600") && (
+                <button
+                  type="button"
+                  onClick={() => setIncludeResizeGachaDisclosure((value) => !value)}
+                  className={cn(
+                    "flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
+                    includeResizeGachaDisclosure
+                      ? "border-accent/50 bg-soft-accent text-accent"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Gacha content
+                </button>
+              )}
+
+              {/* GIF toggle for Resize only */}
               {createFlow === "resize" && (
                 <button
                   type="button"
@@ -3258,7 +4088,95 @@ export function CreateImageView({
                 )}
               </div>
 
-              {/* Cancel button 鈥?visible only while generating */}
+              {SHOW_THEME_CREATE_PRESET_CHIP && createFlow === "theme_create" && (
+                <div className="relative">
+                  <ChipButton
+                    label="Preset Library"
+                    active={activeChip === "presets"}
+                    onClick={() => toggleChip("presets")}
+                  />
+                  {activeChip === "presets" && (
+                    <DropdownPanel className="left-0 w-[560px] max-w-[calc(100vw-48px)] overflow-hidden p-0">
+                      <div className="border-b border-border px-4 py-3">
+                        <p className="text-sm font-semibold text-foreground">Preset Library</p>
+                        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                          Browse saved GM presets and load one directly into the prompt box.
+                        </p>
+                      </div>
+
+                      <div className="max-h-[360px] overflow-y-auto [scrollbar-width:thin]">
+                        <div className="border-b border-border px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">2026 World Cup Edition</p>
+                              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                                Packed stadium lights, championship greens and golds, sports-broadcast energy.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                applyThemeCreatePreset({
+                                  promptTemplate: THEME_CREATE_WORLD_CUP_2026_PROMPT,
+                                  styleName: "2026 World Cup Edition",
+                                  styleDetails: "Packed stadium lights, championship greens and golds, sports-broadcast energy.",
+                                  name: "2026 World Cup Edition",
+                                  description: "Packed stadium lights, championship greens and golds, sports-broadcast energy.",
+                                })
+                              }
+                              className="shrink-0 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                            >
+                              Use Preset
+                            </button>
+                          </div>
+                        </div>
+
+                        {themeCreatePresetLoading ? (
+                          <div className="px-4 py-6 text-sm text-muted-foreground">Loading presets...</div>
+                        ) : themeCreatePresets.length === 0 ? (
+                          <div className="px-4 py-6 text-sm text-muted-foreground">
+                            No saved preset assets yet. Save a strong Theme Create result and it will appear here.
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-border">
+                            {themeCreatePresets.map((preset) => (
+                              <div key={preset.id} className="px-4 py-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-medium text-foreground">{preset.name}</p>
+                                      {preset.isOfficial && (
+                                        <Badge variant="secondary" className="text-[10px]">
+                                          Official
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                                      {preset.description}
+                                    </p>
+                                    <p className="mt-1 text-[10px] uppercase tracking-[0.08em] text-muted-foreground/70">
+                                      {preset.themeCreateMode === "style_modify" ? "Style Modify" : "Style Transfer"}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => applyThemeCreatePreset(preset)}
+                                    className="shrink-0 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                                  >
+                                    Use Preset
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </DropdownPanel>
+                  )}
+                </div>
+              )}
+
+              {/* Cancel button visible only while generating */}
               {isTaskRunning && (
                 <button
                   type="button"
@@ -3270,57 +4188,47 @@ export function CreateImageView({
                 </button>
               )}
 
-              {/* Attach + Send (right-aligned group) */}
-              <div className={cn("flex items-center gap-1.5", !isTaskRunning && "ml-auto")}>
-                {/* Upload button 鈥?source image for Resize */}
-                <button
-                  type="button"
-                  title={createFlow === "resize" ? `Upload source images (${resizeSourceAssets.length}/${MAX_RESIZE_SOURCE_IMAGES})` : undefined}
-                  onClick={() => {
-                    if (createFlow === "resize" && resizeSourceAssets.length < MAX_RESIZE_SOURCE_IMAGES) resizeFileRef.current?.click();
+              <div className={cn(!isTaskRunning && "ml-auto")}>
+                <WorkbenchFooterActions
+                  uploadTitle={
+                    createFlow === "resize"
+                      ? `Upload source images (${resizeSourceAssets.length}/${MAX_RESIZE_SOURCE_IMAGES})`
+                      : createFlow === "remediation"
+                        ? `Upload source images (${remediationSourceAssets.length}/${MAX_REMEDIATION_SOURCE_IMAGES})`
+                        : undefined
+                  }
+                  onUpload={() => {
+                    if (createFlow === "resize" && resizeSourceAssets.length < MAX_RESIZE_SOURCE_IMAGES) {
+                      resizeFileRef.current?.click();
+                    } else if (createFlow === "remediation" && remediationSourceAssets.length < MAX_REMEDIATION_SOURCE_IMAGES) {
+                      resizeFileRef.current?.click();
+                    }
                   }}
-                  disabled={createFlow !== "resize" || resizeSourceAssets.length >= MAX_RESIZE_SOURCE_IMAGES}
-                  className={cn(
-                    "relative flex size-8 items-center justify-center rounded-full transition-colors",
-                    createFlow !== "resize" || resizeSourceAssets.length >= MAX_RESIZE_SOURCE_IMAGES
-                      ? "cursor-not-allowed text-muted-foreground/40"
-                      : createFlow === "resize" && resizeSourceAssets.length > 0
-                      ? "bg-soft-accent text-accent"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <Plus className="size-4" />
-                </button>
-
-                {/* Send button */}
-                <button
-                  type="button"
-                  onClick={() => void handleGenerate()}
-                  disabled={!canGenerate}
-                  className={cn(
-                    "flex size-9 items-center justify-center rounded-full transition-all",
-                    canGenerate
-                      ? "bg-foreground text-background shadow-md hover:opacity-80"
-                      : "cursor-not-allowed bg-muted text-muted-foreground"
-                  )}
-                >
-                  {generating ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <ArrowUp className="size-4" />
-                  )}
-                </button>
+                  uploadDisabled={
+                    (createFlow !== "resize" && createFlow !== "remediation") ||
+                    (createFlow === "resize" && resizeSourceAssets.length >= MAX_RESIZE_SOURCE_IMAGES) ||
+                    (createFlow === "remediation" && remediationSourceAssets.length >= MAX_REMEDIATION_SOURCE_IMAGES)
+                  }
+                  uploadActive={
+                    (createFlow === "resize" && resizeSourceAssets.length > 0) ||
+                    (createFlow === "remediation" && remediationSourceAssets.length > 0)
+                  }
+                  onPrimary={() => void handleGenerate()}
+                  primaryDisabled={!canGenerate}
+                  primaryLoading={generating || remediationScanning}
+                  primaryLabel={createFlow === "remediation" ? remediationPrimaryActionLabel : undefined}
+                />
               </div>
 
             </div>}
 
-          </div>
+          </WorkbenchShell>
         </div>
       </div>
 
       </div>{/* end main column */}
 
-      {/* 鈹€鈹€ Right assets panel 鈹€鈹€ */}
+      {/* Right assets panel */}
       {rightPanelOpen && (
         <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l border-border bg-card">
           {/* Panel header */}
@@ -3335,43 +4243,42 @@ export function CreateImageView({
             </button>
           </div>
 
-          {/* Prefix input */}
-          <div className="shrink-0 border-b border-border px-4 py-3">
-            <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              File prefix
-            </label>
-            <div className="flex items-center">
-              <input
-                type="text"
-                value={downloadPrefix}
-                onChange={(e) => setDownloadPrefix(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""))}
-                placeholder="incept"
-                className="min-w-0 flex-1 rounded-l-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-accent/60"
-              />
-              <span className="rounded-r-lg border border-l-0 border-border bg-muted px-2.5 py-1.5 text-[10px] text-muted-foreground whitespace-nowrap">
-                _1200x628.png
-              </span>
-            </div>
-            <p className="mt-1.5 text-[10px] text-muted-foreground">
-              e.g. <span className="font-mono">{downloadPrefix || "incept"}_300x250.png</span>
-            </p>
-          </div>
-
-          {/* Select all row */}
+          {/* Select row */}
           {downloadableAssets.length > 0 && (
             <div className="shrink-0 border-b border-border px-4 py-2">
-              <button
-                type="button"
-                onClick={toggleAll}
-                className="flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {allSelected
-                  ? <CheckSquare className="size-4 text-accent" />
-                  : <Square className="size-4" />}
-                {allSelected
-                  ? "Deselect all"
-                  : `Select all (${downloadableAssets.length})`}
-              </button>
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className="flex items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {allSelected
+                    ? <CheckSquare className="size-4 text-accent" />
+                    : <Square className="size-4" />}
+                  {allSelected
+                    ? "Deselect all"
+                    : `Select all (${downloadableAssets.length})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (assetPanelSelectMode) {
+                      setAssetPanelSelectMode(false);
+                      setSelectedAssetIds(new Set());
+                      return;
+                    }
+                    setAssetPanelSelectMode(true);
+                  }}
+                  className={cn(
+                    "rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    assetPanelSelectMode
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  {assetPanelSelectMode ? "Unselect" : "Select"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -3388,6 +4295,7 @@ export function CreateImageView({
                   const selected = selectedAssetIds.has(asset.id);
                   const ratio =
                     asset.width && asset.height ? asset.width / asset.height : 1;
+                  const formatLabel = getAssetFileExtension(asset).toUpperCase();
                   return (
                     <div
                       key={asset.id}
@@ -3401,7 +4309,13 @@ export function CreateImageView({
                       {/* Thumbnail */}
                       <button
                         type="button"
-                        onClick={() => setPreviewState({ assets: downloadableAssets, index: downloadableAssets.findIndex((item) => item.id === asset.id) })}
+                        onClick={() => {
+                          if (assetPanelSelectMode) {
+                            toggleAsset(asset.id);
+                            return;
+                          }
+                          setPreviewState({ assets: downloadableAssets, index: downloadableAssets.findIndex((item) => item.id === asset.id) });
+                        }}
                         className="w-full overflow-hidden bg-[#07111F]"
                         style={{ aspectRatio: Math.min(Math.max(ratio, 0.4), 3) }}
                       >
@@ -3433,8 +4347,8 @@ export function CreateImageView({
                       <div className="absolute bottom-1.5 left-1.5 rounded-md bg-black/75 px-1.5 py-0.5 backdrop-blur-sm">
                         <span className="text-[8px] font-semibold text-white">
                           {asset.width && asset.height
-                            ? `${asset.width}脳${asset.height} 路 ${asset.type === "gif" ? "GIF" : "PNG"}`
-                            : asset.type === "gif" ? "GIF" : "PNG"}
+                            ? `${asset.width}x${asset.height} - ${formatLabel}`
+                            : formatLabel}
                         </span>
                       </div>
                     </div>
@@ -3444,44 +4358,49 @@ export function CreateImageView({
             )}
           </div>
 
-          {/* Download + Delete */}
+          {/* Actions */}
           <div className="shrink-0 space-y-2 border-t border-border p-3">
-            <button
-              type="button"
-              onClick={handleOpenKakaoBatch}
-              disabled={selectedKakaoEligibleAssets.length === 0 || generating}
-              className={cn(
-                "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all",
-                selectedKakaoEligibleAssets.length > 0 && !generating
-                  ? "border border-border bg-background text-foreground hover:bg-muted"
-                  : "cursor-not-allowed bg-muted text-muted-foreground"
-              )}
-            >
-              {generating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {selectedKakaoEligibleAssets.length === 0
-                ? "Select PNG assets"
-                : selectedKakaoEligibleAssets.length === 1
-                ? "Create Kakao Bizboard"
-                : `Create Kakao Bizboard (${selectedKakaoEligibleAssets.length})`}
-            </button>
-            <button
-              type="button"
-              onClick={handleGenerateGifSelected}
-              disabled={selectedGifEligibleAssets.length === 0 || generating}
-              className={cn(
-                "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all",
-                selectedGifEligibleAssets.length > 0 && !generating
-                  ? "border border-border bg-background text-foreground hover:bg-muted"
-                  : "cursor-not-allowed bg-muted text-muted-foreground"
-              )}
-            >
-              {generating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {selectedGifEligibleAssets.length === 0
-                ? "Select PNG assets"
-                : selectedGifEligibleAssets.length === 1
-                ? "Generate GIF"
-                : `Generate GIF (${selectedGifEligibleAssets.length})`}
-            </button>
+            {(selectedKakaoEligibleAssets.length > 0 || selectedGifEligibleAssets.length > 0) && (
+              <div className="grid grid-cols-2 gap-2">
+                {selectedKakaoEligibleAssets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenKakaoBatch()}
+                    disabled={generating}
+                    className={cn(
+                      "flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-all",
+                      generating
+                        ? "cursor-not-allowed border-border bg-muted text-muted-foreground"
+                        : "border-border bg-background text-foreground hover:bg-muted"
+                    )}
+                  >
+                    {generating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                    {selectedKakaoEligibleAssets.length === 1
+                      ? "Create Kakao"
+                      : `Create Kakao (${selectedKakaoEligibleAssets.length})`}
+                  </button>
+                )}
+                {selectedGifEligibleAssets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleGenerateGifSelected}
+                    disabled={generating}
+                    className={cn(
+                      "flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-all",
+                      generating
+                        ? "cursor-not-allowed border-border bg-muted text-muted-foreground"
+                        : "border-border bg-background text-foreground hover:bg-muted",
+                      selectedKakaoEligibleAssets.length === 0 && "col-span-2"
+                    )}
+                  >
+                    {generating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                    {selectedGifEligibleAssets.length === 1
+                      ? "Generate GIF"
+                      : `Generate GIF (${selectedGifEligibleAssets.length})`}
+                  </button>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={handleDownload}
@@ -3494,17 +4413,23 @@ export function CreateImageView({
               )}
             >
               {downloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-              {downloading ? "Preparing..." : selectedAssetIds.size === 0 ? "Select to download" : selectedAssetIds.size === 1 ? "Download PNG" : `Download ${selectedAssetIds.size}`}
+              {downloading
+                ? "Preparing..."
+                : selectedAssetIds.size === 0
+                ? "Select to download"
+                : selectedAssetIds.size === 1
+                ? "Download"
+                : `Download ${selectedAssetIds.size}`}
             </button>
             <button
               type="button"
               onClick={handleDeleteSelected}
               disabled={selectedAssetIds.size === 0}
               className={cn(
-                "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all",
+                "flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition-all",
                 selectedAssetIds.size > 0
-                  ? "border border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
-                  : "cursor-not-allowed text-muted-foreground"
+                  ? "border-destructive/30 bg-background text-destructive hover:bg-destructive/10"
+                  : "cursor-not-allowed border-border bg-background text-muted-foreground"
               )}
             >
               <Trash2 className="size-4" />
@@ -3516,31 +4441,35 @@ export function CreateImageView({
 
     </div>
 
-    {/* 鈹€鈹€ Image zoom modal 鈹€鈹€ */}
+    {/* Image zoom modal */}
     {kakaoBatchOpen && (
       <KakaoBatchModal
-        assets={selectedKakaoEligibleAssets}
+        assets={kakaoBatchAssets}
         submitting={kakaoBatchSubmitting}
         appIconUrl={kakaoBatchAppIconUrl}
-        appName={kakaoBatchAppName}
         mainCopy={kakaoBatchMainCopy}
         appDownloadCopy={kakaoBatchAppDownloadCopy}
-        dspName={kakaoBatchDspName}
         gacha={kakaoBatchGacha}
         previewUrl={kakaoBatchPreviewUrl}
         validationErrors={kakaoBatchValidationErrors}
         mainCopyWidthPx={kakaoBatchMainCopyWidthPx}
         onClose={() => {
-          if (!kakaoBatchSubmitting) setKakaoBatchOpen(false);
+          if (!kakaoBatchSubmitting) {
+            setKakaoBatchOpen(false);
+            setKakaoBatchAssets([]);
+          }
         }}
         onSubmit={handleGenerateKakaoSelected}
         onAppIconChange={handleKakaoBatchIconChange}
-        setAppName={setKakaoBatchAppName}
         setGacha={setKakaoBatchGacha}
+        onSubtitleChange={setKakaoBatchAppDownloadCopy}
         onMainCopyChange={(value) => {
           setKakaoBatchMainCopy(value);
-          setKakaoBatchMainCopyCustomized(true);
         }}
+        onApplyChanges={rebuildKakaoBatchPreview}
+        previewBusy={kakaoBatchPreviewBusy}
+        previewAssetIndex={kakaoBatchPreviewAssetIndex}
+        onPreviewAssetChange={setKakaoBatchPreviewAssetIndex}
       />
     )}
 
@@ -3552,7 +4481,14 @@ export function CreateImageView({
       />
     )}
 
-    {/* 鈹€鈹€ Inpainting canvas modal 鈹€鈹€ */}
+    {themeCreatePreviewFile && (
+      <ThemeDraftPreviewModal
+        file={themeCreatePreviewFile}
+        onClose={() => setThemeCreatePreviewFile(null)}
+      />
+    )}
+
+    {/* Inpainting canvas modal */}
     {previewState && previewState.assets[previewState.index] && (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6">
         <div className="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#07111F] shadow-2xl">
@@ -3581,33 +4517,6 @@ export function CreateImageView({
                   : previewState.assets[previewState.index].model}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setWorkingImageFromAsset(previewState.assets[previewState.index]);
-                setPreviewState(null);
-              }}
-              className="rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-white hover:opacity-85"
-            >
-              Use as Working Image
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const asset = previewState.assets[previewState.index];
-                setEditTarget({
-                  assetId: asset.id,
-                  url: asset.url,
-                  width: asset.width ?? 1024,
-                  height: asset.height ?? 1024,
-                  theme: asset.theme,
-                });
-                setPreviewState(null);
-              }}
-              className="rounded-xl border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
-            >
-              Mask Edit
-            </button>
             {previewState.assets[previewState.index].type !== "gif" && (
               <button
                 type="button"
@@ -3673,20 +4582,6 @@ export function CreateImageView({
       </div>
     )}
 
-    {editTarget && (
-      <InpaintingCanvas
-        imageUrl={editTarget.url}
-        assetId={editTarget.assetId}
-        naturalWidth={editTarget.width}
-        naturalHeight={editTarget.height}
-        onClose={() => setEditTarget(null)}
-        onSubmit={handleEditSubmit}
-        submitting={editSubmitting}
-      />
-    )}
     </>
   );
 }
-
-
-
