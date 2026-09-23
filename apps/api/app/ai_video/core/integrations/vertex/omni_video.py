@@ -55,7 +55,11 @@ class VertexOmniVideoApiAdapter:
 
         response_format: dict[str, str] = {
             "type": "video",
-            "delivery": "uri",
+            # The URI delivery mode requires a separate output gcs_uri.  This
+            # adapter instead receives the bytes inline and hands them to the
+            # existing private Linglong asset-persistence flow, which stores
+            # the finished video in the deployment's configured GCS bucket.
+            "delivery": "inline",
             "aspect_ratio": inp.ratio,
             "duration": f"{inp.seconds}s",
         }

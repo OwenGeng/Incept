@@ -80,7 +80,7 @@ async def test_gemini_omni_text_video_uses_global_interactions(monkeypatch: pyte
         assert payload["input"] == [{"type": "text", "text": "a flying linglonglab"}]
         assert payload["response_format"][0] == {
             "type": "video",
-            "delivery": "uri",
+            "delivery": "inline",
             "aspect_ratio": "16:9",
             "duration": "6s",
             "resolution": "1080p",
