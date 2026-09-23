@@ -1,4 +1,4 @@
-"""Vertex AI image adapter backed by the existing google-genai ADC contract."""
+"""Gemini Enterprise Agent Platform image adapter backed by ADC."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from app.ai_video.core.contracts.provider import ProviderConfig
 
 
 class VertexImageApiAdapter:
-    """Generate still images without treating Vertex as an OpenAI-compatible API."""
+    """Generate still images through the configured Google Enterprise endpoint."""
 
     async def generate(
         self,
@@ -36,23 +36,37 @@ class VertexImageApiAdapter:
         except ImportError as exc:  # pragma: no cover - deployment dependency check
             raise RuntimeError("google-genai must be installed to enable Vertex AI generation") from exc
 
-        client = genai.Client(vertexai=True, project=cfg.project_id, location=cfg.location)
+        # gemini-3.1-flash-image is an Enterprise Agent Platform Gemini model,
+        # not an Imagen publisher model.  It must use generate_content with an
+        # IMAGE response modality.  Calling generate_images instead targets the
+        # Vertex publisher-model path and returns a misleading model-not-found
+        # error even when the configured model ID and location are valid.
+        client = genai.Client(enterprise=True, project=cfg.project_id, location=cfg.location)
 
         def _call() -> list[ImageItem]:
-            response = client.models.generate_images(
+            response = client.models.generate_content(
                 model=inp.model,
-                prompt=inp.prompt[:4000],
-                config=genai_types.GenerateImagesConfig(
-                    number_of_images=min(inp.n, 4),
-                    output_mime_type="image/png",
+                contents=inp.prompt[:4000],
+                config=genai_types.GenerateContentConfig(
+                    # The model supports one generated image per request.  The
+                    # public contract permits n > 1 for providers that support
+                    # it, but Enterprise image generation currently returns a
+                    # single candidate per request.
+                    candidateCount=1,
+                    responseModalities=[
+                        genai_types.Modality.TEXT,
+                        genai_types.Modality.IMAGE,
+                    ],
                 ),
             )
             items: list[ImageItem] = []
-            for generated in response.generated_images or []:
-                image = getattr(generated, "image", None)
-                raw = getattr(image, "image_bytes", None) if image is not None else None
-                if raw:
-                    items.append(ImageItem(b64_json=base64.b64encode(raw).decode("ascii")))
+            for candidate in getattr(response, "candidates", None) or []:
+                content = getattr(candidate, "content", None)
+                for part in getattr(content, "parts", None) or []:
+                    inline_data = getattr(part, "inline_data", None)
+                    raw = getattr(inline_data, "data", None) if inline_data is not None else None
+                    if raw:
+                        items.append(ImageItem(b64_json=base64.b64encode(raw).decode("ascii")))
             return items
 
         items = await asyncio.to_thread(_call)

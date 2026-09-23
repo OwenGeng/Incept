@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import ModuleType, SimpleNamespace
 
 import httpx
 import pytest
 
 from app.ai_video.core.integrations.openai.images import OpenAIImageApiAdapter
+from app.ai_video.core.integrations.vertex.images import VertexImageApiAdapter
 from app.ai_video.core.contracts.image_generation import ImageGenerationInput, InputImageRef
 from app.ai_video.core.contracts.provider import ProviderConfig
 from app.ai_video.core.integrations.image_capabilities import (
@@ -133,3 +136,68 @@ async def test_openai_image_adapter_rejects_unsupported_watermark(monkeypatch: p
         assert "watermark is not supported" in str(exc_info.value)
     finally:
         clear_image_model_capability_overrides(provider="openai")
+
+
+@pytest.mark.asyncio
+async def test_vertex_image_adapter_uses_enterprise_generate_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enterprise Gemini image models must not be routed to generate_images."""
+
+    captured: dict[str, object] = {}
+
+    class FakeModels:
+        def generate_content(self, **kwargs: object) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[SimpleNamespace(inline_data=SimpleNamespace(data=b"image-bytes"))]
+                        )
+                    )
+                ]
+            )
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured["client_kwargs"] = kwargs
+            self.models = FakeModels()
+
+    class FakeConfig:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    fake_genai = ModuleType("google.genai")
+    fake_genai.Client = FakeClient  # type: ignore[attr-defined]
+    fake_types = ModuleType("google.genai.types")
+    fake_types.GenerateContentConfig = FakeConfig  # type: ignore[attr-defined]
+    fake_types.Modality = SimpleNamespace(TEXT="TEXT", IMAGE="IMAGE")  # type: ignore[attr-defined]
+    fake_genai.types = fake_types  # type: ignore[attr-defined]
+
+    import google
+
+    monkeypatch.setattr(google, "genai", fake_genai, raising=False)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_types)
+
+    result = await VertexImageApiAdapter().generate(
+        cfg=ProviderConfig(
+            provider="vertex",
+            api_key="",
+            project_id="example-project",
+            location="global",
+        ),
+        inp=ImageGenerationInput(prompt="A bright product photo", model="gemini-3.1-flash-image"),
+        timeout_s=30.0,
+    )
+
+    assert captured["client_kwargs"] == {
+        "enterprise": True,
+        "project": "example-project",
+        "location": "global",
+    }
+    assert captured["model"] == "gemini-3.1-flash-image"
+    assert captured["contents"] == "A bright product photo"
+    config = captured["config"]
+    assert isinstance(config, FakeConfig)
+    assert config.kwargs["responseModalities"] == ["TEXT", "IMAGE"]
+    assert result.images[0].b64_json == "aW1hZ2UtYnl0ZXM="
