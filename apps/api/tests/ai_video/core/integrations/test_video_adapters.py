@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import ModuleType, SimpleNamespace
 
 import httpx
 import pytest
@@ -10,6 +12,7 @@ from pydantic import ValidationError
 
 from app.ai_video.core.integrations.openai.video import OpenAIVideoApiAdapter
 from app.ai_video.core.integrations.vertex.omni_video import VertexOmniVideoApiAdapter
+from app.ai_video.core.integrations.vertex.video import VertexVideoApiAdapter
 from app.ai_video.core.contracts.provider import ProviderConfig
 from app.ai_video.core.contracts.video_generation import VideoGenerationInput
 
@@ -172,3 +175,86 @@ async def test_gemini_omni_uses_verified_gcs_reference_media(monkeypatch: pytest
         timeout_s=30.0,
     )
     assert result.provider_task_id == "interaction-reference"
+
+
+@pytest.mark.asyncio
+async def test_veo_downloads_and_removes_transient_gcs_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Veo writes to the configured bucket; the adapter returns portable bytes."""
+
+    captured: dict[str, object] = {}
+    fetched: list[str] = []
+    removed: list[str] = []
+
+    class FakeModels:
+        def generate_videos(self, **kwargs: object) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                done=True,
+                name="operations/veo-test",
+                response=SimpleNamespace(
+                    generated_videos=[SimpleNamespace(video=SimpleNamespace(uri="gs://test-bucket/staged/video.mp4"))]
+                ),
+            )
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured["client_kwargs"] = kwargs
+            self.models = FakeModels()
+            self.operations = SimpleNamespace()
+
+    class FakeConfig:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeImage:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    fake_genai = ModuleType("google.genai")
+    fake_genai.Client = FakeClient  # type: ignore[attr-defined]
+    fake_types = ModuleType("google.genai.types")
+    fake_types.GenerateVideosConfig = FakeConfig  # type: ignore[attr-defined]
+    fake_types.Image = FakeImage  # type: ignore[attr-defined]
+    fake_genai.types = fake_types  # type: ignore[attr-defined]
+    import google
+
+    monkeypatch.setattr(google, "genai", fake_genai, raising=False)
+    monkeypatch.setitem(sys.modules, "google.genai", fake_genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", fake_types)
+    monkeypatch.setattr("app.ai_video.core.integrations.vertex.video.gcs_storage.enabled", lambda: True)
+    monkeypatch.setattr(
+        "app.ai_video.core.integrations.vertex.video.gcs_storage.object_uri",
+        lambda key: f"gs://test-bucket/staged/{key}",
+    )
+
+    async def download(*, uri: str) -> bytes:
+        fetched.append(uri)
+        return b"video-bytes"
+
+    async def delete(*, uri: str) -> None:
+        removed.append(uri)
+
+    monkeypatch.setattr("app.ai_video.core.integrations.vertex.video.gcs_storage.download_owned_uri", download)
+    monkeypatch.setattr("app.ai_video.core.integrations.vertex.video.gcs_storage.delete_owned_uri", delete)
+
+    result = await VertexVideoApiAdapter().generate(
+        cfg=ProviderConfig(provider="vertex", api_key="", project_id="test-project", location="global"),
+        inp=VideoGenerationInput(model="veo-3.1-fast-generate-001", prompt="A product video", ratio="16:9"),
+        poll_interval_s=1,
+        timeout_s=30,
+    )
+
+    assert captured["client_kwargs"] == {
+        "enterprise": True,
+        "project": "test-project",
+        "location": "global",
+    }
+    assert captured["model"] == "veo-3.1-fast-generate-001"
+    config = captured["config"]
+    assert isinstance(config, FakeConfig)
+    assert config.kwargs["numberOfVideos"] == 1
+    assert config.kwargs["aspectRatio"] == "16:9"
+    assert str(config.kwargs["outputGcsUri"]).startswith("gs://test-bucket/staged/provider-outputs/veo/")
+    assert fetched == ["gs://test-bucket/staged/video.mp4"]
+    assert removed == fetched
+    assert result.url == "data:video/mp4;base64,dmlkZW8tYnl0ZXM="

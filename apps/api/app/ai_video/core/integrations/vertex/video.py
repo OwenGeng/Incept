@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import uuid
 
+from app.ai_video.core import gcs_storage
 from app.ai_video.core.contracts.provider import ProviderConfig
 from app.ai_video.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
 
@@ -55,21 +57,32 @@ class VertexVideoApiAdapter:
         except ImportError as exc:  # pragma: no cover - deployment dependency check
             raise RuntimeError("google-genai must be installed to enable Vertex AI generation") from exc
 
-        client = genai.Client(vertexai=True, project=cfg.project_id, location=cfg.location)
-        config_kwargs: dict[str, object] = {"number_of_videos": 1, "aspect_ratio": inp.ratio}
+        if not gcs_storage.enabled():
+            raise RuntimeError("Veo video generation requires the configured GCS asset bucket")
+
+        # Veo writes its long-running result to Cloud Storage.  Keep this
+        # provider staging object in a unique private prefix, download it, and
+        # let the established FileItem flow persist the final asset normally.
+        output_gcs_uri = gcs_storage.object_uri(f"provider-outputs/veo/{uuid.uuid4().hex}/")
+        client = genai.Client(enterprise=True, project=cfg.project_id, location=cfg.location)
+        config_kwargs: dict[str, object] = {
+            "numberOfVideos": 1,
+            "aspectRatio": inp.ratio,
+            "outputGcsUri": output_gcs_uri,
+        }
         if inp.seconds is not None:
-            config_kwargs["duration_seconds"] = inp.seconds
+            config_kwargs["durationSeconds"] = inp.seconds
         config = genai_types.GenerateVideosConfig(**config_kwargs)
         kwargs: dict[str, object] = {"model": inp.model, "prompt": inp.prompt or "", "config": config}
 
         first = _decode_data_image(inp.first_frame_base64 or inp.key_frame_base64)
         last = _decode_data_image(inp.last_frame_base64)
         if first:
-            kwargs["image"] = genai_types.Image(image_bytes=first[0], mime_type=first[1])
+            kwargs["image"] = genai_types.Image(imageBytes=first[0], mimeType=first[1])
         if last:
             # This is the SDK's documented first/last-frame configuration shape;
             # supported combinations are still enforced by the selected model.
-            config.last_frame = genai_types.Image(image_bytes=last[0], mime_type=last[1])
+            config.lastFrame = genai_types.Image(imageBytes=last[0], mimeType=last[1])
 
         operation = await asyncio.to_thread(client.models.generate_videos, **kwargs)
         waited = 0.0
@@ -86,9 +99,19 @@ class VertexVideoApiAdapter:
         if not generated:
             raise RuntimeError("Vertex video operation completed without generated videos")
         video = getattr(generated[0], "video", None)
-        content = getattr(video, "video_bytes", None) if video is not None else None
+        content = (
+            getattr(video, "videoBytes", None) or getattr(video, "video_bytes", None)
+            if video is not None
+            else None
+        )
+        output_uri = getattr(video, "uri", None) if video is not None else None
+        if not content and output_uri:
+            try:
+                content = await gcs_storage.download_owned_uri(uri=str(output_uri))
+            finally:
+                await gcs_storage.delete_owned_uri(uri=str(output_uri))
         if not content:
-            raise RuntimeError("Vertex video output has no inline bytes; configure durable output storage before enabling this model")
+            raise RuntimeError("Veo video output contained neither inline bytes nor a GCS URI")
         return VideoGenerationResult(
             url=f"data:video/{getattr(video, 'mime_type', None) or 'mp4'};base64,{base64.b64encode(content).decode('ascii')}",
             provider="vertex",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, BinaryIO
+from urllib.parse import unquote, urlparse
 
 from anyio import to_thread
 
@@ -42,6 +43,30 @@ def object_uri(key: str) -> str:
     if not enabled():
         raise RuntimeError("Gemini Omni reference media requires GCS_BUCKET_NAME")
     return f"gs://{settings.gcs_bucket_name}/{_object_key(key)}"
+
+
+def _parse_owned_uri(uri: str) -> tuple[str, str]:
+    """Validate a GCS URI refers to this deployment's configured bucket."""
+    parsed = urlparse(uri)
+    bucket = parsed.netloc.strip()
+    object_key = unquote(parsed.path.lstrip("/"))
+    if parsed.scheme != "gs" or not bucket or not object_key:
+        raise ValueError("Expected a complete gs://bucket/object URI")
+    if bucket != settings.gcs_bucket_name:
+        raise ValueError("GCS URI must use the configured AI Video bucket")
+    return bucket, object_key
+
+
+async def download_owned_uri(*, uri: str) -> bytes:
+    """Download a provider-generated object from the configured private bucket."""
+    bucket, object_key = _parse_owned_uri(uri)
+    return await to_thread.run_sync(lambda: _client().bucket(bucket).blob(object_key).download_as_bytes())
+
+
+async def delete_owned_uri(*, uri: str) -> None:
+    """Delete a transient provider-generated object after its bytes are persisted."""
+    bucket, object_key = _parse_owned_uri(uri)
+    await to_thread.run_sync(lambda: _client().bucket(bucket).blob(object_key).delete())
 
 
 def _external_url(key: str) -> str:
