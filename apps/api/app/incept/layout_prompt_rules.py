@@ -39,7 +39,7 @@ def layout_family_for_size(size: str) -> str:
     if ratio >= 3.2:
         return "narrow_banner"
 
-    # 1200x628, 1200x600, 640x360
+    # 1200x628, 1200x600, 640x360, 1920x1080
     if ratio >= 1.45:
         return "wide_landscape"
 
@@ -47,7 +47,7 @@ def layout_family_for_size(size: str) -> str:
     if ratio >= 0.8:
         return "compact_square"
 
-    # 320x480, 360x640
+    # 320x480, 360x640, 1080x1920
     return "portrait"
 
 
@@ -80,7 +80,7 @@ _RULES: dict[str, LayoutRule] = {
     ),
     "portrait": LayoutRule(
         family="portrait",
-        summary="Vertical mobile creative, such as 320x480 or 360x640.",
+        summary="Vertical mobile creative, such as 320x480, 360x640, or 1080x1920.",
         logo_rule=(
             "Logo scale: target logo width about 32-45% of canvas width, height under 12% of canvas height. "
             "Place it near the top with clear padding. The logo must be fully visible and never touch or cross the canvas edge."
@@ -102,7 +102,7 @@ _RULES: dict[str, LayoutRule] = {
     ),
     "wide_landscape": LayoutRule(
         family="wide_landscape",
-        summary="Wide landscape ad, such as 1200x628, 1200x600, or 640x360.",
+        summary="Wide landscape ad, such as 1200x628, 1200x600, 640x360, or 1920x1080.",
         logo_rule=(
             "Logo scale: target logo width about 16-26% of canvas width and height under 20% of canvas height. "
             "Place it in the upper-left, upper-center, or a brand-safe corner."

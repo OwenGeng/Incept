@@ -3,8 +3,9 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Role(str, Enum):
@@ -81,6 +82,9 @@ class VideoProductionStage(str, Enum):
     design = "design"
     storyboard = "storyboard"
     generate = "generate"
+    # Retained only so older stored records can be read; normalization moves
+    # them to Edit because audio is no longer a separate production stage.
+    audio = "audio"
     edit = "edit"
     deliver = "deliver"
 
@@ -89,6 +93,8 @@ class VideoProductionAssetLink(BaseModel):
     asset_id: str
     role: Literal["reference", "brand", "character", "product", "logo", "background", "audio", "generated"] = "reference"
     label: str = ""
+    source_note: str = ""
+    rights_note: str = ""
 
 
 class VideoProductionBeat(BaseModel):
@@ -98,12 +104,37 @@ class VideoProductionBeat(BaseModel):
     purpose: str = ""
 
 
+class VideoProductionDialogueLine(BaseModel):
+    """One exact spoken line in a script scene.
+
+    Keeping dialogue structured prevents the video prompt from having to guess
+    who speaks, which language they use, or whether the speaker is visible.
+    """
+
+    speaker: str = ""
+    text: str = ""
+    on_camera: bool = True
+    voice_description: str = ""
+    delivery: str = ""
+
+
 class VideoProductionScene(BaseModel):
     id: str
     title: str
     setting: str = ""
     action: str = ""
     dialogue_or_copy: str = ""
+    spoken_language: str = ""
+    dialogue: list[VideoProductionDialogueLine] = Field(default_factory=list)
+    on_screen_text: list[str] = Field(default_factory=list)
+    camera_direction: str = ""
+    sound_direction: str = ""
+    continuity_notes: str = ""
+    restrictions: list[str] = Field(default_factory=list)
+    character_keys: list[str] = Field(default_factory=list)
+    environment_key: str = ""
+    prop_keys: list[str] = Field(default_factory=list)
+    ui_keys: list[str] = Field(default_factory=list)
 
 
 class VideoProductionScript(BaseModel):
@@ -119,12 +150,23 @@ class VideoProductionScript(BaseModel):
     asset_manifest: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     raw_script: str = ""
+    # The editable reading copy and the structured scenes/beats must remain
+    # tied together.  Locking rejects a manually edited reading copy until the
+    # Screenwriter has explicitly restructured it into the durable plan.
+    structured_raw_script_hash: str = ""
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class VideoProductionCreativeDirection(BaseModel):
     status: Literal["draft", "approved"] = "draft"
+    # User-approved subset of the Strategist's proposed reusable visual states.
+    # Empty preserves legacy productions by treating every handoff row as active.
+    confirmed_pack_keys: list[str] = Field(default_factory=list)
     reference_summary: str = ""
+    # A durable, evidence-only record produced before strategy.  Keeping it
+    # separate from the adaptation prevents a later role from silently
+    # replacing what was actually present in the reference video.
+    reference_analysis: dict[str, Any] = Field(default_factory=dict)
     commercial_type: str = ""
     strengths_to_adapt: list[str] = Field(default_factory=list)
     story_structure: list[str] = Field(default_factory=list)
@@ -138,6 +180,14 @@ class VideoProductionCreativeDirection(BaseModel):
     # video. Design extracts these as stills instead of sending the full video
     # to the image model.
     reference_frame_plan: list[dict[str, Any]] = Field(default_factory=list)
+    # Contract handed to the Production Designer. It identifies which visual
+    # state each future Pack needs and whether it needs a brand asset, a
+    # reference-frame briefing, or can be generated from an original prompt.
+    design_handoff: list[dict[str, Any]] = Field(default_factory=list)
+    # Strategist's explicit audit of visual entities in the story. The handoff
+    # is reconciled against this inventory before it reaches Design.
+    visual_inventory: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    output_language: str = ""
     analyzed_asset_ids: list[str] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -154,6 +204,18 @@ class VideoProductionDesignSheet(BaseModel):
     # later replaces these stable scene links with concrete shot IDs.
     scene_ids: list[str] = Field(default_factory=list)
     reason_for_new_pack: str = ""
+    # A manually created Pack is an exact user-authored generation request.
+    # Its prompt must never be rewritten or augmented by Pack-type rules.
+    user_authored: bool = False
+    # Asset Packs lock reusable ingredients. Scene compositions assemble those
+    # approved ingredients into a single storyboard-ready visual candidate.
+    design_mode: Literal["asset", "scene"] = "asset"
+    # Scene compositions normally inherit the production ratio, but may be
+    # explicitly framed for a different deliverable.
+    output_aspect_ratio: Literal["project", "16:9", "9:16"] = "project"
+    handoff_key: str = ""
+    source_mode: Literal["prompt_only", "brand_asset", "reference_frame"] = "prompt_only"
+    source_notes: str = ""
     prompt: str = ""
     crop_plan: list[str] = Field(default_factory=list)
     asset_ids: list[str] = Field(default_factory=list)
@@ -170,6 +232,10 @@ class VideoProductionDesignSheet(BaseModel):
     approved_asset_ids: list[str] = Field(default_factory=list)
     job_id: str | None = None
     status: Literal["draft", "generating", "ready", "failed", "approved"] = "draft"
+    # A user-actionable explanation for a terminal generation failure. Kept on
+    # the pack (rather than only the transient Job) so the Design board remains
+    # diagnosable after a refresh or when reopening a production.
+    failure_reason: str | None = None
 
 
 class VideoProductionDesignBible(BaseModel):
@@ -199,6 +265,21 @@ class VideoProductionShot(BaseModel):
     title: str
     start_seconds: float = 0
     duration_seconds: float = 4
+    # Veo supports fixed output lengths. Keep this separate from the scripted
+    # timeline duration so a 5-second story beat can render as a 6-second
+    # video without rewriting the approved Working Script.
+    generation_duration_seconds: Literal[4, 6, 8] | None = None
+    # Generate two alternatives by default. Video generation is probabilistic;
+    # retaining alternatives is materially more useful than retrying blindly.
+    generation_variants: Literal[1, 2] = 2
+    # The generation mode is an explicit production decision, not something
+    # inferred only at request time.  This lets the UI explain why an end
+    # frame or a prior take is required before a costly render is submitted.
+    generation_mode: Literal["image_to_video", "first_last_frame", "extend"] = "image_to_video"
+    # Extend uses an already generated Take as the provider input. It is kept
+    # separate from selected_video_asset_id so a user can compare/keep a cut
+    # while continuing a different alternative.
+    extend_source_video_asset_id: str | None = None
     purpose: str = ""
     visual: str = ""
     action: str = ""
@@ -223,9 +304,49 @@ class VideoProductionShot(BaseModel):
     transition_in_asset_id: str | None = None
     transition_out_asset_id: str | None = None
     keyframe_asset_id: str | None = None
+    # Optional end state for a shot. It is reviewable in Storyboard even when
+    # the selected video provider only consumes the start frame today.
+    end_keyframe_asset_id: str | None = None
+    # A frame extracted from a usable earlier take and promoted to this
+    # shot's start frame. It preserves the lineage needed to diagnose and
+    # reproduce cross-shot continuity decisions.
+    bridge_source_video_asset_id: str | None = None
+    bridge_timestamp_seconds: float | None = Field(default=None, ge=0)
+    # The Director inspects selected first/last scene images before Veo runs.
+    # It can flag a pair that needs a bridging frame rather than encouraging a
+    # model to hide an impossible move with a hard cut.
+    first_last_frame_status: Literal["not_set", "ready", "needs_intermediate"] = "not_set"
+    first_last_frame_note: str = ""
+    # A structured, reviewable preflight.  The Director can be uncertain, but
+    # it must never silently promise that two unrelated images will interpolate
+    # cleanly.  `recommended_strategy` maps directly to a user-visible editing
+    # choice instead of a free-form canvas edge.
+    motion_feasibility: Literal["not_checked", "safe", "review", "blocked"] = "not_checked"
+    recommended_transition_strategy: Literal["cut", "match_cut", "continuous", "bridge"] = "cut"
+    motion_risk_reasons: list[str] = Field(default_factory=list)
+    # Audio timing is a planning aid, not a claim that a video model will
+    # lip-sync.  It lets the editor choose a plausible Take length before
+    # generation and preserves the result for a later TTS/lip-sync tool.
+    estimated_dialogue_seconds: float | None = Field(default=None, ge=0)
+    estimated_audio_seconds: float | None = Field(default=None, ge=0)
     keyframe_job_id: str | None = None
     video_asset_ids: list[str] = Field(default_factory=list)
+    # The user-owned take choice used by the Edit timeline. Regeneration keeps
+    # prior takes available instead of silently replacing the cut.
+    selected_video_asset_id: str | None = None
+    # A storyboard frame may be intentionally excluded from a particular cut
+    # without deleting its generated takes or losing its history.
+    include_in_edit: bool = True
+    # Non-destructive source trim offsets used by the Edit timeline. `None`
+    # means use the natural end of the chosen take.
+    trim_in_seconds: float = Field(default=0, ge=0)
+    trim_out_seconds: float | None = Field(default=None, gt=0)
     video_job_id: str | None = None
+    # Takes are immutable historical outputs. A source edit only marks them
+    # stale; it never removes an expensive generation or the user's cut.
+    source_signature: str = ""
+    take_source_signature: str = ""
+    take_outdated: bool = False
     status: Literal["draft", "approved", "generating", "ready", "failed"] = "draft"
 
 
@@ -252,10 +373,164 @@ class VideoProductionAudioPlan(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class VideoProductionEditOverlay(BaseModel):
+    """A deterministic post-generation layer; never ask Veo to draw it."""
+
+    id: str = Field(default_factory=lambda: f"overlay_{uuid4().hex[:10]}")
+    kind: Literal["logo", "store_badges", "subtitle", "image"] = "image"
+    asset_id: str | None = None
+    text: str = ""
+    start_seconds: float = Field(default=0, ge=0)
+    end_seconds: float | None = Field(default=None, gt=0)
+    position: Literal["top_left", "top_right", "bottom_center", "center"] = "bottom_center"
+
+
+class VideoProductionTakeReview(BaseModel):
+    take_id: str
+    shot_id: str
+    score: int = Field(default=0, ge=0, le=100)
+    verdict: Literal["use", "trim", "regenerate", "reject"] = "trim"
+    reasons: list[str] = Field(default_factory=list)
+    flags: list[Literal["unreadable_text", "brand_mismatch", "identity_drift", "hard_cut", "bad_motion", "audio_issue"]] = Field(default_factory=list)
+    suggested_trim_in_seconds: float = Field(default=0, ge=0)
+    suggested_trim_out_seconds: float | None = Field(default=None, gt=0)
+
+
+class VideoProductionEditPlan(BaseModel):
+    overlays: list[VideoProductionEditOverlay] = Field(default_factory=list)
+    take_reviews: list[VideoProductionTakeReview] = Field(default_factory=list)
+    review_status: Literal["draft", "reviewing", "ready", "failed"] = "draft"
+    review_summary: str = ""
+    reviewed_at: datetime | None = None
+    # Render-time checks are deterministic guardrails.  They make the final
+    # edit reviewable without pretending that a model judgement is a hard
+    # export decision.
+    qc_status: Literal["not_run", "pass", "warning"] = "not_run"
+    qc_issues: list[str] = Field(default_factory=list)
+    final_duration_seconds: float | None = None
+    # Portable, user-editable representation of the non-destructive timeline.
+    # UI controls remain the easy path; this is for precise or repeatable cuts.
+    timeline_json: dict[str, object] = Field(default_factory=dict)
+
+
 class VideoProductionConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
     text: str
+    # Attachments belong to the turn as well as the project gallery, so the
+    # Copilot can distinguish "these images" from all historical assets.
+    asset_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VideoProductionConfirmation(BaseModel):
+    """A proposed high-impact Copilot action waiting for an explicit user yes."""
+
+    id: str = Field(default_factory=lambda: f"confirm_{uuid4().hex[:10]}")
+    question: str = ""
+    reason: str = ""
+    proposed_action: str = ""
+    stage: str = "direction"
+    choices: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VideoProductionCanvasState(BaseModel):
+    """Presentation-only state for the constrained production canvas.
+
+    The actual production graph is always derived from Project State. Canvas
+    coordinates and collapsed groups can be saved freely, but arbitrary graph
+    edges are intentionally not stored here.
+    """
+
+    node_positions: dict[str, dict[str, float]] = Field(default_factory=dict)
+    collapsed_groups: list[str] = Field(default_factory=list)
+    selected_node_id: str | None = None
+
+
+class VideoProductionRevision(BaseModel):
+    revision: int
+    label: str = ""
+    summary: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VideoProductionScriptRevision(BaseModel):
+    """A bounded, readable checkpoint of a reviewed working script."""
+
+    revision_id: str = Field(default_factory=lambda: f"vsr_{uuid4().hex}")
+    revision: int = Field(ge=1)
+    status: Literal["draft", "locked"]
+    reason: str
+    actor_user_id: str = "system"
+    raw_script: str
+    scene_count: int = Field(ge=0)
+    beat_count: int = Field(ge=0)
+    script: VideoProductionScript | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VideoProductionEvent(BaseModel):
+    """A compact, durable activity record for one production revision.
+
+    The event is deliberately a factual state-transition receipt, not an
+    unbounded copy of prompts or model output. Detailed production state stays
+    in the project record; this log lets an operator understand when a saved
+    transition occurred after refresh or on another instance.
+    """
+
+    event_id: str
+    production_id: str
+    workspace_id: str
+    event_type: str
+    summary: str
+    state_revision: int = Field(ge=1)
+    actor_user_id: str = "system"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VideoProductionModelSelection(BaseModel):
+    """One server-validated provider/model choice owned by a production."""
+
+    provider: str = ""
+    model: str = ""
+
+
+class VideoProductionProviderSelection(BaseModel):
+    """Project-scoped model choices for each independently billable operation."""
+
+    text: VideoProductionModelSelection = Field(default_factory=VideoProductionModelSelection)
+    image: VideoProductionModelSelection = Field(default_factory=VideoProductionModelSelection)
+    video: VideoProductionModelSelection = Field(default_factory=VideoProductionModelSelection)
+    audio: VideoProductionModelSelection = Field(default_factory=VideoProductionModelSelection)
+
+
+class VideoProductionProviderOption(BaseModel):
+    provider: str
+    model: str
+    label: str
+
+
+class VideoProductionProviderCapabilities(BaseModel):
+    text: list[VideoProductionProviderOption] = Field(default_factory=list)
+    image: list[VideoProductionProviderOption] = Field(default_factory=list)
+    video: list[VideoProductionProviderOption] = Field(default_factory=list)
+    audio: list[VideoProductionProviderOption] = Field(default_factory=list)
+
+
+class VideoProductionSetup(BaseModel):
+    """User-confirmed market and creative constraints for one video."""
+
+    target_market: str = ""
+    target_audience: str = ""
+    video_type: str = ""
+    visual_style: str = ""
+    spoken_language: str = ""
+    subtitle_language: str = ""
+    platform: str = ""
+    conversion_goal: str = ""
+    provider_selection: VideoProductionProviderSelection = Field(default_factory=VideoProductionProviderSelection)
+    confirmed: bool = False
 
 
 class VideoProduction(BaseModel):
@@ -268,12 +543,32 @@ class VideoProduction(BaseModel):
     target_seconds: Literal[15, 30, 60] = 30
     aspect_ratio: Literal["16:9", "9:16"] = "16:9"
     resolution: Literal["720p", "1080p"] = "720p"
+    # Revision and branch metadata make major upstream experiments safe. A
+    # branch reuses existing assets but owns its own Project State thereafter.
+    state_revision: int = 1
+    parent_production_id: str | None = None
+    branch_label: str = ""
+    archived_at: datetime | None = None
+    archived_by: str | None = None
+    revisions: list[VideoProductionRevision] = Field(default_factory=list)
+    script_revisions: list[VideoProductionScriptRevision] = Field(default_factory=list)
+    canvas_state: VideoProductionCanvasState = Field(default_factory=VideoProductionCanvasState)
+    pending_confirmation: VideoProductionConfirmation | None = None
+    video_setup: VideoProductionSetup = Field(default_factory=VideoProductionSetup)
     reference_asset_ids: list[str] = Field(default_factory=list)
     asset_links: list[VideoProductionAssetLink] = Field(default_factory=list)
+    # Contract-driven pipeline state. Dict storage keeps existing productions
+    # readable while the typed contracts validate each agent handoff.
+    production_contract: dict[str, Any] = Field(default_factory=dict)
+    creative_contract: dict[str, Any] = Field(default_factory=dict)
+    asset_contract: dict[str, Any] = Field(default_factory=dict)
     creative_direction: VideoProductionCreativeDirection = Field(default_factory=VideoProductionCreativeDirection)
     script: VideoProductionScript = Field(default_factory=VideoProductionScript)
     design_bible: VideoProductionDesignBible = Field(default_factory=VideoProductionDesignBible)
     shots: list[VideoProductionShot] = Field(default_factory=list)
+    storyboard_approved_at: datetime | None = None
+    storyboard_approved_revision: int | None = None
+    edit_plan: VideoProductionEditPlan = Field(default_factory=VideoProductionEditPlan)
     audio_plan: VideoProductionAudioPlan = Field(default_factory=VideoProductionAudioPlan)
     conversation: list[VideoProductionConversationMessage] = Field(default_factory=list)
     final_asset_id: str | None = None
@@ -294,6 +589,8 @@ class VideoProductionCreateRequest(BaseModel):
     target_seconds: Literal[15, 30, 60] = 30
     aspect_ratio: Literal["16:9", "9:16"] = "16:9"
     resolution: Literal["720p", "1080p"] = "720p"
+    brief: str = ""
+    video_setup: VideoProductionSetup | None = None
 
 
 class VideoProductionUpdateRequest(BaseModel):
@@ -303,26 +600,89 @@ class VideoProductionUpdateRequest(BaseModel):
     target_seconds: Literal[15, 30, 60] | None = None
     aspect_ratio: Literal["16:9", "9:16"] | None = None
     resolution: Literal["720p", "1080p"] | None = None
+    video_setup: VideoProductionSetup | None = None
     reference_asset_ids: list[str] | None = None
     asset_links: list[VideoProductionAssetLink] | None = None
     creative_direction: VideoProductionCreativeDirection | None = None
     script: VideoProductionScript | None = None
     design_bible: VideoProductionDesignBible | None = None
     audio_plan: VideoProductionAudioPlan | None = None
+    edit_plan: VideoProductionEditPlan | None = None
+    canvas_state: VideoProductionCanvasState | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class VideoProductionAgentRequest(BaseModel):
     message: str = ""
+    shot_ids: list[str] = Field(default_factory=list)
+
+
+class VideoProductionCopilotRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=20_000)
+    asset_ids: list[str] = Field(default_factory=list, max_length=12)
+    stage: VideoProductionStage | None = None
+    confirm_action_id: str | None = None
+
+
+class VideoProductionCopilotResponse(BaseModel):
+    production: VideoProduction
+    needs_confirmation: bool = False
+    clarification_questions: list[str] = Field(default_factory=list)
+
+
+class PromptReviewRequest(BaseModel):
+    target_prompt: str = Field(min_length=1, max_length=100_000)
+    target_name: str = "Target Prompt"
+
+
+class PromptReviewResponse(BaseModel):
+    target_name: str
+    review: str
+    model: str
 
 
 class VideoProductionDesignSheetSelectionRequest(BaseModel):
     panel: int = Field(ge=0, le=3)
 
 
+class VideoProductionDesignSheetCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    asset_pack_type: Literal["character", "environment", "prop", "ui", "lighting", "transition"] = "environment"
+    purpose: str = ""
+    prompt: str = ""
+    source_asset_ids: list[str] = Field(default_factory=list)
+    scene_ids: list[str] = Field(default_factory=list)
+    design_mode: Literal["asset", "scene"] = "asset"
+    output_aspect_ratio: Literal["project", "16:9", "9:16"] = "project"
+
+
+class VideoProductionDesignSheetUpdateRequest(BaseModel):
+    title: str | None = None
+    asset_pack_type: Literal["character", "environment", "prop", "ui", "lighting", "transition"] | None = None
+    purpose: str | None = None
+    prompt: str | None = None
+    source_asset_ids: list[str] | None = None
+    scene_ids: list[str] | None = None
+    design_mode: Literal["asset", "scene"] | None = None
+    output_aspect_ratio: Literal["project", "16:9", "9:16"] | None = None
+
+
+class VideoProductionSceneReframeRequest(BaseModel):
+    """Extend an approved Scene image to a delivery aspect ratio without cropping it."""
+
+    source_asset_id: str = Field(min_length=1)
+    output_aspect_ratio: Literal["project", "16:9", "9:16"] = "project"
+
+
 class VideoProductionShotUpdateRequest(BaseModel):
+    scene_id: str | None = None
     title: str | None = None
     start_seconds: float | None = None
     duration_seconds: float | None = None
+    generation_duration_seconds: Literal[4, 6, 8] | None = None
+    generation_variants: Literal[1, 2] | None = None
+    generation_mode: Literal["image_to_video", "first_last_frame", "extend"] | None = None
+    extend_source_video_asset_id: str | None = None
     purpose: str | None = None
     visual: str | None = None
     action: str | None = None
@@ -342,10 +702,27 @@ class VideoProductionShotUpdateRequest(BaseModel):
     transition_in_asset_id: str | None = None
     transition_out_asset_id: str | None = None
     keyframe_asset_id: str | None = None
+    end_keyframe_asset_id: str | None = None
+    bridge_source_video_asset_id: str | None = None
+    bridge_timestamp_seconds: float | None = Field(default=None, ge=0)
+    first_last_frame_status: Literal["not_set", "ready", "needs_intermediate"] | None = None
+    first_last_frame_note: str | None = None
     keyframe_job_id: str | None = None
     video_asset_ids: list[str] | None = None
+    selected_video_asset_id: str | None = None
+    include_in_edit: bool | None = None
+    trim_in_seconds: float | None = Field(default=None, ge=0)
+    trim_out_seconds: float | None = Field(default=None, gt=0)
     video_job_id: str | None = None
     status: Literal["draft", "approved", "generating", "ready", "failed"] | None = None
+
+
+class VideoProductionShotCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    purpose: str = ""
+    visual: str = ""
+    action: str = ""
+    duration_seconds: float = Field(default=3.0, gt=0, le=12)
 
 
 class VideoProductionShotOrderRequest(BaseModel):
@@ -355,7 +732,15 @@ class VideoProductionShotOrderRequest(BaseModel):
 class VideoProductionShotRenderRequest(BaseModel):
     """Runs one controlled production step for a storyboard shot."""
 
-    variants: Literal[1, 2] = 1
+    variants: Literal[1, 2] = 2
+
+
+class VideoProductionBridgeFrameRequest(BaseModel):
+    """Promote a usable frame from one Take into the next shot's start frame."""
+
+    source_video_asset_id: str | None = None
+    timestamp_seconds: float = Field(ge=0)
+    target_shot_id: str | None = None
 
 
 class VideoProductionRenderRequest(BaseModel):
@@ -823,6 +1208,9 @@ class OutpaintRequest(BaseModel):
     session_id: str | None = None
     thread_id: str | None = None
     output_sizes: list[str] = Field(default_factory=list)
+    # Optional exact canvas used by Scene Builder's reframe action. The source
+    # pixels stay centered and untouched; only the new border is generated.
+    target_size: str | None = None
 
 
 # ── Background removal ────────────────────────────────────────────────────────
@@ -885,3 +1273,111 @@ class UsageEvent(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── GamingPlayable templates ─────────────────────────────────────────────────
+
+PlayableTemplateVisibility = Literal["private", "workspace", "community"]
+
+
+class PlayableProjectSaveRequest(BaseModel):
+    """Durable editable source for one playable project.
+
+    The schema is intentionally stored as JSON rather than re-modelled on the
+    API. The runtime owns the schema version and can evolve without making a
+    historical creator project unreadable.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    workspace_id: str = "wsp_q2"
+    project_id: str | None = None
+    title: str = Field(min_length=1, max_length=120)
+    schema_payload: dict[str, Any] = Field(alias="schema", serialization_alias="schema")
+    source_template_id: str | None = None
+
+
+class PlayableProject(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    project_id: str
+    workspace_id: str
+    owner_user_id: str
+    title: str
+    schema_payload: dict[str, Any] = Field(alias="schema", serialization_alias="schema")
+    source_template_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlayableTemplateCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    workspace_id: str = "wsp_q2"
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=600)
+    visibility: PlayableTemplateVisibility = "private"
+    category: str = Field(default="merge", min_length=1, max_length=64)
+    schema_payload: dict[str, Any] = Field(alias="schema", serialization_alias="schema")
+
+
+class PlayableTemplate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    template_id: str
+    workspace_id: str
+    owner_user_id: str
+    owner_name: str
+    title: str
+    description: str = ""
+    visibility: PlayableTemplateVisibility
+    category: str
+    version: int
+    schema_payload: dict[str, Any] = Field(alias="schema", serialization_alias="schema")
+    asset_policy: Literal["slots_only"] = "slots_only"
+    favorite_count: int = 0
+    fork_count: int = 0
+    is_favorited: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlayableTemplateForkRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=120)
+
+
+# ── GamingPlayable Copilot ───────────────────────────────────────────────────
+
+PlayableCopilotModel = Literal["gemini-3.8-flash", "gemini-3.1-pro-preview"]
+PlayableCopilotRole = Literal["user", "assistant"]
+
+
+class PlayableCopilotMessage(BaseModel):
+    id: str
+    role: PlayableCopilotRole
+    text: str = Field(max_length=6_000)
+    asset_ids: list[str] = Field(default_factory=list)
+    model: PlayableCopilotModel | None = None
+    created_at: datetime
+
+
+class PlayableCopilotSession(BaseModel):
+    session_id: str
+    workspace_id: str
+    owner_user_id: str
+    title: str
+    messages: list[PlayableCopilotMessage] = Field(default_factory=list)
+    proposal: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlayableCopilotMessageRequest(BaseModel):
+    workspace_id: str = "wsp_q2"
+    message: str = Field(min_length=1, max_length=12_000)
+    asset_ids: list[str] = Field(default_factory=list, max_length=6)
+    model: PlayableCopilotModel = "gemini-3.8-flash"
+
+
+class PlayableCopilotProjectRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=120)

@@ -14,9 +14,10 @@ export default async function StudioLayout({
     redirect("/sign-in");
   }
 
-  // Studio is for all Moloco users. Agency accounts are Scout-only.
+  // Studio is for all Moloco users. Agency accounts had Supply-only access;
+  // Supply has been retired from this app, so there is nowhere left for them to land.
   if (session?.user?.role === "agency") {
-    redirect("/supply-smb/no-sdk-no-ua/weekly-brief");
+    redirect("/unauthorized");
   }
 
   return (

@@ -32,8 +32,6 @@ import {
 } from "lucide-react";
 import type { AssetSummary, CreativeThreadSummary, InceptUser, JobSummary } from "@incept/shared";
 import { HomeView } from "./HomeView";
-import { CreateWorkbenchView } from "./CreateWorkbenchView";
-import { VideoProductionView } from "./VideoProductionView";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +48,7 @@ import {
   validateKakaoBizboardInputs,
 } from "@/lib/kakao-compositor";
 import type { AppView } from "./Sidebar";
-import { KakaoBatchModal } from "./CreateImageView";
+import { CreateImageView, KakaoBatchModal } from "./CreateImageView";
 import { UsageView } from "./UsageView";
 import { AppHeader } from "@/components/ui/app-header";
 
@@ -578,6 +576,7 @@ function LibraryView({
   activeWorkspaceId,
   contentScope,
   activeThreadId,
+  onResizeAssets,
 }: {
   activeView: AppView;
   liveAssets: AssetSummary[];
@@ -587,6 +586,7 @@ function LibraryView({
   activeWorkspaceId: string;
   contentScope: ContentScope;
   activeThreadId: string | null;
+  onResizeAssets: (assetIds: string[]) => void;
 }) {
   const [tab, setTab] = useState<"generated" | "assets">("generated");
   const [mediaFilter, setMediaFilter] = useState<"all" | "image" | "video" | "gif" | "report" | "playable">("all");
@@ -754,6 +754,10 @@ function LibraryView({
   }
 
   const selectedAssets = liveAssets.filter((asset) => selected.has(asset.id));
+  const selectedResizeEligibleAssets = useMemo(
+    () => selectedAssets.filter((asset) => asset.type === "image" && asset.url && !asset.url.includes("placeholder")),
+    [selectedAssets],
+  );
   const selectedKakaoEligibleAssets = useMemo(
     () => liveAssets.filter(
       (asset) => selected.has(asset.id) && asset.type !== "gif" && asset.url && !asset.url.includes("placeholder")
@@ -937,24 +941,6 @@ function LibraryView({
     } finally {
       setKakaoBatchSubmitting(false);
     }
-  }
-
-  if (activeView === "Settings") {
-    return (
-      <Card>
-        <CardContent className="grid min-h-[520px] gap-5 p-7">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">Settings</p>
-            <h2 className="mt-3 font-display text-4xl font-semibold">Provider configuration</h2>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {["API Keys", "Model Defaults", "Team & Permissions", "Billing"].map((name) => (
-              <Card key={name}><CardHeader><CardTitle className="text-base">{name}</CardTitle></CardHeader></Card>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
   }
 
   function readVideoMeta(asset: AssetSummary): {
@@ -1336,6 +1322,14 @@ function LibraryView({
             >
               {gifGenerating ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
               Generate GIF
+            </button>
+            <button
+              onClick={() => onResizeAssets(selectedResizeEligibleAssets.map((asset) => asset.id))}
+              disabled={selectedResizeEligibleAssets.length === 0}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              <ImageIcon className="size-3" />
+              {selectedResizeEligibleAssets.length <= 1 ? "Resize" : `Resize (${selectedResizeEligibleAssets.length})`}
             </button>
             <button
               onClick={handleOpenKakaoBatch}
@@ -1827,6 +1821,7 @@ export function Workspace({
   const [resultsOpen, setResultsOpen] = useState(true);
   const [resultSearch, setResultSearch] = useState("");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  const [resizeSourceAssetIds, setResizeSourceAssetIds] = useState<string[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const jobToMsg = useRef<Map<string, string>>(new Map());
@@ -1992,37 +1987,40 @@ export function Workspace({
     sending, onSend: handleSend,
   };
 
-  if (activeView === "Image" || activeView === "Video") {
+  if (activeView === "Settings") {
     return (
-      <CreateWorkbenchView
-        surface={activeView === "Video" ? "video" : "image"}
-        liveAssets={liveAssets}
-        setLiveAssets={setLiveAssets}
-        liveJobs={liveJobs}
-        setLiveJobs={setLiveJobs}
-        liveThreads={liveThreads}
-        setLiveThreads={setLiveThreads}
-        currentUser={currentUser}
-        contentScope={contentScope}
-        activeWorkspaceId={activeWorkspaceId}
-        activeThreadId={activeThreadId}
-        onThreadSelect={onThreadSelect}
-        onJobCreated={onJobCreated}
-      />
+      <Card>
+        <CardContent className="grid min-h-[520px] gap-5 p-7">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">Settings</p>
+            <h2 className="mt-3 font-display text-4xl font-semibold">Provider configuration</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {["API Keys", "Model Defaults", "Team & Permissions", "Billing"].map((name) => (
+              <Card key={name}><CardHeader><CardTitle className="text-base">{name}</CardTitle></CardHeader></Card>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
-  if (activeView === "VideoProduction") {
-    return (
-      <VideoProductionView
-        liveAssets={liveAssets}
-        setLiveAssets={setLiveAssets}
-        currentUser={currentUser}
-        contentScope={contentScope}
-        activeWorkspaceId={activeWorkspaceId}
-        onMobileMenuOpen={onMobileMenuOpen}
-      />
-    );
+  if (activeView === "Image") {
+    return <CreateImageView
+      liveAssets={liveAssets}
+      setLiveAssets={setLiveAssets}
+      liveJobs={liveJobs}
+      setLiveJobs={setLiveJobs}
+      liveThreads={liveThreads}
+      setLiveThreads={setLiveThreads}
+      currentUser={currentUser}
+      contentScope={contentScope}
+      activeWorkspaceId={activeWorkspaceId}
+      activeThreadId={activeThreadId}
+      initialResizeAssetIds={resizeSourceAssetIds}
+      onThreadSelect={onThreadSelect}
+      onJobCreated={onJobCreated}
+    />;
   }
 
   return (
@@ -2044,7 +2042,7 @@ export function Workspace({
           <div
             className={cn(
               "flex-1 min-h-0 px-7 py-6 max-[860px]:px-4",
-              activeView === "Library" || activeView === "Settings"
+              activeView === "Library"
                 ? "flex flex-col overflow-hidden"
                 : "overflow-auto"
             )}
@@ -2056,12 +2054,12 @@ export function Workspace({
                 liveThreads={liveThreads}
                 onViewChange={onViewChange}
                 onThreadSelect={onThreadSelectFromHome}
-                onOpenCreateSurface={(surface) => onViewChange(surface === "video" ? "Video" : "Image")}
+                onOpenCreateSurface={() => onViewChange("Image")}
               />
             )}
             {activeView === "Analyze" && <ComingSoon activeView={activeView} />}
             {activeView === "Usage" && <UsageView />}
-            {(activeView === "Library" || activeView === "Settings") && (
+            {activeView === "Library" && (
               <LibraryView
                 activeView={activeView}
                 liveAssets={liveAssets}
@@ -2071,6 +2069,10 @@ export function Workspace({
                 activeWorkspaceId={activeWorkspaceId}
                 contentScope={contentScope}
                 activeThreadId={activeThreadId}
+                onResizeAssets={(assetIds) => {
+                  setResizeSourceAssetIds(assetIds);
+                  onViewChange("Image");
+                }}
               />
             )}
           </div>

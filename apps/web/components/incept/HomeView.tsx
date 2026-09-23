@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useSession } from "next-auth/react";
-import { ImageIcon, Sparkles, Library, ArrowRight, Video, Zap } from "lucide-react";
+import { ImageIcon, Sparkles, Library, ArrowRight, Zap } from "lucide-react";
 import type { AssetSummary, CreativeThreadSummary, JobSummary } from "@incept/shared";
 import type { AppView } from "./Sidebar";
 import { cn } from "@/lib/utils";
@@ -36,7 +36,7 @@ interface HomeViewProps {
   liveThreads: CreativeThreadSummary[];
   onViewChange: (view: AppView) => void;
   onThreadSelect: (threadId: string) => void;
-  onOpenCreateSurface: (surface: "image" | "video") => void;
+  onOpenCreateSurface: () => void;
 }
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ export function HomeView({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button
           type="button"
-          onClick={() => onOpenCreateSurface("image")}
+          onClick={onOpenCreateSurface}
           className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 text-left transition-colors hover:bg-muted/60"
         >
           <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-soft-accent text-accent">
@@ -169,20 +169,6 @@ export function HomeView({
           <div>
             <p className="text-sm font-medium">Generate Images</p>
             <p className="text-[11px] text-muted-foreground">Image &amp; endcard</p>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onOpenCreateSurface("video")}
-          className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 text-left transition-colors hover:bg-muted/60"
-        >
-          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-soft-accent text-accent">
-            <Video className="size-4" />
-          </div>
-          <div>
-            <p className="text-sm font-medium">Generate Videos</p>
-            <p className="text-[11px] text-muted-foreground">Veo scaffold</p>
           </div>
         </button>
 

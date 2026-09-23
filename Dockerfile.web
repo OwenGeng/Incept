@@ -33,6 +33,12 @@ COPY apps/web ./apps/web
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+# Middleware is bundled at build time. Keep the release flags available in
+# both this stage and the runtime stage so the deferred routes are fail-closed.
+ARG INCEPT_ENABLE_VIDEO_PRODUCTION=false
+ARG INCEPT_ENABLE_GAMING_PLAYABLE=false
+ENV INCEPT_ENABLE_VIDEO_PRODUCTION=${INCEPT_ENABLE_VIDEO_PRODUCTION}
+ENV INCEPT_ENABLE_GAMING_PLAYABLE=${INCEPT_ENABLE_GAMING_PLAYABLE}
 
 # next build runs from the web package dir
 WORKDIR /app/apps/web
@@ -44,6 +50,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG INCEPT_ENABLE_VIDEO_PRODUCTION=false
+ARG INCEPT_ENABLE_GAMING_PLAYABLE=false
+ENV INCEPT_ENABLE_VIDEO_PRODUCTION=${INCEPT_ENABLE_VIDEO_PRODUCTION}
+ENV INCEPT_ENABLE_GAMING_PLAYABLE=${INCEPT_ENABLE_GAMING_PLAYABLE}
 
 # Non-root user
 RUN addgroup --system --gid 1001 nodejs \

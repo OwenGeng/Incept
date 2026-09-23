@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "release_id": "linglong-ai-video-v0.0.0-rc.1",
+  "release_profile": "image-ai-video",
+  "source_commit": "4b206d7664b0f8bd749a9468ac450498b33fff16",
+  "products": {
+    "image": true,
+    "ai_video": true,
+    "video_production": false,
+    "gaming_playable": false
+  },
+  "images": {
+    "api": { "tag": "linglong-ai-video-v0.0.0-rc.1" },
+    "web": { "tag": "linglong-ai-video-v0.0.0-rc.1" }
+  },
+  "approvals": {
+    "required": ["AI Committee", "Engineering owner", "Product owner"],
+    "records": [
+      { "role": "AI Committee", "reviewer": "fixture", "decision": "approved", "date": "2000-01-01", "evidence": "test fixture" },
+      { "role": "Engineering owner", "reviewer": "fixture", "decision": "approved", "date": "2000-01-01", "evidence": "test fixture" },
+      { "role": "Product owner", "reviewer": "fixture", "decision": "approved", "date": "2000-01-01", "evidence": "test fixture" }
+    ]
+  },
+  "rollout": {
+    "strategy": "Cloud Run revision",
+    "rollback_release_id": "linglong-ai-video-v0.0.0-rc.0"
+  }
+}

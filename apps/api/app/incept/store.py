@@ -1,7 +1,6 @@
 ﻿import base64
 import json
 import logging
-import math
 import mimetypes
 import re
 from collections.abc import Iterator
@@ -35,7 +34,10 @@ STATIC_DIR = STATIC_ROOT / "generated"
 UPLOAD_DIR = STATIC_ROOT / "uploads"
 _GCS_CLIENT = None
 _UPLOAD_SAFE_JPEG_SIZES = {"1200x628", "1200x600", "720x720"}
+_RESIZE_GACHA_DISCLOSURE_SIZES = {"1200x628", "1200x600"}
 _UPLOAD_SAFE_JPEG_MAX_BYTES = 500 * 1024
+_MAX_PSD_RASTER_PIXELS = 64_000_000
+_NON_RASTER_UPLOAD_EXTENSIONS = {".ai", ".pdf", ".svg"}
 _GENERATED_TITLE_SUFFIX_PATTERNS = (
     re.compile(r"\s*-\s*resize\b.*$", re.IGNORECASE),
     re.compile(r"\s*-\s*theme create\b.*$", re.IGNORECASE),
@@ -1020,7 +1022,7 @@ async def _export_master_images_to_assets(
             if not width or not height:
                 width, height = _read_image_size(output_bytes)
 
-            if include_kakao_gacha_disclosure and size == "1200x600":
+            if include_kakao_gacha_disclosure and size in _RESIZE_GACHA_DISCLOSURE_SIZES:
                 output_bytes = add_kakao_gacha_disclosure(output_bytes)
                 analysis = {
                     **(analysis or {}),
@@ -1317,24 +1319,63 @@ def list_usage_events(workspace_id: str | None = None) -> list[UsageEvent]:
     return sorted(values, key=lambda item: item.created_at, reverse=True)
 
 
-def _maybe_convert_psd(content: bytes, filename: str) -> tuple[bytes, str, str]:
-    """If content is a PSD file, flatten and return PNG bytes. Otherwise pass through."""
+def _maybe_convert_psd(content: bytes, filename: str) -> tuple[bytes, str, str, dict[str, object] | None]:
+    """Flatten a PSD to PNG before it can be used as an image reference.
+
+    The image-generation providers only ever receive a PNG working copy.  A
+    malformed or unsupported PSD must fail the upload rather than silently
+    becoming a source image that later falls back to text-only generation.
+    """
     if not filename.lower().endswith(".psd"):
-        return content, filename, ""
+        return content, filename, "", None
     try:
         from psd_tools import PSDImage
         import io as _io
         psd = PSDImage.open(_io.BytesIO(content))
+        width, height = int(psd.width), int(psd.height)
+        if width <= 0 or height <= 0 or width * height > _MAX_PSD_RASTER_PIXELS:
+            raise ValueError(
+                "PSD dimensions are not supported for conversion. "
+                f"Maximum is {_MAX_PSD_RASTER_PIXELS:,} pixels."
+            )
         buf = _io.BytesIO()
         psd.composite().save(buf, format="PNG")
         png_bytes = buf.getvalue()
+        if not png_bytes:
+            raise ValueError("PSD contains no composite image.")
         png_filename = Path(filename).stem + ".png"
         logger.info("PSD converted to PNG: %s → %s (%d MB → %d MB)",
                     filename, png_filename, len(content) // 1_000_000, len(png_bytes) // 1_000_000)
-        return png_bytes, png_filename, "image/png"
+        return png_bytes, png_filename, "image/png", {
+            "source_format": "psd",
+            "rasterized_from_psd": True,
+            "model_input_mime_type": "image/png",
+            "source_width": width,
+            "source_height": height,
+        }
     except Exception as exc:
-        logger.warning("PSD conversion failed for %s: %s — uploading as-is", filename, exc)
-        return content, filename, ""
+        logger.warning("PSD conversion failed for %s", filename, exc_info=True)
+        raise ValueError(
+            "This PSD could not be converted to a PNG working image. "
+            "Flatten the document in Photoshop and upload the exported PNG instead."
+        ) from exc
+
+
+def _uploaded_asset_type(filename: str, content_type: str | None) -> str:
+    """Classify an upload without treating audio as an image fallback."""
+    inferred_mime = (content_type or _guess_content_type(filename, "application/octet-stream")).lower()
+    extension = Path(filename).suffix.lower()
+    if inferred_mime.startswith("video/"):
+        return "video"
+    if inferred_mime.startswith("audio/"):
+        return "audio"
+    if inferred_mime == "text/html" or extension in {".html", ".htm"}:
+        return "playable"
+    if inferred_mime in {"application/zip", "application/x-zip-compressed"} or extension == ".zip":
+        return "report"
+    if extension in _NON_RASTER_UPLOAD_EXTENSIONS:
+        return "report"
+    return "image"
 
 
 def save_uploaded_asset(
@@ -1346,9 +1387,21 @@ def save_uploaded_asset(
     thread_id: str | None = None,
     content_type: str | None = None,
 ) -> Asset:
-    content, filename, converted_mime = _maybe_convert_psd(content, filename)
+    content, filename, converted_mime, conversion_analysis = _maybe_convert_psd(content, filename)
     if converted_mime:
         content_type = converted_mime
+    inferred_mime = (content_type or _guess_content_type(filename, "application/octet-stream")).lower()
+    asset_type = _uploaded_asset_type(filename, inferred_mime)
+
+    img_w, img_h = (None, None)
+    if asset_type == "image":
+        # Read actual pixel dimensions so they're available for downstream image ops.
+        img_w, img_h = _read_image_size(content)
+        if img_w is None or img_h is None:
+            raise ValueError(
+                "Unsupported or invalid raster image. Upload PNG, JPEG, WebP, GIF, TIFF, BMP, "
+                "or a PSD that can be flattened to PNG."
+            )
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     asset_id = f"asset_upload_{uuid4().hex[:12]}"
@@ -1356,21 +1409,6 @@ def save_uploaded_asset(
     dest = UPLOAD_DIR / f"{asset_id}{ext}"
     dest.write_bytes(content)
     created_at = datetime.utcnow()
-
-    inferred_mime = (content_type or _guess_content_type(filename, "application/octet-stream")).lower()
-    if inferred_mime.startswith("video/"):
-        asset_type = "video"
-    elif inferred_mime == "text/html" or Path(filename).suffix.lower() in {".html", ".htm"}:
-        asset_type = "playable"
-    elif inferred_mime in {"application/zip", "application/x-zip-compressed"} or Path(filename).suffix.lower() == ".zip":
-        asset_type = "report"
-    else:
-        asset_type = "image"
-
-    img_w, img_h = (None, None)
-    if asset_type == "image":
-        # Read actual pixel dimensions so they're available for downstream image ops.
-        img_w, img_h = _read_image_size(content)
 
     asset = Asset(
         id=asset_id,
@@ -1389,6 +1427,7 @@ def save_uploaded_asset(
         height=img_h,
         theme=None,
         asset_role=_coerce_asset_role(asset_role, provider="upload"),
+        analysis=conversion_analysis,
         thread_id=thread_id,
     )
     object_path = _build_gcs_object_path(
@@ -1472,24 +1511,44 @@ def _estimate_cost_usd(request: GenerationRequest, provider_generations: int) ->
     return 0.0
 
 
+def _month_window(now: datetime | None = None) -> tuple[datetime, datetime]:
+    """Return the current UTC calendar-month window without a reset job."""
+    current = now or datetime.utcnow()
+    start = datetime(current.year, current.month, 1)
+    if current.month == 12:
+        return start, datetime(current.year + 1, 1, 1)
+    return start, datetime(current.year, current.month + 1, 1)
+
+
+def current_monthly_studio_spend_usd(user: User, now: datetime | None = None) -> float:
+    """All metered Studio operations share one per-user monthly allowance."""
+    start, end = _month_window(now)
+    return round(sum(
+        event.actual_cost_usd if event.actual_cost_usd is not None else event.estimated_cost_usd
+        for event in USAGE_EVENTS.values()
+        if event.user_id == user.id and start <= event.created_at < end
+    ), 4)
+
+
+def monthly_budget_reset_message(budget_limit: float, now: datetime | None = None) -> str:
+    _start, reset_at = _month_window(now)
+    return (
+        f"Monthly Studio budget reached (${budget_limit:.2f}). "
+        f"Your allowance resets automatically on {reset_at.strftime('%B')} 1, {reset_at.year} (UTC). "
+        "Please try again after it resets."
+    )
+
+
 def assert_image_budget_available(request: GenerationRequest, user: User) -> None:
     """Enforce the shared per-user Studio budget before image generation."""
     settings = get_settings()
     budget_limit = max(0.0, settings.studio_user_budget_usd)
     if budget_limit <= 0:
         return
-    current_spend = sum(
-        event.actual_cost_usd if event.actual_cost_usd is not None else event.estimated_cost_usd
-        for event in USAGE_EVENTS.values()
-        if event.user_id == user.id and event.operation in {"image_generation", "video_generation"}
-    )
+    current_spend = current_monthly_studio_spend_usd(user)
     estimated_request_cost = _estimate_cost_usd(request, _estimate_provider_generations(request))
     if current_spend + estimated_request_cost > budget_limit:
-        raise RuntimeError(
-            "Studio budget exceeded. "
-            f"User budget: ${budget_limit:.2f}. Current estimated spend: ${current_spend:.2f}. "
-            f"This request would add about ${estimated_request_cost:.2f}."
-        )
+        raise RuntimeError(monthly_budget_reset_message(budget_limit))
 
 
 _SUPPORTED_OPENAI_MODELS = frozenset(
@@ -1830,9 +1889,9 @@ async def _generate_images_gemini_from_references(
                     text_value = getattr(part, "text", None)
                     if isinstance(text_value, str) and text_value.strip():
                         text_parts.append(text_value.strip())
-        except Exception:
+        except Exception as exc:
             logger.exception("Gemini image edit failed for one variant")
-            return None, None
+            return None, f"{exc.__class__.__name__}: {exc}"
         return None, " ".join(text_parts)[:500] if text_parts else None
 
     n = min(variants, 4)
@@ -1848,7 +1907,7 @@ async def _generate_images_gemini_from_references(
         raise RuntimeError(
             f"Gemini returned no image data. Model text response: {text_responses[0]}"
         )
-    return []
+    raise RuntimeError("Gemini returned no image data for this image-edit request")
 
 
 async def _generate_kakao_clean_image(
@@ -1986,13 +2045,14 @@ async def _generate_images_vertex(
 
 
 def _vertex_aspect_ratio_for_size(size: str | None) -> str | None:
-    if not size:
-        return None
-    width, height = _parse_size(size)
-    if not width or not height:
-        return None
-    divisor = math.gcd(width, height)
-    return f"{width // divisor}:{height // divisor}"
+    """Resize is deliberately prompt-led for every target canvas.
+
+    Gemini receives only the source image and the user-visible Resize prompt;
+    we do not impose ``image_config.aspect_ratio`` or coerce any request to a
+    nearest native ratio before generation. The target size remains part of
+    the prompt and is used for the final exported asset dimensions.
+    """
+    return None
 
 
 async def _generate_images_vertex_from_references(
@@ -2445,7 +2505,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 ):
                     return
 
-                generation_size = "728x180" if size == "728x90" else size
+                generation_size = {"728x90": "728x180"}.get(size, size)
                 target_w, target_h = _parse_size(generation_size)
                 openai_size = get_openai_size(target_w or 1024, target_h or 1024, model)
                 override_prompt = resize_prompt_overrides.get(size)
@@ -2476,6 +2536,10 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 generated_raw_by_size[size] = [
                     base64.b64decode(b64) for b64 in b64_images if b64
                 ]
+                if not generated_raw_by_size[size]:
+                    raise RuntimeError(
+                        f"Resize returned no image output for {size}; the job was not completed."
+                    )
 
                 done_progress = 20 + int(((size_index + 1) / total_sizes) * 45)
                 if not _mark_generation_progress(
@@ -2540,10 +2604,14 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                         "resize_prompt_override_used": size in resize_prompt_overrides,
                         "resize_negative_prompt_override": resize_negative_prompt_override,
                         "resize_include_gacha_disclosure": bool(
-                            request.resize_include_gacha_disclosure and size == "1200x600"
+                            request.resize_include_gacha_disclosure and size in _RESIZE_GACHA_DISCLOSURE_SIZES
                         ),
-                        "resize_generation_canvas_size": "728x180" if size == "728x90" else size,
-                        "resize_pipeline": "v2_oversampled_split_generation" if size == "728x90" else "v2_simple_per_size_generation",
+                        "resize_generation_canvas_size": {"728x90": "728x180"}.get(size, size),
+                        "resize_pipeline": (
+                            "v2_oversampled_split_generation"
+                            if size == "728x90"
+                            else "v2_simple_per_size_generation"
+                        ),
                     }
                     upsert_asset(asset)
                     asset_ids.append(asset.id)
@@ -2685,7 +2753,24 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
             else:
                 raise RuntimeError(f"Unsupported Theme Create mode: {mode}")
 
-            requested_theme_sizes = request.output_sizes or ["1200x628"]
+            # Gemini image editing accepts a fixed set of native aspect ratios.
+            # Theme Create intentionally exposes only the two production canvases
+            # below; use Resize for arbitrary ad sizes after this step.
+            requested_theme_sizes = request.output_sizes or ["1920x1080"]
+            # A browser tab opened before the native-size update may still send
+            # the former fixed Theme Create canvas. Upgrade that legacy request
+            # rather than making the user lose an otherwise valid generation.
+            requested_theme_sizes = [
+                "1920x1080" if size == "1200x628" else size
+                for size in requested_theme_sizes
+            ]
+            supported_theme_sizes = {"1920x1080", "1080x1920"}
+            unsupported_theme_sizes = [size for size in requested_theme_sizes if size not in supported_theme_sizes]
+            if unsupported_theme_sizes:
+                raise ValueError(
+                    "Theme Create supports only Gemini-native 16:9 (1920x1080) "
+                    "or 9:16 (1080x1920) output. Use Resize for other dimensions."
+                )
             generated_raw_by_size: dict[str, list[bytes]] = {}
             actual_prompt_by_size: dict[str, str] = {}
             total_sizes = max(1, len(requested_theme_sizes))
@@ -2714,6 +2799,10 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 generated_raw_by_size[size] = [
                     base64.b64decode(b64) for b64 in b64_images if b64
                 ]
+                if not generated_raw_by_size[size]:
+                    raise RuntimeError(
+                        f"Theme Create returned no image output for {size}; the job was not completed."
+                    )
 
                 done_progress = 20 + int(((size_index + 1) / total_sizes) * 45)
                 if not _mark_generation_progress(
@@ -3817,7 +3906,7 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
 
         from app.incept.composite import create_outpaint_inputs
         expanded_bytes, mask_bytes = create_outpaint_inputs(
-            original_bytes, request.direction, request.ratio
+            original_bytes, request.direction, request.ratio, request.target_size
         )
 
         job.progress = 30

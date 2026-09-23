@@ -1,0 +1,166 @@
+{
+  "source": "/Users/owen.geng/Documents/Projects/Incept/ArcReel/docs/assets/hero-screenshot.png",
+  "sample_size": {
+    "width": 720,
+    "height": 378
+  },
+  "sampled_pixel_count": 272160,
+  "dominant_colors": [
+    {
+      "hex": "#121827",
+      "rgb": [
+        18,
+        24,
+        39
+      ],
+      "coverage_percent": 31.62
+    },
+    {
+      "hex": "#1E2432",
+      "rgb": [
+        30,
+        36,
+        50
+      ],
+      "coverage_percent": 8.31
+    },
+    {
+      "hex": "#040711",
+      "rgb": [
+        4,
+        7,
+        17
+      ],
+      "coverage_percent": 4.75
+    },
+    {
+      "hex": "#394150",
+      "rgb": [
+        57,
+        65,
+        80
+      ],
+      "coverage_percent": 2.85
+    },
+    {
+      "hex": "#9CA0A8",
+      "rgb": [
+        156,
+        160,
+        168
+      ],
+      "coverage_percent": 1.86
+    },
+    {
+      "hex": "#868A94",
+      "rgb": [
+        134,
+        138,
+        148
+      ],
+      "coverage_percent": 1.73
+    },
+    {
+      "hex": "#6E737D",
+      "rgb": [
+        110,
+        115,
+        125
+      ],
+      "coverage_percent": 1.71
+    },
+    {
+      "hex": "#262C3A",
+      "rgb": [
+        38,
+        44,
+        58
+      ],
+      "coverage_percent": 1.63
+    },
+    {
+      "hex": "#525763",
+      "rgb": [
+        82,
+        87,
+        99
+      ],
+      "coverage_percent": 1.51
+    },
+    {
+      "hex": "#ADB1B8",
+      "rgb": [
+        173,
+        177,
+        184
+      ],
+      "coverage_percent": 1.49
+    },
+    {
+      "hex": "#414957",
+      "rgb": [
+        65,
+        73,
+        87
+      ],
+      "coverage_percent": 1.36
+    },
+    {
+      "hex": "#4C3AED",
+      "rgb": [
+        76,
+        58,
+        237
+      ],
+      "coverage_percent": 0.66
+    },
+    {
+      "hex": "#2F6957",
+      "rgb": [
+        47,
+        105,
+        87
+      ],
+      "coverage_percent": 0.33
+    },
+    {
+      "hex": "#244D45",
+      "rgb": [
+        36,
+        77,
+        69
+      ],
+      "coverage_percent": 0.31
+    }
+  ],
+  "accent_candidates": [
+    {
+      "hex": "#4C3AED",
+      "rgb": [
+        76,
+        58,
+        237
+      ],
+      "coverage_percent": 0.66
+    },
+    {
+      "hex": "#2F6957",
+      "rgb": [
+        47,
+        105,
+        87
+      ],
+      "coverage_percent": 0.33
+    },
+    {
+      "hex": "#244D45",
+      "rgb": [
+        36,
+        77,
+        69
+      ],
+      "coverage_percent": 0.31
+    }
+  ],
+  "note": "Observed pixel samples only. Confirm semantic roles before treating any value as a product token."
+}

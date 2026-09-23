@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,36 @@ def create_outpaint_inputs(
     image_bytes: bytes,
     direction: str,
     ratio: float = 0.3,
+    target_size: str | None = None,
 ) -> tuple[bytes, bytes]:
     """Create an expanded canvas plus preservation mask for outpainting."""
     from PIL import Image, ImageDraw
 
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     w, h = img.size
+
+    # Reframe has an exact output canvas. Keep the complete source image at
+    # its original scale in the centre and expose only the new perimeter to
+    # the image editor. This avoids a crop or a whole-image regeneration.
+    match = re.fullmatch(r"(\d+)x(\d+)", target_size or "")
+    if match:
+        target_w, target_h = int(match.group(1)), int(match.group(2))
+        if target_w > 0 and target_h > 0:
+            target_ratio = target_w / target_h
+            current_ratio = w / h
+            if current_ratio > target_ratio:
+                new_w, new_h = w, max(h, round(w / target_ratio))
+            else:
+                new_w, new_h = max(w, round(h * target_ratio)), h
+            left, top = (new_w - w) // 2, (new_h - h) // 2
+            canvas = Image.new("RGBA", (new_w, new_h), (0, 0, 0, 0))
+            canvas.paste(img, (left, top))
+            mask = Image.new("RGBA", (new_w, new_h), (0, 0, 0, 0))
+            ImageDraw.Draw(mask).rectangle(
+                [left, top, left + w - 1, top + h - 1],
+                fill=(255, 255, 255, 255),
+            )
+            return _to_png(canvas), _to_png(mask)
 
     has_x = direction in {"left", "right", "all"}
     has_y = direction in {"top", "bottom", "all"}

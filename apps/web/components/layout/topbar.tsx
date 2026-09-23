@@ -5,7 +5,6 @@
  */
 
 import { AppHeader } from "@/components/ui/app-header";
-import { defaultPageTabs } from "@/lib/supply-navigation";
 
 type NavTab = { label: string; href: string };
 
@@ -13,12 +12,12 @@ export function Topbar({
   activeHref,
   title,
   subtitle,
-  pageTabs = defaultPageTabs,
+  pageTabs = [],
   scopeTabs,
   activeScopeHref,
   datasetTabs,
   activeDatasetHref,
-  docsHref = "/docs/intelligence",
+  docsHref = "/docs",
 }: {
   activeHref?: string;
   title: string;
@@ -28,7 +27,7 @@ export function Topbar({
   activeScopeHref?: string;
   datasetTabs?: NavTab[];
   activeDatasetHref?: string;
-  /** Docs link target @default "/docs/intelligence" — override for non-Intelligence pages (e.g. CTV) */
+  /** Docs link target @default "/docs" — override for a page's own docs subpage */
   docsHref?: string;
 }) {
   return (

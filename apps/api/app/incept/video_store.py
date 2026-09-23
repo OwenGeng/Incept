@@ -42,6 +42,8 @@ from app.incept.store import (
     build_asset_content_path,
     guess_asset_extension,
     read_asset_bytes,
+    current_monthly_studio_spend_usd,
+    monthly_budget_reset_message,
 )
 from app.incept.video_prompt_builder import build_video_mock_completion_message
 
@@ -98,14 +100,7 @@ def _estimated_veo_render_seconds(target_seconds: int) -> int:
 
 
 def _current_studio_spend_usd_for_user(user: User) -> float:
-    total = 0.0
-    for event in USAGE_EVENTS.values():
-        if event.user_id != user.id:
-            continue
-        if event.operation not in {"image_generation", "video_generation"}:
-            continue
-        total += event.actual_cost_usd if event.actual_cost_usd is not None else event.estimated_cost_usd
-    return round(total, 4)
+    return current_monthly_studio_spend_usd(user)
 
 
 def assert_video_budget_available(request: VideoGenerationRequest, user: User) -> None:
@@ -118,12 +113,7 @@ def assert_video_budget_available(request: VideoGenerationRequest, user: User) -
     current_spend = _current_studio_spend_usd_for_user(user)
     projected_total = round(current_spend + estimated_request_cost, 4)
     if projected_total > budget_limit:
-        raise RuntimeError(
-            "Video budget exceeded. "
-            f"User budget: ${budget_limit:.2f}. "
-            f"Current estimated spend: ${current_spend:.2f}. "
-            f"This request would add about ${estimated_request_cost:.2f}, reaching ${projected_total:.2f}."
-        )
+        raise RuntimeError(monthly_budget_reset_message(budget_limit))
 
 
 def get_video_budget_status(
@@ -217,6 +207,7 @@ def _call_multimodal_text_model(
     prompt: str,
     parts: list[genai_types.Part],
     model_id: str | None = None,
+    json_response: bool = False,
 ) -> str:
     settings = get_settings()
     client = genai.Client(
@@ -225,10 +216,13 @@ def _call_multimodal_text_model(
         location=settings.gcp_location,
     )
     contents = [genai_types.Content(role="user", parts=[_text_part(prompt), *parts])]
-    response = client.models.generate_content(
-        model=(model_id or settings.vertex_gemini_model).strip(),
-        contents=contents,
-    )
+    request: dict[str, object] = {
+        "model": (model_id or settings.vertex_gemini_model).strip(),
+        "contents": contents,
+    }
+    if json_response:
+        request["config"] = genai_types.GenerateContentConfig(response_mime_type="application/json")
+    response = client.models.generate_content(**request)
     text = _extract_text_response(response)
     if not text:
         raise RuntimeError("Gemini text analysis returned no text.")
@@ -243,11 +237,42 @@ def _video_analysis_model_id() -> str:
     return model_id
 
 
+def _text_model_asset_mime_type(asset: Asset) -> str:
+    """Return a Gemini-supported media MIME type for an Incept asset.
+
+    Generated assets are often titled with an internal ID (for example,
+    ``vprod_…_vid``) rather than a filename. Guessing from that title alone
+    produces ``application/octet-stream``, which Gemini rejects even when the
+    asset is a perfectly valid MP4 in GCS. The persisted Asset type is the
+    reliable fallback; filename-based detection is retained for precise formats.
+    """
+    fallback_by_type = {
+        "image": "image/png",
+        "gif": "image/gif",
+        "video": "video/mp4",
+        "audio": "audio/mpeg",
+        "playable": "text/html",
+        "report": "text/plain",
+    }
+    fallback = fallback_by_type.get(asset.type, "application/octet-stream")
+    expected_prefix = {
+        "image": "image/",
+        "gif": "image/",
+        "video": "video/",
+        "audio": "audio/",
+    }.get(asset.type)
+    for candidate in (asset.title, asset.gcs_uri, asset.preview_url):
+        guessed = _guess_content_type(candidate or "", "")
+        if guessed and (expected_prefix is None or guessed.startswith(expected_prefix)):
+            return guessed
+    return fallback
+
+
 def _asset_part_for_text_model(asset: Asset) -> genai_types.Part:
     asset_bytes = read_asset_bytes(asset)
     if not asset_bytes:
         raise RuntimeError(f"Could not read bytes for asset {asset.id}")
-    mime = _guess_content_type(asset.title or asset.id, "application/octet-stream")
+    mime = _text_model_asset_mime_type(asset)
     return genai_types.Part.from_bytes(data=asset_bytes, mime_type=mime)
 
 
@@ -1046,7 +1071,7 @@ def _build_generate_video_kwargs(
         "duration_seconds": request.duration_seconds,
         "aspect_ratio": request.aspect_ratio,
         "resolution": request.resolution,
-        "generate_audio": False,
+        "generate_audio": True,
         "enhance_prompt": True,
         "negative_prompt": (
             "warped face, broken anatomy, inconsistent identity, extra limbs, "
@@ -1098,7 +1123,7 @@ def _build_generate_video_kwargs(
             raise RuntimeError("A start-frame image is required for storyboard video generation.")
         if not end_frame_asset or end_frame_asset.type != "image":
             raise RuntimeError("An end-frame image is required for storyboard video generation.")
-        config.lastFrame = _image_from_asset(end_frame_asset)
+        config.last_frame = _image_from_asset(end_frame_asset)
         kwargs["image"] = _image_from_asset(source_asset)
         return kwargs
 
@@ -1124,7 +1149,7 @@ async def _wait_for_operation(client: genai.Client, operation) -> genai_types.Ge
                 raise RuntimeError("Veo operation completed without a result payload.")
             return result
         await asyncio.sleep(5)
-        current = client.operations.get(current)
+        current = await asyncio.to_thread(client.operations.get, current)
     raise RuntimeError("Timed out while waiting for Veo video generation to complete.")
 
 
@@ -1148,7 +1173,7 @@ async def _request_veo_videos(
     message: str,
 ) -> list[genai_types.Video]:
     """Submit one Veo operation and normalize every result to in-memory bytes."""
-    operation = client.models.generate_videos(**kwargs)
+    operation = await asyncio.to_thread(client.models.generate_videos, **kwargs)
     job.progress = progress
     job.message = message
     job.updated_at = datetime.utcnow()
@@ -1284,9 +1309,16 @@ def _concat_video_sequence(*, clips: list[bytes], target_seconds: int) -> bytes:
                 "0",
                 "-i",
                 str(manifest),
-                "-an",
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
                 "-c:v",
                 "libx264",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
                 "-pix_fmt",
                 "yuv420p",
                 "-r",
@@ -1317,9 +1349,16 @@ def _concat_video_sequence(*, clips: list[bytes], target_seconds: int) -> bytes:
                 str(joined),
                 "-t",
                 str(target_seconds),
-                "-an",
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
                 "-c:v",
                 "libx264",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
                 "-pix_fmt",
                 "yuv420p",
                 "-r",
@@ -1639,7 +1678,7 @@ async def _execute_veo_sequence(
                     number_of_videos=1,
                     aspect_ratio=request.aspect_ratio,
                     resolution=request.resolution,
-                    generate_audio=False,
+                    generate_audio=True,
                     enhance_prompt=True,
                     negative_prompt=(
                         "scene restart, repeated opening, hard cut, unrelated new scene, character change, "
@@ -1671,7 +1710,9 @@ async def _execute_veo_sequence(
         job.message = "Assembling the continuous Veo sequence…"
         job.updated_at = datetime.utcnow()
         upsert_job(job)
-        final_video = _concat_video_sequence(clips=clips, target_seconds=request.duration_seconds)
+        final_video = await asyncio.to_thread(
+            _concat_video_sequence, clips=clips, target_seconds=request.duration_seconds
+        )
         asset = _persist_generated_video_asset(
             job=job,
             request=request,
@@ -2060,7 +2101,7 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
         if mode == VideoGenerationMode.playable_to_video:
             if not source_asset:
                 raise RuntimeError("Playable to Video requires a source HTML playable asset.")
-            analysis = _analyze_playable_for_video(source_asset, request.prompt)
+            analysis = await asyncio.to_thread(_analyze_playable_for_video, source_asset, request.prompt)
             asset_bytes = read_asset_bytes(source_asset)
             html_text = (asset_bytes or b"").decode("utf-8", errors="ignore")
             llm_summary = analysis.get("llm_summary", {})
@@ -2102,7 +2143,9 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
                 raise RuntimeError("Video to Video requires a source video.")
             reference_assets = [_asset_by_id(asset_id) for asset_id in request.reference_asset_ids]
             reference_assets = [asset for asset in reference_assets if asset is not None]
-            style_summary = _analyze_reference_assets_for_style(reference_assets, request.prompt)
+            style_summary = await asyncio.to_thread(
+                _analyze_reference_assets_for_style, reference_assets, request.prompt
+            )
             effective_request = request.model_copy(
                 update={
                     "video_generation_mode": VideoGenerationMode.image_to_video,
@@ -2128,10 +2171,11 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
         elif mode == VideoGenerationMode.video_to_playable:
             if not source_asset or source_asset.type != "video":
                 raise RuntimeError("Video to Playable requires a source video.")
-            analysis = _analyze_video_for_playable(source_asset, request.prompt)
+            analysis = await asyncio.to_thread(_analyze_video_for_playable, source_asset, request.prompt)
             reference_assets = [_asset_by_id(asset_id) for asset_id in request.reference_asset_ids]
             reference_assets = [asset for asset in reference_assets if asset is not None]
-            playable_draft = _build_playable_draft(
+            playable_draft = await asyncio.to_thread(
+                _build_playable_draft,
                 source_video=source_asset,
                 reference_assets=reference_assets,
                 analysis=analysis,

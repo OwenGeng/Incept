@@ -1,0 +1,23 @@
+# One-time SQLite -> Cloud SQL importer. This deliberately excludes the web
+# runtime, Creative Core and local SQLite data: the Job reads its source from
+# the explicit GCS object passed as --source.
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+# The importer loads only persistence models plus GCS and PostgreSQL clients.
+# Keep this image independent from the API's video/image processing stack so a
+# one-time recovery task stays small and fast to build.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
+        'google-cloud-storage>=2.19.0' \
+        'psycopg[binary,pool]>=3.2.0' \
+        'pydantic>=2.10.3'
+
+COPY apps/api/app/ ./app/
+COPY apps/api/scripts/migrate_sqlite_to_postgres.py ./scripts/migrate_sqlite_to_postgres.py
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+ENTRYPOINT ["python", "/app/scripts/migrate_sqlite_to_postgres.py"]

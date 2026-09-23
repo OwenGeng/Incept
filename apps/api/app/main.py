@@ -1,78 +1,48 @@
 import logging
-import threading
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.ai_video.main import app as ai_video_app, initialize_ai_video_module
 from app.core.config import settings
-from app.routers import admin, agent, ai_insights, cold_prospects, feedback, health, incept, internal, kakao, leads, supply_smb
+from app.routers import admin, feedback, health, incept, internal, kakao
 
 logger = logging.getLogger(__name__)
 
 
-def _fill_all_caches() -> None:
-    """
-    Pull every BQ dataset into the in-memory cache.
-    Safe to call from any thread; individual BQ errors are caught per-dataset.
-    """
-    try:
-        from app.services.supply_smb_live import DATASET_META, SupplySmbLiveService
-
-        svc = SupplySmbLiveService()
-
-        logger.info("[cache] Warming main dataset (List 4/5/6)…")
-        svc._get_dataset()
-        logger.info("[cache] Main dataset ready.")
-
-        for key in DATASET_META:
-            try:
-                logger.info(f"[cache] Warming dataset {key}…")
-                svc._get_custom_dataset_rows(key)
-                logger.info(f"[cache] Dataset {key} ready.")
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"[cache] Failed to warm {key}: {exc}")
-
-        logger.info("[cache] All datasets warm ✓")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"[cache] Warm cycle aborted: {exc}")
-
-
-def _prewarm_caches() -> None:
-    """Startup thread: wait for uvicorn to bind, then fill caches."""
-    time.sleep(4)
-    logger.info("[prewarm] Starting initial cache warm…")
-    _fill_all_caches()
-
-
-_REFRESH_INTERVAL_SECONDS = 3 * 3600  # 3 h — refresh before 4-h TTL expires
-
-
-def _periodic_refresh_loop() -> None:
-    """
-    Background thread: re-warm all BQ caches every 3 hours so users never
-    hit a cold cache during the working day. Runs forever (daemon thread).
-    """
-    while True:
-        time.sleep(_REFRESH_INTERVAL_SECONDS)
-        logger.info("[refresh] Periodic cache refresh starting…")
-        _fill_all_caches()
-        logger.info("[refresh] Periodic cache refresh complete.")
-
-
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    # Initial warm — runs once shortly after startup
-    t_warm = threading.Thread(target=_prewarm_caches, daemon=True, name="cache-prewarm")
-    t_warm.start()
-    # Periodic refresh — keeps cache alive every 3 h
-    t_refresh = threading.Thread(target=_periodic_refresh_loop, daemon=True, name="cache-refresh")
-    t_refresh.start()
-    yield
-    # Daemon threads stop automatically with the process
+async def lifespan(app: FastAPI):
+    # Initialize the mounted AI Video module in this FastAPI process. Its
+    # persistence uses the same Cloud SQL credential contract as Incept.
+    await initialize_ai_video_module()
+    workflow_worker_started = False
+    try:
+        # Studio Workflows belongs to the deferred Video Production product.
+        # Do not start its worker in the Image + AI Video production profile.
+        if settings.video_production_enabled:
+            from app.incept.workflow_worker import start_workflow_worker
+
+            start_workflow_worker()
+            workflow_worker_started = True
+
+        mcp_server = getattr(app.state, "video_production_mcp_server", None)
+        if mcp_server is not None:
+            # Mounted Starlette applications do not automatically own their child
+            # lifespan. Run the MCP session manager from the API lifespan so the
+            # Streamable HTTP transport has its task group before the first call.
+            async with mcp_server.session_manager.run():
+                yield
+        else:
+            yield
+    finally:
+        if workflow_worker_started:
+            from app.incept.workflow_worker import stop_workflow_worker
+
+            stop_workflow_worker()
 
 
 def create_app() -> FastAPI:
@@ -91,17 +61,46 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def hide_deferred_product_apis(request: Request, call_next):
+        """Return a neutral 404 for product APIs excluded from this release."""
+        path = request.url.path
+        video_production_paths = ("/video-production", "/video-productions")
+        gaming_playable_paths = ("/playable-projects", "/playable-templates")
+
+        if not settings.video_production_enabled and (
+            path == "/video-production-capabilities"
+            or any(path == prefix or path.startswith(f"{prefix}/") for prefix in video_production_paths)
+        ):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        if not settings.gaming_playable_enabled and any(
+            path == prefix or path.startswith(f"{prefix}/") for prefix in gaming_playable_paths
+        ):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        return await call_next(request)
+
     app.include_router(health.router)
     app.include_router(internal.router)
     app.include_router(admin.router)
-    app.include_router(supply_smb.router)
-    app.include_router(cold_prospects.router)
-    app.include_router(leads.router)
-    app.include_router(ai_insights.router)
-    app.include_router(agent.router)
     app.include_router(feedback.router)
     app.include_router(incept.router)
     app.include_router(kakao.router)
+
+    # The legacy workflow is now an in-process Linglong Lab module. Mounting
+    # preserves its generated-client paths and response envelope without a
+    # second Cloud Run service or backend URL.
+    app.mount("/ai-video", ai_video_app)
+
+    # The automation endpoint is fail-closed: without an explicit public
+    # resource URL and opaque service principals, no MCP route exists at all.
+    # It is mounted separately from browser auth and uses bearer credentials.
+    if settings.video_production_enabled:
+        from app.incept.video_production_mcp import configured_video_production_mcp_server
+
+        video_production_mcp_server = configured_video_production_mcp_server()
+        if video_production_mcp_server is not None:
+            app.state.video_production_mcp_server = video_production_mcp_server
+            app.mount("/video-production/mcp", video_production_mcp_server.streamable_http_app())
 
     # Serve Incept static files (generated images & uploads)
     _static_root = Path(__file__).parent.parent / "static"
@@ -112,4 +111,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

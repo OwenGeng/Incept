@@ -2,13 +2,14 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { isAuthDevSkipped } from "@/lib/auth-mode";
 import Link from "next/link";
-import { ArrowRight, WandSparkles, Settings, BarChart2 } from "lucide-react";
+import { ArrowRight, Gamepad2, Settings, Video, WandSparkles } from "lucide-react";
+import { isDeferredProductSurfaceEnabled } from "@/lib/release-surfaces";
 
 export default async function PortalPage() {
   const session = await auth();
 
   if (isAuthDevSkipped()) {
-    redirect("/supply-smb/no-sdk-no-ua/weekly-brief");
+    redirect("/incept");
   }
 
   if (!session) {
@@ -17,9 +18,12 @@ export default async function PortalPage() {
 
   const user  = session.user;
   const role  = user?.role;
-  // Agency accounts are Scout-only — redirect them directly
+  const showVideoProduction = isDeferredProductSurfaceEnabled("videoProduction");
+  const showGamingPlayable = isDeferredProductSurfaceEnabled("gamingPlayable");
+  // Agency accounts had Supply-only access; Supply has been retired from this
+  // app, so there is nowhere left for them to land.
   if (role === "agency") {
-    redirect("/supply-smb/no-sdk-no-ua/weekly-brief");
+    redirect("/unauthorized");
   }
 
   return (
@@ -67,7 +71,7 @@ export default async function PortalPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Link
             href="/incept"
-            className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:col-span-2 lg:col-span-1"
+            className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
           >
             <div className="flex h-28 items-center justify-center bg-gradient-to-br from-[#F3EEFB] to-[#EDE4FF]">
               <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#8338ec] to-[#6d28d9] shadow-lg">
@@ -78,44 +82,45 @@ export default async function PortalPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8338ec]">Creation</p>
-                  <h2 className="mt-0.5 text-[18px] font-semibold text-foreground">Studio</h2>
+                  <h2 className="mt-0.5 text-[18px] font-semibold text-foreground">Image</h2>
                 </div>
                 <span className="rounded-full bg-[#ECFDF5] px-2.5 py-0.5 text-[11px] font-medium text-[#065f46]">Live</span>
               </div>
               <p className="mt-3 text-sm text-muted-foreground">
-                AI creative studio — generate, edit, and manage ad creatives at scale.
+                Generate, resize, and manage image creatives and endcards.
               </p>
               <div className="mt-5 flex items-center gap-1 text-sm font-medium text-[#8338ec]">
                 Open <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
               </div>
             </div>
           </Link>
-
-          <Link
-            href="/supply-smb/no-sdk-no-ua/weekly-brief"
-            className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:col-span-2 lg:col-span-1"
+          {showVideoProduction && <Link
+            href="/video-production"
+            className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
           >
-            <div className="flex h-28 items-center justify-center bg-gradient-to-br from-[#EEF6FB] to-[#E4F0FF]">
-              <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0ea5e9] to-[#2563eb] shadow-lg">
-                <BarChart2 className="size-7 text-white" />
-              </div>
+            <div className="flex h-28 items-center justify-center bg-gradient-to-br from-[#E8F1FF] to-[#DCEBFF]">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-[#101827] shadow-lg"><WandSparkles className="size-7 text-white" /></div>
             </div>
-            <div className="flex flex-1 flex-col p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#0ea5e9]">Analysis</p>
-                  <h2 className="mt-0.5 text-[18px] font-semibold text-foreground">Intelligence</h2>
-                </div>
-                <span className="rounded-full bg-[#ECFDF5] px-2.5 py-0.5 text-[11px] font-medium text-[#065f46]">Live</span>
-              </div>
-              <p className="mt-3 text-sm text-muted-foreground">
-                Market intelligence — prospect discovery, supply signals and insights.
-              </p>
-              <div className="mt-5 flex items-center gap-1 text-sm font-medium text-[#0ea5e9]">
-                Open <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-              </div>
+            <div className="flex flex-1 flex-col p-6"><div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#356fec]">Video</p><h2 className="mt-0.5 text-[18px] font-semibold text-foreground">Video Production</h2></div><span className="rounded-full bg-[#ECFDF5] px-2.5 py-0.5 text-[11px] font-medium text-[#065f46]">New</span></div><p className="mt-3 text-sm text-muted-foreground">Turn a brief and references into an editable shot plan, takes, review, and delivery.</p><div className="mt-5 flex items-center gap-1 text-sm font-medium text-[#356fec]">Open <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" /></div></div>
+          </Link>}
+          <Link
+            href="/ai-video"
+            className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+          >
+            <div className="flex h-28 items-center justify-center bg-gradient-to-br from-[#EEF8FF] to-[#DDEEFF]">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-[#2BACFF] shadow-lg"><Video className="size-7 text-white" /></div>
             </div>
+            <div className="flex flex-1 flex-col p-6"><div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#2BACFF]">Creation</p><h2 className="mt-0.5 text-[18px] font-semibold text-foreground">AI Video</h2></div><span className="rounded-full bg-[#EEF9FF] px-2.5 py-0.5 text-[11px] font-medium text-[#1476AE]">Live</span></div><p className="mt-3 text-sm text-muted-foreground">Generate traceable video takes from a reference frame and motion brief.</p><div className="mt-5 flex items-center gap-1 text-sm font-medium text-[#1476AE]">Open <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" /></div></div>
           </Link>
+          {showGamingPlayable && <Link
+            href="/gaming-playable"
+            className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+          >
+            <div className="flex h-28 items-center justify-center bg-[#FFEDD5]">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-[#F97316] shadow-lg"><Gamepad2 className="size-7 text-white" /></div>
+            </div>
+            <div className="flex flex-1 flex-col p-6"><div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#EA580C]">Interactive</p><h2 className="mt-0.5 text-[18px] font-semibold text-foreground">GamingPlayable</h2></div><span className="rounded-full bg-[#FFF7ED] px-2.5 py-0.5 text-[11px] font-medium text-[#C2410C]">New</span></div><p className="mt-3 text-sm text-muted-foreground">Create a playable HTML5 ad, preview it, then save or download one standalone file.</p><div className="mt-5 flex items-center gap-1 text-sm font-medium text-[#EA580C]">Open <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" /></div></div>
+          </Link>}
         </div>
       </div>
     </div>

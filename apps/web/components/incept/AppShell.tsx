@@ -142,7 +142,7 @@ export function AppShell() {
     const thread = liveThreads.find((item) => item.id === threadId);
     setActiveWorkspaceId(DEFAULT_WORKSPACE_ID);
     setActiveThreadId(threadId);
-    setActiveView(thread?.generationMode === "video" ? "Video" : "Image");
+    setActiveView("Image");
     setSidebarOpen(false);
   }
 

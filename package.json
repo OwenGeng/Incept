@@ -5,9 +5,8 @@
   "scripts": {
     "dev:web": "pnpm --filter @incept/web dev",
     "build:web": "pnpm --filter @incept/web build",
-    "lint:web": "pnpm --filter @incept/web lint"
-  },
-  "dependencies": {
-    "pnpm": "^11.5.2"
+    "lint:web": "pnpm --filter @incept/web lint",
+    "typecheck:web": "pnpm --filter @incept/web exec tsc --noEmit",
+    "release:validate": "node scripts/release-manifest.mjs validate"
   }
 }

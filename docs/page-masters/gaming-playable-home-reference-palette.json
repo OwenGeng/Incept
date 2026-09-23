@@ -1,0 +1,166 @@
+{
+  "source": "/var/folders/66/x7zky52d3wlbw7sqkz_jw3_r0000gp/T/codex-clipboard-25dfc29e-01cb-446a-8287-73a0a22acc58.png",
+  "sample_size": {
+    "width": 720,
+    "height": 422
+  },
+  "sampled_pixel_count": 303840,
+  "dominant_colors": [
+    {
+      "hex": "#F7F8FB",
+      "rgb": [
+        247,
+        248,
+        251
+      ],
+      "coverage_percent": 37.75
+    },
+    {
+      "hex": "#ECE4FF",
+      "rgb": [
+        236,
+        228,
+        255
+      ],
+      "coverage_percent": 1.34
+    },
+    {
+      "hex": "#7C3AED",
+      "rgb": [
+        124,
+        58,
+        237
+      ],
+      "coverage_percent": 1.22
+    },
+    {
+      "hex": "#DFECFF",
+      "rgb": [
+        223,
+        236,
+        255
+      ],
+      "coverage_percent": 0.86
+    },
+    {
+      "hex": "#0F1827",
+      "rgb": [
+        15,
+        24,
+        39
+      ],
+      "coverage_percent": 0.76
+    },
+    {
+      "hex": "#ACAFB6",
+      "rgb": [
+        172,
+        175,
+        182
+      ],
+      "coverage_percent": 0.73
+    },
+    {
+      "hex": "#EAEBEE",
+      "rgb": [
+        234,
+        235,
+        238
+      ],
+      "coverage_percent": 0.71
+    },
+    {
+      "hex": "#828791",
+      "rgb": [
+        130,
+        135,
+        145
+      ],
+      "coverage_percent": 0.71
+    },
+    {
+      "hex": "#DFE0E3",
+      "rgb": [
+        223,
+        224,
+        227
+      ],
+      "coverage_percent": 0.66
+    },
+    {
+      "hex": "#6A707C",
+      "rgb": [
+        106,
+        112,
+        124
+      ],
+      "coverage_percent": 0.62
+    },
+    {
+      "hex": "#000000",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "coverage_percent": 0.37
+    },
+    {
+      "hex": "#ECFEF6",
+      "rgb": [
+        236,
+        254,
+        246
+      ],
+      "coverage_percent": 0.36
+    },
+    {
+      "hex": "#6920DA",
+      "rgb": [
+        105,
+        32,
+        218
+      ],
+      "coverage_percent": 0.02
+    }
+  ],
+  "accent_candidates": [
+    {
+      "hex": "#7C3AED",
+      "rgb": [
+        124,
+        58,
+        237
+      ],
+      "coverage_percent": 1.22
+    },
+    {
+      "hex": "#DFECFF",
+      "rgb": [
+        223,
+        236,
+        255
+      ],
+      "coverage_percent": 0.86
+    },
+    {
+      "hex": "#E9E1FB",
+      "rgb": [
+        233,
+        225,
+        251
+      ],
+      "coverage_percent": 0.34
+    },
+    {
+      "hex": "#6920DA",
+      "rgb": [
+        105,
+        32,
+        218
+      ],
+      "coverage_percent": 0.02
+    }
+  ],
+  "note": "Observed pixel samples only. Confirm semantic roles before treating any value as a product token."
+}

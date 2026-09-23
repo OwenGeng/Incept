@@ -67,6 +67,14 @@ export type SidebarUser = {
   roleLabel?: string | null;
 };
 
+export type SidebarPrimaryAction = {
+  label: string;
+  icon: React.ElementType;
+  href?: string;
+  onClick?: () => void;
+  className?: string;
+};
+
 export interface AppSidebarProps {
   /** Product name shown in the header — e.g. "Scout", "Studio" */
   productName: string;
@@ -82,8 +90,21 @@ export interface AppSidebarProps {
   /** Return true if the item/child with this key is currently active */
   isActive: (key: string) => boolean;
   user?: SidebarUser;
-  onSignOut: () => void;
+  onSignOut?: () => void;
   topContent?: React.ReactNode;
+  /** Product-owned content rendered in the main sidebar region (for focused tools). */
+  content?: React.ReactNode;
+  /** Expanded width when `content` needs more room than a conventional navigation rail. */
+  expandedWidthClassName?: string;
+  /** Product's primary creation action. It remains available as an icon when collapsed. */
+  primaryAction?: SidebarPrimaryAction;
+  /** Accessible label for the primary navigation region. */
+  navigationLabel?: string;
+  /** Content above the account block, such as product-specific help. */
+  footerContent?: React.ReactNode;
+  /** Product accent overrides while retaining the shared sidebar structure. */
+  activeItemClassName?: string;
+  activeIconClassName?: string;
 }
 
 // ── Collapsed-mode group flyout ────────────────────────────────────────────────
@@ -138,6 +159,13 @@ export function AppSidebar({
   user,
   onSignOut,
   topContent,
+  content,
+  expandedWidthClassName,
+  primaryAction,
+  navigationLabel = "Primary navigation",
+  footerContent,
+  activeItemClassName = "bg-soft-accent font-semibold text-foreground",
+  activeIconClassName = "text-accent",
 }: AppSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -178,12 +206,14 @@ export function AppSidebar({
   }
 
   const isCollapsed = mounted && collapsed;
+  const userLabel = user?.email ?? user?.name ?? "Workspace";
+  const PrimaryActionIcon = primaryAction?.icon;
 
   return (
     <aside
       className={cn(
-        "relative z-10 flex h-screen shrink-0 sticky top-0 flex-col bg-secondary border-r border-border transition-[width] duration-200 ease-in-out",
-        isCollapsed ? "w-[64px]" : "w-[220px]",
+        "relative z-10 flex h-screen shrink-0 sticky top-0 flex-col border-r border-border bg-white transition-[width] duration-200 ease-in-out",
+        isCollapsed ? "w-[64px]" : (expandedWidthClassName ?? "w-[220px]"),
       )}
     >
       {/* ── Collapse / expand toggle ────────────────────────────────────────── */}
@@ -230,20 +260,11 @@ export function AppSidebar({
                 LL
               </div>
             )}
-            <div className="flex min-w-0 flex-col leading-none">
-              <span className="text-[15px] font-semibold tracking-tight text-foreground transition group-hover:text-foreground">
-                {brandTitle}
-              </span>
-              {brandSubtitle ? (
-                <span className="mt-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground transition group-hover:text-foreground/80">
-                  {brandSubtitle}
-                </span>
-              ) : null}
-            </div>
+            <span className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-foreground">{brandTitle}{brandSubtitle ? <><span className="text-muted-foreground transition group-hover:text-foreground/80"> </span><span className="text-muted-foreground transition group-hover:text-foreground/80">{brandSubtitle}</span></> : null}</span>
           </Link>
           {productName ? (
             <div className="mt-1.5 px-1">
-              <span className="text-[17px] font-semibold tracking-tight text-foreground">
+              <span className="text-[13px] font-semibold tracking-tight text-muted-foreground">
                 {productName}
               </span>
             </div>
@@ -257,9 +278,22 @@ export function AppSidebar({
         </div>
       ) : null}
 
-      {/* ── Navigation ──────────────────────────────────────────────────────── */}
+      {primaryAction && PrimaryActionIcon ? (
+        <div className={cn("shrink-0", isCollapsed ? "px-2 py-3" : "px-3 pt-4")}>
+          {primaryAction.href ? (
+            <Link href={primaryAction.href as Route} title={isCollapsed ? primaryAction.label : undefined} className={cn("flex h-11 items-center rounded-xl text-sm font-semibold text-white shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2", isCollapsed ? "justify-center px-0" : "justify-center gap-2 px-3", primaryAction.className)}><PrimaryActionIcon className="size-4" />{!isCollapsed && primaryAction.label}</Link>
+          ) : (
+            <button type="button" onClick={primaryAction.onClick} title={isCollapsed ? primaryAction.label : undefined} className={cn("flex h-11 w-full items-center rounded-xl text-sm font-semibold text-white shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2", isCollapsed ? "justify-center px-0" : "justify-center gap-2 px-3", primaryAction.className)}><PrimaryActionIcon className="size-4" />{!isCollapsed && primaryAction.label}</button>
+          )}
+        </div>
+      ) : null}
+
+      {/* ── Product content / navigation ───────────────────────────────────── */}
+      {content && !isCollapsed ? (
+        <div className="flex-1 overflow-y-auto">{content}</div>
+      ) : (
       <div className="flex-1 overflow-y-auto py-3">
-        <nav className="flex flex-col gap-0.5 px-2" aria-label="Primary navigation">
+        <nav className="flex flex-col gap-0.5 px-2" aria-label={navigationLabel}>
           {items.map((item) => {
             /* ── Separator ──────────────────────────────────────────────── */
             if (item.kind === "separator") {
@@ -304,7 +338,7 @@ export function AppSidebar({
                     <Icon
                       className={cn(
                         "size-4 shrink-0",
-                        anyChildActive ? "text-accent" : "text-muted-foreground",
+                        anyChildActive ? activeIconClassName : "text-muted-foreground",
                       )}
                     />
                     {!isCollapsed && (
@@ -330,7 +364,7 @@ export function AppSidebar({
                         const childCls = cn(
                           "flex items-center rounded-xl px-3 py-2 text-[13px] transition",
                           active
-                            ? "bg-soft-accent font-semibold text-foreground"
+                            ? activeItemClassName
                             : "text-muted-foreground hover:bg-muted hover:text-foreground",
                         );
                         if (child.href) {
@@ -362,7 +396,7 @@ export function AppSidebar({
               disabled
                 ? "cursor-default opacity-40"
                 : active
-                ? "bg-soft-accent font-semibold text-foreground"
+                ? activeItemClassName
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             );
             const iconCls = cn(
@@ -370,7 +404,7 @@ export function AppSidebar({
               disabled
                 ? "text-muted-foreground"
                 : active
-                ? "text-accent"
+                ? activeIconClassName
                 : "text-muted-foreground group-hover:text-foreground",
             );
 
@@ -407,18 +441,16 @@ export function AppSidebar({
           })}
         </nav>
       </div>
+      )}
 
       {/* ── User account ────────────────────────────────────────────────────── */}
       <div className="shrink-0 border-t border-border px-2 py-3">
+        {!isCollapsed && footerContent ? <div className="mb-2">{footerContent}</div> : null}
         {isCollapsed ? (
           <div className="flex justify-center">
-            <button
-              onClick={onSignOut}
-              title={user?.email ? `${user.email} — Sign out` : "Sign out"}
-              className="flex size-9 items-center justify-center rounded-xl bg-muted text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
+            {onSignOut ? <button onClick={onSignOut} title={`${userLabel} — Sign out`} className="flex size-9 items-center justify-center rounded-xl bg-muted text-muted-foreground transition hover:bg-muted hover:text-foreground">
               <User className="size-4" />
-            </button>
+            </button> : <span title={userLabel} className="flex size-9 items-center justify-center rounded-xl bg-muted text-xs font-semibold text-muted-foreground">{userLabel.slice(0, 1).toUpperCase()}</span>}
           </div>
         ) : (
           <div className="group flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(16,19,24,0.04)]">
@@ -427,24 +459,18 @@ export function AppSidebar({
                 <AvatarImage src={user.image} alt={user.name ?? "User"} referrerPolicy="no-referrer" />
               )}
               <AvatarFallback className="bg-foreground text-[11px] font-semibold text-background">
-                {(user?.email ?? user?.name ?? "U").slice(0, 1).toUpperCase()}
+                {userLabel.slice(0, 1).toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[11.5px] font-semibold text-foreground" title={user?.email ?? ""}>
-                {user?.email ?? "—"}
+              <div className="truncate text-[11.5px] font-semibold text-foreground" title={userLabel}>
+                {userLabel}
               </div>
               {user?.roleLabel && (
                 <div className="text-[10px] text-muted-foreground">{user.roleLabel}</div>
               )}
             </div>
-            <button
-              onClick={onSignOut}
-              title="Sign out"
-              className="shrink-0 rounded-lg p-1 text-muted-foreground transition hover:text-foreground"
-            >
-              <LogOut className="size-3.5" />
-            </button>
+            {onSignOut ? <button onClick={onSignOut} title="Sign out" className="shrink-0 rounded-lg p-1 text-muted-foreground transition hover:text-foreground"><LogOut className="size-3.5" /></button> : null}
           </div>
         )}
       </div>

@@ -1,0 +1,10 @@
+#!include:.gitignore
+
+# A Cloud SQL migration Job reads its source snapshot from GCS. Do not send
+# local databases, local environments, or build artifacts to Cloud Build.
+apps/api/data/
+apps/api/.venv/
+node_modules/
+apps/web/node_modules/
+.next/
+dist/

@@ -32,12 +32,17 @@ RUN printf '%s\n' '#!/bin/sh' 'exec /usr/bin/chromium --no-sandbox --disable-set
     && chmod 755 /usr/local/bin/incept-chromium
 
 # Creative Core invokes Node/tsx through pnpm for browser video exports.
+# node/npm/npx/corepack are symlinks into /usr/local/lib/node_modules in the
+# upstream image (e.g. npm -> ../lib/node_modules/npm/bin/npm-cli.js). Copying
+# each bin symlink as a single-file COPY dereferences it into a flattened real
+# file, which breaks their relative `require('./lib/...')` calls. Copy the
+# real node binary plus the node_modules tree, then recreate the symlinks.
 COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
-COPY --from=node_runtime /usr/local/bin/npm /usr/local/bin/npm
-COPY --from=node_runtime /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=node_runtime /usr/local/bin/corepack /usr/local/bin/corepack
 COPY --from=node_runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -sf /usr/local/lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+    && corepack enable && corepack prepare pnpm@10.24.0 --activate
 
 # Copy only the versioned Creative Core source. Installing its dependencies in
 # this Linux image avoids bringing macOS-native binaries into Cloud Run.
@@ -65,6 +70,10 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Copy application source
 COPY apps/api/app/ ./app/
+# One-time operational tools. They are not invoked by the API container, but
+# are available to the separately created Cloud Run migration Job.
+COPY apps/api/scripts/migrate_sqlite_to_postgres.py ./scripts/migrate_sqlite_to_postgres.py
+COPY apps/api/scripts/init_ai_video_schema.py ./scripts/init_ai_video_schema.py
 
 # SQL query files are loaded at runtime by supply_smb_live.py
 COPY sql/ ./sql/

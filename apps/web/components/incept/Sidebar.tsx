@@ -2,21 +2,20 @@
 
 import { useCallback } from "react";
 import { signOut, useSession } from "next-auth/react";
-import { Activity, Clapperboard, Home, ImageIcon, Library } from "lucide-react";
+import { Activity, Home, ImageIcon, Library } from "lucide-react";
 import type { InceptUser } from "@incept/shared";
 import { AppSidebar, type SidebarNavItem } from "@/components/ui/app-sidebar";
 import type { ContentScope } from "@/lib/incept-api";
 
 // ── AppView type (exported so AppShell and other components can use it) ────────
 
-export type AppView = "Home" | "Image" | "Video" | "VideoProduction" | "Analyze" | "Library" | "Settings" | "Workspace" | "Usage";
+export type AppView = "Home" | "Image" | "Analyze" | "Library" | "Settings" | "Workspace" | "Usage";
 
 // ── Nav item definitions ───────────────────────────────────────────────────────
 
 const BASE_ITEMS: Array<Omit<Extract<SidebarNavItem, { kind: "simple" }>, "onClick">> = [
   { kind: "simple", key: "Home",    label: "Home",    icon: Home },
   { kind: "simple", key: "Image",   label: "Image",   icon: ImageIcon },
-  { kind: "simple", key: "VideoProduction", label: "Video Production", icon: Clapperboard },
   { kind: "simple", key: "Library", label: "Library", icon: Library },
   { kind: "simple", key: "Usage",   label: "Usage",   icon: Activity },
 ];
@@ -40,7 +39,9 @@ export function Sidebar({
 }: SidebarProps) {
   const { data: session } = useSession();
   const user = session?.user;
-  const canViewAllContent = currentUser.role === "admin" || currentUser.role === "manager";
+  // Workspace content is shared by signed-in members. The scope control only
+  // changes what is displayed; it does not grant edit or delete permission.
+  const canViewAllContent = Boolean(currentUser.id && currentUser.id !== "anon");
 
   const items: SidebarNavItem[] = [
     ...BASE_ITEMS.map((item) => ({
@@ -58,6 +59,7 @@ export function Sidebar({
       brandSubtitle="Lab"
       logo="/logo.png"
       storageKey="studio"
+      expandedWidthClassName="w-60"
       items={items}
       isActive={isActive}
       user={{

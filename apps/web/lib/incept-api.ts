@@ -28,17 +28,68 @@ import type {
 const API_BASE_URL = "/api/incept";
 export type ContentScope = "mine" | "all";
 
-export type VideoProductionStage = "direction" | "script" | "design" | "storyboard" | "generate" | "edit" | "deliver";
+// `audio` remains accepted for older persisted productions; the UI normalizes
+// it to Edit and no longer exposes it as a workflow stage.
+export type VideoProductionStage = "direction" | "script" | "design" | "storyboard" | "generate" | "audio" | "edit" | "deliver";
 
 export interface VideoProductionCreativeDirection {
   status: "draft" | "approved";
+  confirmed_pack_keys?: string[];
   reference_summary: string;
+  reference_analysis?: {
+    source_summary?: string;
+    detailed_analysis?: string;
+    observed_style?: Record<string, string>;
+    timeline?: Array<{
+      start_seconds: number;
+      end_seconds: number;
+      observed_visual: string;
+      action: string;
+      camera: string;
+      on_screen_text?: string;
+      audio?: string;
+    }>;
+    people_and_wardrobe?: string[];
+    locations?: string[];
+    props_and_ui?: string[];
+    edit_and_camera?: string[];
+    uncertainty?: string[];
+  };
   commercial_type: string;
   reference_frame_plan: Array<{
     timestamp_seconds: number;
     purpose: string;
     rationale: string;
+    source_asset_id?: string;
+    source_asset_title?: string;
   }>;
+  design_handoff?: Array<{
+    pack_key: string;
+    pack_type: "character" | "environment" | "prop" | "ui" | "lighting" | "transition";
+    asset_name?: string;
+    purpose: string;
+    source_mode: "prompt_only" | "brand_asset" | "reference_frame" | "casting_brief" | "onset_prop" | "3d_render" | "ui_graphic" | "motion_graphic" | "vector_asset";
+    source_requirement: string;
+    reference_frame_index: number;
+    priority?: "high" | "medium" | "low";
+    handoff_scope?: "production_brief" | "design_asset";
+    required?: boolean;
+    status?: "ready" | "missing";
+    visual_mode?: string;
+    composition_role?: string;
+    visual_brief?: string;
+    continuity_rules?: string[];
+    scene_uses?: string[];
+    negative_constraints?: string[];
+  }>;
+  visual_inventory?: Record<string, Array<{
+    asset_key: string;
+    asset_name: string;
+    visual_brief: string;
+    reference_frame_index: number;
+    handoff_scope?: "production_brief" | "design_asset";
+  }>>;
+  output_language?: string;
   strengths_to_adapt: string[];
   story_structure: string[];
   scene_and_character_notes: string[];
@@ -76,6 +127,12 @@ export interface VideoProductionDesignSheet {
   scene_ids: string[];
   /** Why the Designer created this pack instead of reusing an existing state. */
   reason_for_new_pack: string;
+  user_authored?: boolean;
+  design_mode?: "asset" | "scene";
+  output_aspect_ratio?: "project" | "16:9" | "9:16";
+  handoff_key?: string;
+  source_mode?: "prompt_only" | "brand_asset" | "reference_frame";
+  source_notes?: string;
   prompt: string;
   crop_plan: string[];
   asset_ids: string[];
@@ -87,6 +144,7 @@ export interface VideoProductionDesignSheet {
   approved_asset_ids: string[];
   job_id: string | null;
   status: "draft" | "generating" | "ready" | "failed" | "approved";
+  failure_reason?: string | null;
 }
 
 export interface VideoProductionBeat {
@@ -99,9 +157,17 @@ export interface VideoProductionBeat {
 export interface VideoProductionScene {
   id: string;
   title: string;
+  purpose?: string;
   setting: string;
   action: string;
   dialogue_or_copy: string;
+  spoken_language: string;
+  dialogue: Array<{ speaker: string; text: string; on_camera: boolean; voice_description: string; delivery: string }>;
+  on_screen_text: string[];
+  camera_direction: string;
+  sound_direction: string;
+  continuity_notes: string;
+  restrictions: string[];
 }
 
 export interface VideoProductionScript {
@@ -117,6 +183,7 @@ export interface VideoProductionScript {
   asset_manifest: string[];
   risks: string[];
   raw_script: string;
+  structured_raw_script_hash: string;
   updated_at: string;
 }
 
@@ -127,6 +194,10 @@ export interface VideoProductionShot {
   title: string;
   start_seconds: number;
   duration_seconds: number;
+  generation_duration_seconds?: 4 | 6 | 8 | null;
+  generation_variants?: 1 | 2;
+  generation_mode?: "image_to_video" | "first_last_frame" | "extend";
+  extend_source_video_asset_id?: string | null;
   purpose: string;
   visual: string;
   action: string;
@@ -146,9 +217,26 @@ export interface VideoProductionShot {
   transition_in_asset_id?: string | null;
   transition_out_asset_id?: string | null;
   keyframe_asset_id?: string | null;
+  end_keyframe_asset_id?: string | null;
+  bridge_source_video_asset_id?: string | null;
+  bridge_timestamp_seconds?: number | null;
+  first_last_frame_status?: "not_set" | "ready" | "needs_intermediate";
+  first_last_frame_note?: string;
+  motion_feasibility?: "not_checked" | "safe" | "review" | "blocked";
+  recommended_transition_strategy?: "cut" | "match_cut" | "continuous" | "bridge";
+  motion_risk_reasons?: string[];
+  estimated_dialogue_seconds?: number | null;
+  estimated_audio_seconds?: number | null;
   keyframe_job_id?: string | null;
   video_asset_ids: string[];
+  selected_video_asset_id?: string | null;
+  include_in_edit?: boolean;
+  trim_in_seconds?: number;
+  trim_out_seconds?: number | null;
   video_job_id?: string | null;
+  source_signature?: string;
+  take_source_signature?: string;
+  take_outdated?: boolean;
   status: "draft" | "approved" | "generating" | "ready" | "failed";
 }
 
@@ -173,10 +261,80 @@ export interface VideoProductionAudioPlan {
   updated_at: string;
 }
 
+export interface VideoProductionEditOverlay {
+  id: string;
+  kind: "logo" | "store_badges" | "subtitle" | "image";
+  asset_id?: string | null;
+  text: string;
+  start_seconds: number;
+  end_seconds?: number | null;
+  position: "top_left" | "top_right" | "bottom_center" | "center";
+}
+
+export interface VideoProductionTakeReview {
+  take_id: string;
+  shot_id: string;
+  score: number;
+  verdict: "use" | "trim" | "regenerate" | "reject";
+  reasons: string[];
+  flags: Array<"unreadable_text" | "brand_mismatch" | "identity_drift" | "hard_cut" | "bad_motion" | "audio_issue">;
+  suggested_trim_in_seconds: number;
+  suggested_trim_out_seconds?: number | null;
+}
+
+export interface VideoProductionEditPlan {
+  overlays: VideoProductionEditOverlay[];
+  take_reviews: VideoProductionTakeReview[];
+  review_status: "draft" | "reviewing" | "ready" | "failed";
+  review_summary: string;
+  reviewed_at?: string | null;
+  qc_status: "not_run" | "pass" | "warning";
+  qc_issues: string[];
+  final_duration_seconds: number | null;
+  timeline_json: Record<string, unknown>;
+}
+
 export interface VideoProductionMessage {
   role: "user" | "assistant";
   text: string;
+  asset_ids?: string[];
   created_at: string;
+}
+
+export interface VideoProductionSetup {
+  target_market: string;
+  target_audience: string;
+  video_type: string;
+  visual_style: string;
+  spoken_language: string;
+  subtitle_language: string;
+  platform: string;
+  conversion_goal: string;
+  provider_selection?: VideoProductionProviderSelection;
+  confirmed: boolean;
+}
+
+export interface VideoProductionModelSelection {
+  provider: string;
+  model: string;
+}
+
+export interface VideoProductionProviderSelection {
+  text: VideoProductionModelSelection;
+  image: VideoProductionModelSelection;
+  video: VideoProductionModelSelection;
+  audio: VideoProductionModelSelection;
+}
+
+export interface VideoProductionProviderOption extends VideoProductionModelSelection {
+  label: string;
+}
+
+export interface VideoProductionProviderCapabilities {
+  text: VideoProductionProviderOption[];
+  image: VideoProductionProviderOption[];
+  video: VideoProductionProviderOption[];
+  audio: VideoProductionProviderOption[];
 }
 
 export interface VideoProduction {
@@ -189,18 +347,43 @@ export interface VideoProduction {
   target_seconds: 15 | 30 | 60;
   aspect_ratio: "16:9" | "9:16";
   resolution: "720p" | "1080p";
+  state_revision: number;
+  parent_production_id?: string | null;
+  branch_label: string;
+  archived_at: string | null;
+  archived_by: string | null;
+  revisions: Array<{ revision: number; label: string; summary: string; created_at: string }>;
+  script_revisions: Array<{ revision_id: string; revision: number; status: "draft" | "locked"; reason: string; actor_user_id: string; raw_script: string; scene_count: number; beat_count: number; script?: VideoProductionScript | null; created_at: string }>;
+  canvas_state: { node_positions: Record<string, { x: number; y: number }>; collapsed_groups: string[]; selected_node_id?: string | null };
+  pending_confirmation?: { id: string; question: string; reason: string; proposed_action: string; stage: string; choices: string[]; created_at: string } | null;
+  video_setup: VideoProductionSetup;
   reference_asset_ids: string[];
-  asset_links: Array<{ asset_id: string; role: string; label: string }>;
+  asset_links: Array<{ asset_id: string; role: string; label: string; source_note?: string; rights_note?: string }>;
   creative_direction: VideoProductionCreativeDirection;
   script: VideoProductionScript;
   design_bible: VideoProductionDesignBible;
   audio_plan: VideoProductionAudioPlan;
   shots: VideoProductionShot[];
+  storyboard_approved_at: string | null;
+  storyboard_approved_revision: number | null;
+  edit_plan: VideoProductionEditPlan;
   conversation: VideoProductionMessage[];
   final_asset_id?: string | null;
   render_job_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface VideoProductionEvent {
+  event_id: string;
+  production_id: string;
+  workspace_id: string;
+  event_type: string;
+  summary: string;
+  state_revision: number;
+  actor_user_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface VideoProductionCreatePayload {
@@ -209,6 +392,8 @@ export interface VideoProductionCreatePayload {
   target_seconds?: 15 | 30 | 60;
   aspect_ratio?: "16:9" | "9:16";
   resolution?: "720p" | "1080p";
+  brief?: string;
+  video_setup?: VideoProductionSetup;
 }
 
 export function getAssetFileExtension(
@@ -732,9 +917,25 @@ function videoProductionError(action: string, status: number, detail: string): E
   }
 }
 
-export async function listVideoProductions(workspaceId: string): Promise<VideoProduction[]> {
+export async function listVideoProductions(workspaceId: string, scope: ContentScope = "mine", includeArchived = false): Promise<VideoProduction[]> {
   if (!API_BASE_URL || !workspaceId) return [];
-  return fetchJson<VideoProduction[]>(`/video-productions?workspace_id=${encodeURIComponent(workspaceId)}`);
+  return fetchJson<VideoProduction[]>(`/video-productions?workspace_id=${encodeURIComponent(workspaceId)}&scope=${encodeURIComponent(scope)}&include_archived=${includeArchived}`);
+}
+
+export async function getVideoProduction(productionId: string): Promise<VideoProduction> {
+  return fetchJson<VideoProduction>(`/video-productions/${encodeURIComponent(productionId)}`);
+}
+
+export async function listVideoProductionEvents(productionId: string, limit = 20): Promise<VideoProductionEvent[]> {
+  return fetchJson<VideoProductionEvent[]>(`/video-productions/${encodeURIComponent(productionId)}/events?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function openVideoProductionEventStream(productionId: string): EventSource {
+  return new EventSource(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/events/stream`);
+}
+
+export async function getVideoProductionCapabilities(): Promise<VideoProductionProviderCapabilities> {
+  return fetchJson<VideoProductionProviderCapabilities>("/video-production-capabilities");
 }
 
 export async function createVideoProduction(payload: VideoProductionCreatePayload): Promise<VideoProduction> {
@@ -749,7 +950,7 @@ export async function createVideoProduction(payload: VideoProductionCreatePayloa
 
 export async function updateVideoProduction(
   productionId: string,
-  payload: Partial<Pick<VideoProduction, "title" | "stage" | "brief" | "target_seconds" | "aspect_ratio" | "resolution" | "reference_asset_ids" | "asset_links" | "creative_direction" | "script" | "design_bible" | "audio_plan">>,
+  payload: Partial<Pick<VideoProduction, "title" | "stage" | "brief" | "target_seconds" | "aspect_ratio" | "resolution" | "video_setup" | "reference_asset_ids" | "asset_links" | "creative_direction" | "script" | "design_bible" | "audio_plan" | "edit_plan" | "canvas_state">> & { expected_revision?: number },
 ): Promise<VideoProduction> {
   const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}`, {
     method: "PATCH",
@@ -757,6 +958,59 @@ export async function updateVideoProduction(
     body: JSON.stringify(payload),
   });
   if (!response.ok) throw videoProductionError("Update production", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function forkVideoProduction(productionId: string, label: string): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/fork`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label }),
+  });
+  if (!response.ok) throw videoProductionError("Create safe branch", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export interface VideoProductionCopilotResponse {
+  production: VideoProduction;
+  needs_confirmation: boolean;
+  clarification_questions: string[];
+}
+
+export async function runVideoProductionCopilot(
+  productionId: string,
+  payload: { message: string; asset_ids?: string[]; stage?: VideoProductionStage; confirm_action_id?: string | null },
+  signal?: AbortSignal,
+): Promise<VideoProductionCopilotResponse> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/copilot`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal,
+  });
+  if (!response.ok) throw videoProductionError("Production Copilot", response.status, await response.text());
+  return response.json() as Promise<VideoProductionCopilotResponse>;
+}
+
+export async function cancelVideoProductionCopilot(productionId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/copilot/cancel`, { method: "POST" });
+}
+
+export async function deleteVideoProduction(productionId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}`, { method: "DELETE" });
+  if (!response.ok) throw videoProductionError("Delete production", response.status, await response.text());
+}
+
+export async function archiveVideoProduction(productionId: string): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/archive`, { method: "POST" });
+  if (!response.ok) throw videoProductionError("Archive production", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function restoreVideoProduction(productionId: string): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/restore`, { method: "POST" });
+  if (!response.ok) throw videoProductionError("Restore production", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function restoreVideoProductionScriptRevision(productionId: string, revisionId: string): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/script-revisions/${encodeURIComponent(revisionId)}/restore`, { method: "POST" });
+  if (!response.ok) throw videoProductionError("Restore script checkpoint", response.status, await response.text());
   return response.json() as Promise<VideoProduction>;
 }
 
@@ -770,11 +1024,11 @@ export async function runVideoProductionScriptAgent(productionId: string, messag
   return response.json() as Promise<VideoProduction>;
 }
 
-async function runVideoProductionRole(productionId: string, endpoint: string, message: string, label: string): Promise<VideoProduction> {
+async function runVideoProductionRole(productionId: string, endpoint: string, message: string, label: string, shotIds: string[] = []): Promise<VideoProduction> {
   const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, shot_ids: shotIds }),
   });
   if (!response.ok) throw videoProductionError(label, response.status, await response.text());
   return response.json() as Promise<VideoProduction>;
@@ -788,8 +1042,18 @@ export function runVideoProductionDesigner(productionId: string, message: string
   return runVideoProductionRole(productionId, "production-designer", message, "Production Designer");
 }
 
-export function runVideoProductionDirector(productionId: string, message: string): Promise<VideoProduction> {
-  return runVideoProductionRole(productionId, "director", message, "Director");
+export function runVideoProductionDirector(productionId: string, message: string, shotIds: string[] = []): Promise<VideoProduction> {
+  return runVideoProductionRole(productionId, "director", message, "Director", shotIds);
+}
+
+export async function runVideoProductionEditReviewer(productionId: string, message = "", shotIds: string[] = []): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/edit-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, shot_ids: shotIds }),
+  });
+  if (!response.ok) throw videoProductionError("Edit Reviewer", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
 }
 
 export function runVideoProductionAudioProducer(productionId: string, message: string): Promise<VideoProduction> {
@@ -804,10 +1068,16 @@ export async function lockVideoProductionScript(productionId: string): Promise<V
   return response.json() as Promise<VideoProduction>;
 }
 
+export async function approveVideoProductionStoryboard(productionId: string): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/approve-storyboard`, { method: "POST" });
+  if (!response.ok) throw videoProductionError("Approve storyboard", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
 export async function updateVideoProductionShot(
   productionId: string,
   shotId: string,
-  payload: Partial<Omit<VideoProductionShot, "id" | "order" | "scene_id" | "keyframe_asset_id" | "video_asset_ids">>,
+  payload: Partial<Omit<VideoProductionShot, "id" | "order" | "video_asset_ids">>,
 ): Promise<VideoProduction> {
   const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/shots/${encodeURIComponent(shotId)}`, {
     method: "PATCH",
@@ -815,6 +1085,22 @@ export async function updateVideoProductionShot(
     body: JSON.stringify(payload),
   });
   if (!response.ok) throw videoProductionError("Update shot", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function createVideoProductionShot(productionId: string, payload: {
+  title: string; purpose?: string; visual?: string; action?: string; duration_seconds?: number;
+}): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/shots`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw videoProductionError("Create storyboard frame", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function deleteVideoProductionShot(productionId: string, shotId: string): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/shots/${encodeURIComponent(shotId)}`, { method: "DELETE" });
+  if (!response.ok) throw videoProductionError("Delete storyboard frame", response.status, await response.text());
   return response.json() as Promise<VideoProduction>;
 }
 
@@ -842,6 +1128,63 @@ export async function generateVideoProductionDesignSheet(productionId: string, s
   return { id: job.job_id, jobId: job.job_id, title: job.title, toolId: job.tool_id, status: job.status, progress: job.progress, eta: "Running…", lineageKey: job.lineage_key, message: job.message, createdAt: job.created_at };
 }
 
+export async function cancelVideoProductionDesignSheet(productionId: string, sheetId: string): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/design-sheets/${encodeURIComponent(sheetId)}/cancel`, { method: "POST" });
+  if (!response.ok) throw videoProductionError("Stop design generation", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function reframeVideoProductionScene(productionId: string, payload: {
+  source_asset_id: string;
+  output_aspect_ratio?: "project" | "16:9" | "9:16";
+}): Promise<JobSummary> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/scene-reframes`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw videoProductionError("Reframe scene", response.status, await response.text());
+  const job = await response.json() as ApiJob;
+  return { id: job.job_id, jobId: job.job_id, title: job.title, toolId: job.tool_id, status: job.status, progress: job.progress, eta: "Running…", lineageKey: job.lineage_key, message: job.message, createdAt: job.created_at };
+}
+
+export async function createVideoProductionDesignSheet(productionId: string, payload: {
+  title: string;
+  asset_pack_type: VideoProductionDesignSheet["asset_pack_type"];
+  purpose?: string;
+  prompt?: string;
+  source_asset_ids?: string[];
+  scene_ids?: string[];
+  design_mode?: "asset" | "scene";
+  output_aspect_ratio?: "project" | "16:9" | "9:16";
+}): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/design-sheets`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw videoProductionError("Create design pack", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function updateVideoProductionDesignSheet(productionId: string, sheetId: string, payload: Partial<{
+  title: string;
+  asset_pack_type: VideoProductionDesignSheet["asset_pack_type"];
+  purpose: string;
+  prompt: string;
+  source_asset_ids: string[];
+  scene_ids: string[];
+  design_mode: "asset" | "scene";
+  output_aspect_ratio: "project" | "16:9" | "9:16";
+}>): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/design-sheets/${encodeURIComponent(sheetId)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw videoProductionError("Update design pack", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
+}
+
+export async function deleteVideoProductionDesignSheet(productionId: string, sheetId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/design-sheets/${encodeURIComponent(sheetId)}`, { method: "DELETE" });
+  if (!response.ok) throw videoProductionError("Delete design pack", response.status, await response.text());
+}
+
 export async function selectVideoProductionDesignSheetPanel(productionId: string, sheetId: string, panel: number): Promise<VideoProduction> {
   const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/design-sheets/${encodeURIComponent(sheetId)}/select`, {
     method: "POST",
@@ -852,15 +1195,29 @@ export async function selectVideoProductionDesignSheetPanel(productionId: string
   return response.json() as Promise<VideoProduction>;
 }
 
-export async function generateVideoProductionShot(productionId: string, shotId: string): Promise<JobSummary> {
+export async function generateVideoProductionShot(productionId: string, shotId: string, variants: 1 | 2 = 2): Promise<JobSummary> {
   const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/shots/${encodeURIComponent(shotId)}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ variants: 1 }),
+    body: JSON.stringify({ variants }),
   });
   if (!response.ok) throw videoProductionError("Generate shot", response.status, await response.text());
   const job = await response.json() as ApiJob;
   return { id: job.job_id, jobId: job.job_id, title: job.title, toolId: job.tool_id, status: job.status, progress: job.progress, eta: "Running…", lineageKey: job.lineage_key, message: job.message, createdAt: job.created_at };
+}
+
+export async function extractVideoProductionBridgeFrame(
+  productionId: string,
+  shotId: string,
+  payload: { source_video_asset_id?: string; timestamp_seconds: number; target_shot_id?: string },
+): Promise<VideoProduction> {
+  const response = await fetch(`${API_BASE_URL}/video-productions/${encodeURIComponent(productionId)}/shots/${encodeURIComponent(shotId)}/bridge-frame`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw videoProductionError("Extract bridge frame", response.status, await response.text());
+  return response.json() as Promise<VideoProduction>;
 }
 
 export async function generateVideoProductionSoundtrack(productionId: string): Promise<JobSummary> {

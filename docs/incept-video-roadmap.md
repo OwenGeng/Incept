@@ -483,7 +483,7 @@ But the model should **not** be the runtime.
 | Task | Model / implementation |
 | --- | --- |
 | Image -> Video and video output | `veo-3.1-fast` |
-| Image/video/playable analysis and style reports | `gemini-3.1-flash-lite` |
+| Image/video/playable analysis and style reports | `gemini-3.6-flash` |
 | Image generation or replacement | `gemini-3.1-flash-image` |
 | Playable concept and validated schema draft | `gemini-3.6-flash` |
 | Final playable | Deterministic Moloco runtime rendered from the validated schema, not arbitrary model-authored JavaScript. |

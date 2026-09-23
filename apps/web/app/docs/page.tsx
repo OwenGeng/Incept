@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Paintbrush, BarChart3 } from "lucide-react";
+import { ArrowRight, Paintbrush } from "lucide-react";
 import { DocsBreadcrumb } from "@/components/docs/DocsChrome";
 
 const MODULES = [
@@ -8,12 +8,6 @@ const MODULES = [
     icon: Paintbrush,
     title: "Studio",
     description: "Image, video, and Kakao Bizboard creative generation — workflows, controls, and validation rules.",
-  },
-  {
-    href: "/docs/intelligence",
-    icon: BarChart3,
-    title: "Intelligence",
-    description: "Supply-side analysis and prospecting pipelines, including the Cold Prospect Pipeline.",
   },
 ];
 

@@ -117,7 +117,10 @@ def get_current_user(
     Priority:
       1. X-Internal-API-Key  — trusted call from the Next.js proxy (NBSpark portal)
       2. Google IAP JWT      — production Cloud Run with IAP enabled
-      3. Dev mode            — local development, no real auth required
+      3. Dev mode            — local development only, no real auth required
+
+    Anything that falls through all three (e.g. an unauthenticated request
+    hitting the Cloud Run URL directly) is rejected. There is no default user.
     """
 
     settings = get_settings()
@@ -164,23 +167,30 @@ def get_current_user(
             team="Moloco",
         )
 
-    # ── 3. Dev mode ───────────────────────────────────────────────────────────
-    user_id = x_incept_user_id if isinstance(x_incept_user_id, str) else None
-    email = x_incept_user_email if isinstance(x_incept_user_email, str) else None
-    name = x_incept_user_name if isinstance(x_incept_user_name, str) else None
-    role_value = x_incept_user_role if isinstance(x_incept_user_role, str) else None
-    team = x_incept_user_team if isinstance(x_incept_user_team, str) else None
+    # ── 3. Dev mode (local development only) ───────────────────────────────────
+    if settings.auth_mode == "dev" and settings.environment != "production":
+        user_id = x_incept_user_id if isinstance(x_incept_user_id, str) else None
+        email = x_incept_user_email if isinstance(x_incept_user_email, str) else None
+        name = x_incept_user_name if isinstance(x_incept_user_name, str) else None
+        role_value = x_incept_user_role if isinstance(x_incept_user_role, str) else None
+        team = x_incept_user_team if isinstance(x_incept_user_team, str) else None
 
-    if email:
-        _require_allowed_domain(email)
+        if email:
+            _require_allowed_domain(email)
 
-    role = Role(role_value or Role.manager.value)
-    return User(
-        id=user_id or "usr_jane",
-        name=name or "Jane Cooper",
-        email=email or "jane@moloco.com",
-        role=role,
-        team=team or "IM GM",
+        role = Role(role_value or Role.manager.value)
+        return User(
+            id=user_id or "usr_jane",
+            name=name or "Jane Cooper",
+            email=email or "jane@moloco.com",
+            role=role,
+            team=team or "IM GM",
+        )
+
+    # ── 4. Nothing matched — fail closed ───────────────────────────────────────
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Unauthorized",
     )
 
 

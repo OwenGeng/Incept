@@ -1,0 +1,115 @@
+{"kind":"deck","id":"pr/8i1hp6","name":"Deck"}
+{"kind":"layout","layoutId":"1a17582d-f9a9-474b-9a2f-5e2322dc713e","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"25742a3f-ac64-4f05-baba-e1d56122c131","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/pt3ura","slide":1,"title":"LINGLONG LAB · CREATIVE PRODUCTION","textShapes":20}
+{"kind":"shape","id":"sh/d4r658ja","slide":1,"bbox":[0,560,380,340]}
+{"kind":"shape","id":"sh/6h0nut0z","slide":1,"bbox":[1200,580,400,320]}
+{"kind":"textbox","id":"sh/r29o3y1k","slide":1,"text":"LINGLONG LAB · CREATIVE PRODUCTION","textPreview":"LINGLONG LAB · CREATIVE PRODUCTION","textChars":34,"textLines":1,"bbox":[64,54,420,24]}
+{"kind":"textbox","id":"sh/072503i1","slide":1,"name":"headline","text":"AI can generate an asset.\nCommercial creative needs a system.","textPreview":"AI can generate an asset. | Commercial creative needs a system.","textChars":61,"textLines":2,"bbox":[64,94,860,132]}
+{"kind":"textbox","id":"sh/18b698jm","slide":1,"text":"Linglong Lab turns brand assets, reference media and a brief into controlled, reusable image and video workflows.","textPreview":"Linglong Lab turns brand assets, reference media and a brief into controlled, reusable image and video workflows.","textChars":113,"textLines":1,"bbox":[66,274,770,52]}
+{"kind":"textbox","id":"sh/e50nyd0v","slide":1,"text":"Without a production layer","textPreview":"Without a production layer","textChars":26,"textLines":1,"bbox":[68,354,420,26]}
+{"kind":"shape","id":"sh/f69o7i1g","slide":1,"bbox":[70,398,34,34]}
+{"kind":"textbox","id":"sh/wby5ojix","slide":1,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[70,406,34,18]}
+{"kind":"textbox","id":"sh/hc7mxoji","slide":1,"text":"Context breaks","textPreview":"Context breaks","textChars":14,"textLines":1,"bbox":[122,397,410,24]}
+{"kind":"textbox","id":"sh/1gzet8ve","slide":1,"text":"Characters, products and brand cues drift between generations.","textPreview":"Characters, products and brand cues drift between generations.","textChars":62,"textLines":1,"bbox":[122,428,430,44]}
+{"kind":"shape","id":"sh/0fqx0nut","slide":1,"bbox":[70,501,34,34]}
+{"kind":"textbox","id":"sh/zehwrid8","slide":1,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[70,509,34,18]}
+{"kind":"textbox","id":"sh/ed8fydcn","slide":1,"text":"Creative support does not scale","textPreview":"Creative support does not scale","textChars":31,"textLines":1,"bbox":[122,500,410,24]}
+{"kind":"textbox","id":"sh/94jyxsva","slide":1,"text":"The long tail has limited access to tailored production support.","textPreview":"The long tail has limited access to tailored production support.","textChars":64,"textLines":1,"bbox":[122,531,430,44]}
+{"kind":"shape","id":"sh/o3ax4nu5","slide":1,"bbox":[70,604,34,34]}
+{"kind":"textbox","id":"sh/ni1gvidk","slide":1,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[70,612,34,18]}
+{"kind":"textbox","id":"sh/mhsf2dcz","slide":1,"text":"Repetitive work consumes capacity","textPreview":"Repetitive work consumes capacity","textChars":33,"textLines":1,"bbox":[122,603,410,24]}
+{"kind":"textbox","id":"sh/x83y1svm","slide":1,"text":"Format adaptation crowds out higher-value creative work.","textPreview":"Format adaptation crowds out higher-value creative work.","textChars":56,"textLines":1,"bbox":[122,634,430,44]}
+{"kind":"shape","id":"sh/w7ax87u1","slide":1,"name":"media-placeholder","bbox":[630,330,850,414]}
+{"kind":"shape","id":"sh/gn29kv69","slide":1,"bbox":[936,429.36,238,238]}
+{"kind":"shape","id":"sh/hobqt0nu","slide":1,"bbox":[1029.5,458.34,68,76.5]}
+{"kind":"textbox","id":"sh/ulkri5oj","slide":1,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[654,352,802,20]}
+{"kind":"textbox","id":"sh/vmt8rqp4","slide":1,"text":"Video workspace","textPreview":"Video workspace","textChars":15,"textLines":1,"bbox":[658,594.96,794,35]}
+{"kind":"textbox","id":"sh/4rm9of6l","slide":1,"text":"Insert product screenshot · direction → script → assets → storyboard → video","textPreview":"Insert product screenshot · direction → script → assets → storyboard → video","textChars":76,"textLines":1,"bbox":[658,652.92,794,32]}
+{"kind":"textbox","id":"sh/5svqxkn6","slide":1,"text":"The missing layer is not a better model. It is production control around the model.","textPreview":"The missing layer is not a better model. It is production control around the model.","textChars":83,"textLines":1,"bbox":[66,774,1370,32]}
+{"kind":"shape","id":"sh/ip4rm5of","slide":1,"bbox":[60,846,1480,0]}
+{"kind":"textbox","id":"sh/3qd8va50","slide":1,"text":"Confidential, proprietary and informational purposes only","textPreview":"Confidential, proprietary and informational purposes only","textChars":57,"textLines":1,"bbox":[60,858,720,24]}
+{"kind":"textbox","id":"sh/kvipcb6h","slide":1,"text":"LINGLONG LAB","textPreview":"LINGLONG LAB","textChars":12,"textLines":1,"bbox":[1320,850,210,30]}
+{"kind":"textbox","id":"sh/lwrqlg7m","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[1520,850,30,30]}
+{"kind":"notes","id":"nt/pt3ura","slide":1,"text":""}
+{"kind":"slide","id":"sl/asw30l","slide":2,"title":"PRODUCT DEMO","textShapes":24}
+{"kind":"shape","id":"sh/gnql0fit","slide":2,"bbox":[0,560,380,340]}
+{"kind":"shape","id":"sh/vmhkra18","slide":2,"bbox":[1200,580,400,320]}
+{"kind":"textbox","id":"sh/ul83y50n","slide":2,"text":"PRODUCT DEMO","textPreview":"PRODUCT DEMO","textChars":12,"textLines":1,"bbox":[64,52,420,24]}
+{"kind":"textbox","id":"sh/5sj2xkja","slide":2,"text":"One workflow for image creation\nand scripted video.","textPreview":"One workflow for image creation | and scripted video.","textChars":51,"textLines":2,"bbox":[64,92,960,120]}
+{"kind":"textbox","id":"sh/4rql4fip","slide":2,"text":"The system keeps source material, creative decisions and selected outputs connected across the production process.","textPreview":"The system keeps source material, creative decisions and selected outputs connected across the production process.","textChars":114,"textLines":1,"bbox":[66,236,930,34]}
+{"kind":"shape","id":"sh/3qhkva14","slide":2,"name":"media-placeholder","bbox":[66,324,680,350]}
+{"kind":"shape","id":"sh/ip83250z","slide":2,"bbox":[310.8,408,190.4,190.4]}
+{"kind":"shape","id":"sh/dgjm14jm","slide":2,"bbox":[385.6,432.5,54.4,61.2]}
+{"kind":"textbox","id":"sh/sfal8zi1","slide":2,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[90,346,632,20]}
+{"kind":"textbox","id":"sh/u9sz6t4z","slide":2,"text":"Image Studio","textPreview":"Image Studio","textChars":12,"textLines":1,"bbox":[94,548,624,35]}
+{"kind":"textbox","id":"sh/fa1gzy5k","slide":2,"text":"Insert product screenshot · create, edit, resize, Kakao & GIF","textPreview":"Insert product screenshot · create, edit, resize, Kakao & GIF","textChars":61,"textLines":1,"bbox":[94,597,624,32]}
+{"kind":"shape","id":"sh/gbah83m5","slide":2,"name":"media-placeholder","bbox":[820,324,680,350]}
+{"kind":"shape","id":"sh/hwjy18nq","slide":2,"bbox":[1064.8,408,190.4,190.4]}
+{"kind":"shape","id":"sh/2xszat4v","slide":2,"bbox":[1139.6,432.5,54.4,61.2]}
+{"kind":"textbox","id":"sh/3y103y5g","slide":2,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[844,346,632,20]}
+{"kind":"textbox","id":"sh/4zuhc3m1","slide":2,"text":"Video","textPreview":"Video","textChars":5,"textLines":1,"bbox":[848,548,624,35]}
+{"kind":"textbox","id":"sh/p03i58nm","slide":2,"text":"Insert product screenshot · plan, design, storyboard, generate","textPreview":"Insert product screenshot · plan, design, storyboard, generate","textChars":62,"textLines":1,"bbox":[848,597,624,32]}
+{"kind":"shape","id":"sh/y18zy94r","slide":2,"bbox":[66,722,42,42]}
+{"kind":"textbox","id":"sh/j2hgre5c","slide":2,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[66,730,42,20]}
+{"kind":"textbox","id":"sh/n6dwzal4","slide":2,"text":"Shared contracts","textPreview":"Shared contracts","textChars":16,"textLines":1,"bbox":[124,720,285,26]}
+{"kind":"textbox","id":"sh/ml4v65kj","slide":2,"text":"Strategy, script, design and storyboard use the same asset plan.","textPreview":"Strategy, script, design and storyboard use the same asset plan.","textChars":64,"textLines":1,"bbox":[124,751,285,54]}
+{"kind":"shape","id":"sh/98ve1k3a","slide":2,"bbox":[430,722,42,42]}
+{"kind":"textbox","id":"sh/o7mdsf2p","slide":2,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[430,730,42,20]}
+{"kind":"textbox","id":"sh/zidwvql8","slide":2,"text":"Reusable visual states","textPreview":"Reusable visual states","textChars":22,"textLines":1,"bbox":[488,720,285,26]}
+{"kind":"textbox","id":"sh/eh4v25kn","slide":2,"text":"Approved people, products and settings can carry across outputs.","textPreview":"Approved people, products and settings can carry across outputs.","textChars":64,"textLines":1,"bbox":[488,751,285,54]}
+{"kind":"shape","id":"sh/1kvex03y","slide":2,"bbox":[794,722,42,42]}
+{"kind":"textbox","id":"sh/0jmd4v2d","slide":2,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[794,730,42,20]}
+{"kind":"textbox","id":"sh/jexw7ulc","slide":2,"text":"Shot-level control","textPreview":"Shot-level control","textChars":18,"textLines":1,"bbox":[852,720,285,26]}
+{"kind":"textbox","id":"sh/ydofypkr","slide":2,"text":"Users approve the decisions that are costly to reverse.","textPreview":"Users approve the decisions that are costly to reverse.","textChars":55,"textLines":1,"bbox":[852,751,285,54]}
+{"kind":"shape","id":"sh/g7y1cnex","slide":2,"bbox":[1158,722,42,42]}
+{"kind":"textbox","id":"sh/h872lsfi","slide":2,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[1158,730,42,20]}
+{"kind":"textbox","id":"sh/u5gjaxwr","slide":2,"text":"Traceable production","textPreview":"Traceable production","textChars":20,"textLines":1,"bbox":[1216,720,285,26]}
+{"kind":"textbox","id":"sh/v6pkjixc","slide":2,"text":"Prompts, sources, versions and selections remain reviewable.","textPreview":"Prompts, sources, versions and selections remain reviewable.","textChars":60,"textLines":1,"bbox":[1216,751,285,54]}
+{"kind":"shape","id":"sh/4bylg7e9","slide":2,"bbox":[60,846,1480,0]}
+{"kind":"textbox","id":"sh/5cr2pcfe","slide":2,"text":"Confidential, proprietary and informational purposes only","textPreview":"Confidential, proprietary and informational purposes only","textChars":57,"textLines":1,"bbox":[60,858,720,24]}
+{"kind":"textbox","id":"sh/i9gjexw3","slide":2,"text":"LINGLONG LAB","textPreview":"LINGLONG LAB","textChars":12,"textLines":1,"bbox":[1320,850,210,30]}
+{"kind":"textbox","id":"sh/3apkn2xo","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1520,850,30,30]}
+{"kind":"notes","id":"nt/asw30l","slide":2,"text":""}
+{"kind":"slide","id":"sl/td9czf","slide":3,"title":"WHAT IT PRODUCES","textShapes":22}
+{"kind":"shape","id":"sh/ulofi90f","slide":3,"bbox":[0,560,380,340]}
+{"kind":"shape","id":"sh/h8zydoj6","slide":3,"bbox":[1200,580,400,320]}
+{"kind":"textbox","id":"sh/gnqxkjil","slide":3,"text":"WHAT IT PRODUCES","textPreview":"WHAT IT PRODUCES","textChars":16,"textLines":1,"bbox":[64,52,420,24]}
+{"kind":"textbox","id":"sh/3ahgfy1w","slide":3,"text":"One brief can become a\ncampaign-ready creative set.","textPreview":"One brief can become a | campaign-ready creative set.","textChars":51,"textLines":2,"bbox":[64,92,980,122]}
+{"kind":"textbox","id":"sh/i98fmt0r","slide":3,"text":"A video, images and interface views can all trace back to the same production decisions — rather than becoming disconnected files.","textPreview":"A video, images and interface views can all trace back to the same production decisions — rather than becoming disconnected files.","textChars":130,"textLines":1,"bbox":[66,244,1080,54]}
+{"kind":"shape","id":"sh/5czyhoj2","slide":3,"name":"media-placeholder","bbox":[66,340,600,337]}
+{"kind":"shape","id":"sh/4bqxo3ih","slide":3,"bbox":[282,420.88,168,168]}
+{"kind":"shape","id":"sh/zexw3u1s","slide":3,"bbox":[348,444.47,48,54]}
+{"kind":"textbox","id":"sh/yd4fap07","slide":3,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[90,362,552,20]}
+{"kind":"textbox","id":"sh/wvqdcb2t","slide":3,"text":"Hero commercial video","textPreview":"Hero commercial video","textChars":21,"textLines":1,"bbox":[94,555.68,544,35]}
+{"kind":"textbox","id":"sh/xwze5gje","slide":3,"text":"15–30 second customer-ready ad","textPreview":"15–30 second customer-ready ad","textChars":30,"textLines":1,"bbox":[94,602.86,544,32]}
+{"kind":"shape","id":"sh/atovalkn","slide":3,"name":"media-placeholder","bbox":[708,340,370,160]}
+{"kind":"shape","id":"sh/buxw3618","slide":3,"bbox":[734,395,64,64]}
+{"kind":"shape","id":"sh/kjqdgv2p","slide":3,"bbox":[758,415,19,22]}
+{"kind":"textbox","id":"sh/5kze90ja","slide":3,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[820,367,160,18]}
+{"kind":"textbox","id":"sh/yx8velkj","slide":3,"text":"Series consistency","textPreview":"Series consistency","textChars":18,"textLines":1,"bbox":[820,399,230,27]}
+{"kind":"textbox","id":"sh/jyhw7q14","slide":3,"text":"Characters, scenes and product states","textPreview":"Characters, scenes and product states","textChars":37,"textLines":1,"bbox":[820,431,230,34]}
+{"kind":"shape","id":"sh/03md4r2l","slide":3,"name":"media-placeholder","bbox":[1112,340,370,160]}
+{"kind":"shape","id":"sh/1ofexwj6","slide":3,"bbox":[1138,395,64,64]}
+{"kind":"shape","id":"sh/1k7u1sbu","slide":3,"bbox":[1162,415,19,22]}
+{"kind":"textbox","id":"sh/gjet8nu9","slide":3,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[1224,367,160,18]}
+{"kind":"textbox","id":"sh/fi5czito","slide":3,"text":"One idea, many sizes","textPreview":"One idea, many sizes","textChars":20,"textLines":1,"bbox":[1224,399,230,27]}
+{"kind":"textbox","id":"sh/ehwb6dc3","slide":3,"text":"Landscape, portrait and end-card adaptations","textPreview":"Landscape, portrait and end-card adaptations","textChars":44,"textLines":1,"bbox":[1224,431,230,34]}
+{"kind":"shape","id":"sh/po7u5sbq","slide":3,"name":"media-placeholder","bbox":[708,530,370,160]}
+{"kind":"shape","id":"sh/onytc7ul","slide":3,"bbox":[734,585,64,64]}
+{"kind":"shape","id":"sh/3mpc32t0","slide":3,"bbox":[758,605,19,22]}
+{"kind":"textbox","id":"sh/2lgbaxcf","slide":3,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[820,557,160,18]}
+{"kind":"textbox","id":"sh/dcru9cb2","slide":3,"text":"Kakao & GIF","textPreview":"Kakao & GIF","textChars":11,"textLines":1,"bbox":[820,589,230,27]}
+{"kind":"textbox","id":"sh/critg7uh","slide":3,"text":"Format-specific motion and ad assets","textPreview":"Format-specific motion and ad assets","textChars":36,"textLines":1,"bbox":[820,621,230,34]}
+{"kind":"shape","id":"sh/uxsra9sz","slide":3,"name":"media-placeholder","bbox":[1112,530,370,160]}
+{"kind":"shape","id":"sh/vy183etk","slide":3,"bbox":[1138,585,64,64]}
+{"kind":"shape","id":"sh/wza9cja5","slide":3,"bbox":[1162,605,19,22]}
+{"kind":"textbox","id":"sh/h03q54rq","slide":3,"text":"PLACEHOLDER","textPreview":"PLACEHOLDER","textChars":11,"textLines":1,"bbox":[1224,557,160,18]}
+{"kind":"textbox","id":"sh/i1cre9sv","slide":3,"text":"Storyboard control","textPreview":"Storyboard control","textChars":18,"textLines":1,"bbox":[1224,589,230,27]}
+{"kind":"textbox","id":"sh/j2l87e9g","slide":3,"text":"Scenes, prompts, versions and take selection","textPreview":"Scenes, prompts, versions and take selection","textChars":44,"textLines":1,"bbox":[1224,621,230,34]}
+{"kind":"textbox","id":"sh/4nu9gja1","slide":3,"text":"The result is not a single generated file. It is a reusable, reviewable creative package ready for commercial deployment.","textPreview":"The result is not a single generated file. It is a reusable, reviewable creative package ready for commercial deployment.","textChars":121,"textLines":1,"bbox":[66,728,1280,42]}
+{"kind":"shape","id":"sh/5o3q9orm","slide":3,"bbox":[60,846,1480,0]}
+{"kind":"textbox","id":"sh/6pcrits7","slide":3,"text":"Confidential, proprietary and informational purposes only","textPreview":"Confidential, proprietary and informational purposes only","textChars":57,"textLines":1,"bbox":[60,858,720,24]}
+{"kind":"textbox","id":"sh/rql8by9s","slide":3,"text":"LINGLONG LAB","textPreview":"LINGLONG LAB","textChars":12,"textLines":1,"bbox":[1320,850,210,30]}
+{"kind":"textbox","id":"sh/fah0fuxk","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1520,850,30,30]}
+{"kind":"notes","id":"nt/td9czf","slide":3,"text":""}

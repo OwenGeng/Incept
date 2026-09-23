@@ -72,18 +72,19 @@ type ThemeCreateMode = "style_modify" | "style_transfer";
 // Sizes grouped by family for the Resize task UI (endcard included as 4th group)
 const RESIZE_SIZE_GROUPS = [
   { label: "Banner",           sizes: ["320x50", "728x90", "1200x222", "640x100"] },
-  { label: "Landscape",        sizes: ["1200x628", "1200x600"] },
+  { label: "Landscape",        sizes: ["1200x628", "1200x600", "1920x1080"] },
   { label: "Portrait / Square",sizes: ["320x480", "300x250", "720x720"] },
-  { label: "Endcard",          sizes: ["360x640", "480x480", "640x360"] },
+  { label: "Endcard",          sizes: ["360x640", "1080x1920", "480x480", "640x360"] },
 ] as const;
 
 const RESIZE_SIZE_ORDER = RESIZE_SIZE_GROUPS.flatMap((group) => group.sizes);
+const RESIZE_GACHA_DISCLOSURE_SIZES = new Set(["1200x628", "1200x600"]);
 
-const ENDCARD_SIZE_SET = new Set(["360x640", "480x480", "640x360"]);
+const ENDCARD_SIZE_SET = new Set(["360x640", "1080x1920", "480x480", "640x360", "1920x1080"]);
 
 const IMAGE_SIZES = [
   "1200x628", "320x480", "300x250",
-  "720x720", "1200x600", "360x640", "480x480", "640x360",
+  "720x720", "1200x600", "1920x1080", "360x640", "1080x1920", "480x480", "640x360",
 ];
 
 // GIF supported for medium + endcard sizes
@@ -95,7 +96,9 @@ const GIF_ALLOWED_SIZES = new Set([
 
 const ENDCARD_SIZES = [
   { id: "360x640", label: "Portrait 9:16" },
+  { id: "1080x1920", label: "Portrait 9:16 HD" },
   { id: "640x360", label: "Landscape 16:9" },
+  { id: "1920x1080", label: "Landscape 16:9 HD" },
   { id: "480x480", label: "Square 1:1" },
 ];
 const ENDCARD_SIZE_IDS = ENDCARD_SIZES.map((s) => s.id);
@@ -116,6 +119,14 @@ const THEME_CREATE_MODES: Array<{ id: ThemeCreateMode; label: string; blurb: str
   { id: "style_modify", label: "Style Modify", blurb: "Keep the exact layout of one source image and transform its artistic style." },
   { id: "style_transfer", label: "Style Transfer", blurb: "Use Image 1 for content and Image 2 only for visual style DNA." },
 ];
+
+// Keep Theme Create on Gemini-native aspect ratios. The generated image is
+// exported at this exact size; arbitrary ad dimensions belong in Resize.
+const THEME_CREATE_SIZES = [
+  { id: "1920x1080", label: "Landscape 16:9 · 1920×1080" },
+  { id: "1080x1920", label: "Portrait 9:16 · 1080×1920" },
+] as const;
+const THEME_CREATE_SIZE_IDS = THEME_CREATE_SIZES.map((size) => size.id);
 
 const THEME_CREATE_WORLD_CUP_2026_PROMPT = `You are modifying [Image 1] to fit the global "2026 FIFA World Cup Tournament" premium broadcast campaign aesthetic.
 
@@ -152,6 +163,7 @@ export interface CreateImageViewProps {
   contentScope: ContentScope;
   activeWorkspaceId: string;
   activeThreadId?: string | null;
+  initialResizeAssetIds?: string[];
   onThreadSelect?: (id: string | null) => void;
   onJobCreated: (job: JobSummary) => void;
 }
@@ -1279,6 +1291,7 @@ export function CreateImageView({
   contentScope,
   activeWorkspaceId,
   activeThreadId,
+  initialResizeAssetIds = [],
   onThreadSelect,
   onJobCreated,
 }: CreateImageViewProps) {
@@ -1297,6 +1310,8 @@ export function CreateImageView({
   // Resize source images
   const [resizeSourceAssets, setResizeSourceAssets] = useState<ResizeSourceAsset[]>([]);
   const resizeFileRef = useRef<HTMLInputElement>(null);
+  const appliedInitialResizeSignature = useRef("");
+  const [resizeLibraryPickerOpen, setResizeLibraryPickerOpen] = useState(false);
   const [remediationSourceAssets, setRemediationSourceAssets] = useState<ResizeSourceAsset[]>([]);
   const [remediationAnalyses, setRemediationAnalyses] = useState<Record<string, RemediationAnalysisResult>>({});
   const [remediationScanning, setRemediationScanning] = useState(false);
@@ -1331,7 +1346,6 @@ export function CreateImageView({
   const [uploadingSource, setUploadingSource] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState("");
-  const [workbenchExpanded, setWorkbenchExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [psdInfo, setPsdInfo] = useState<string | null>(null);
   // Session
@@ -1561,6 +1575,41 @@ export function CreateImageView({
     });
     setCreateFlow("resize");
   }
+
+  function addResizeSourceFromLibrary(asset: AssetSummary) {
+    if (asset.type !== "image" || !asset.url || asset.url.includes("placeholder")) return;
+    setResizeSourceAssets((prev) => {
+      if (prev.some((item) => item.id === asset.id) || prev.length >= MAX_RESIZE_SOURCE_IMAGES) return prev;
+      return [...prev, {
+        id: asset.id,
+        url: asset.url,
+        name: asset.title || "Resize source",
+        width: asset.width,
+        height: asset.height,
+      }];
+    });
+    setResizeLibraryPickerOpen(false);
+    setCreateFlow("resize");
+  }
+
+  useEffect(() => {
+    const ids = initialResizeAssetIds.filter(Boolean).slice(0, MAX_RESIZE_SOURCE_IMAGES);
+    const signature = ids.join("|");
+    if (!signature || appliedInitialResizeSignature.current === signature) return;
+    const selectedAssets = ids
+      .map((id) => liveAssets.find((asset) => asset.id === id))
+      .filter((asset): asset is AssetSummary => Boolean(asset && asset.type === "image" && asset.url && !asset.url.includes("placeholder")));
+    if (!selectedAssets.length) return;
+    appliedInitialResizeSignature.current = signature;
+    setResizeSourceAssets(selectedAssets.map((asset) => ({
+      id: asset.id,
+      url: asset.url,
+      name: asset.title || "Resize source",
+      width: asset.width,
+      height: asset.height,
+    })));
+    setCreateFlow("resize");
+  }, [initialResizeAssetIds, liveAssets]);
 
   function buildThemeCreatePresetTemplate(): string {
     if (themeCreateMode === "style_modify") {
@@ -2140,7 +2189,7 @@ export function CreateImageView({
         generation_mode: "resize",
         include_gif: false,
         resize_include_gacha_disclosure: Boolean(
-          outputSizes.includes("1200x600") && entry.assets.some(
+          outputSizes.some((size) => RESIZE_GACHA_DISCLOSURE_SIZES.has(size)) && entry.assets.some(
             (asset) => asset.analysis?.resize_include_gacha_disclosure === true
           )
         ),
@@ -2222,7 +2271,7 @@ export function CreateImageView({
         generation_mode: "resize",
         include_gif: false,
         resize_include_gacha_disclosure: Boolean(
-          targetSize === "1200x600" && asset.analysis?.resize_include_gacha_disclosure === true
+          RESIZE_GACHA_DISCLOSURE_SIZES.has(targetSize) && asset.analysis?.resize_include_gacha_disclosure === true
         ),
         resize_prompt_overrides: resizePromptOverrides[targetSize]?.trim()
           ? { [targetSize]: resizePromptOverrides[targetSize].trim() }
@@ -2316,7 +2365,7 @@ export function CreateImageView({
   }, [mode]);
 
   useEffect(() => {
-    if (!selectedSizes.includes("1200x600")) {
+    if (!selectedSizes.some((size) => RESIZE_GACHA_DISCLOSURE_SIZES.has(size))) {
       setIncludeResizeGachaDisclosure(false);
     }
   }, [selectedSizes]);
@@ -2382,10 +2431,15 @@ export function CreateImageView({
     return () => document.removeEventListener("mousedown", handler);
   }, [activeChip]);
 
-  // Theme Create always generates a single 1200x628 output.
+  // Theme Create always produces one Gemini-native canvas. Resize is the
+  // separate workflow for non-native ad dimensions such as 1200×628.
   useEffect(() => {
     if (createFlow === "theme_create") {
-      setSelectedSizes(["1200x628"]);
+      setSelectedSizes((current) =>
+        THEME_CREATE_SIZE_IDS.includes(current[0] as (typeof THEME_CREATE_SIZE_IDS)[number])
+          ? [current[0]]
+          : ["1920x1080"]
+      );
     }
   }, [createFlow]);
 
@@ -2858,7 +2912,7 @@ export function CreateImageView({
               generation_mode: "resize",
               include_gif: includeGif,
               resize_include_gacha_disclosure:
-                selectedSizes.includes("1200x600") && includeResizeGachaDisclosure,
+                selectedSizes.some((size) => RESIZE_GACHA_DISCLOSURE_SIZES.has(size)) && includeResizeGachaDisclosure,
               resize_prompt_overrides: Object.fromEntries(
                 sizes
                   .map((size) => [size, resizePromptOverrides[size]?.trim() ?? ""])
@@ -2973,7 +3027,7 @@ export function CreateImageView({
           created_by: currentUser.id,
           source_asset_ids: [sourceIds[0]],
           theme: modeLabel,
-          output_sizes: ["1200x628"],
+          output_sizes: sizes,
           output_format: "image",
           reference_asset_ids: referenceIds,
           preserve_layout: false,
@@ -3576,8 +3630,8 @@ export function CreateImageView({
 
           <WorkbenchShell
             ref={barRef}
-            expanded={workbenchExpanded}
-            onToggleExpanded={() => setWorkbenchExpanded((prev) => !prev)}
+            autoHeight
+            showExpandControl={false}
             className={cn(
               "focus-within:shadow-[0_2px_20px_rgba(0,0,0,0.10)]",
               isDragUploading && "border-accent bg-soft-accent/10 shadow-[0_0_0_1px_rgba(34,197,94,0.18)]"
@@ -3620,11 +3674,9 @@ export function CreateImageView({
               className={cn(
                 "overflow-y-auto [scrollbar-width:thin]",
                 isKakaoFlow
-                  ? "min-h-0 flex-1"
+                  ? "max-h-[calc(100svh-280px)] flex-none"
                   : showImageWorkbenchSection
-                  ? workbenchExpanded
-                    ? "h-[260px] flex-none"
-                    : "h-[132px] flex-none"
+                  ? "max-h-[calc(100svh-280px)] flex-none"
                   : "h-0 min-h-0 flex-none overflow-hidden"
               )}
             >
@@ -3696,7 +3748,7 @@ export function CreateImageView({
             {createFlow === "resize" && resizeSourceAssets.length === 0 && (
               <div className="border-t border-border px-4 py-3">
                 <div className="flex min-h-[72px] items-center rounded-xl border border-dashed border-border bg-background/50 px-3 text-sm text-muted-foreground">
-                  Tap + below to upload one source image, then choose your target sizes.
+                  Tap + below to add a source image from your computer or Library, then choose target sizes.
                 </div>
               </div>
             )}
@@ -3988,7 +4040,7 @@ export function CreateImageView({
                 </div>
               )}
 
-              {/* Size chip: multi-select for Resize, fixed single output for Theme Create, original-size output for Remediation */}
+              {/* Size chip: multi-select for Resize, one Gemini-native output for Theme Create, original-size output for Remediation */}
               {createFlow === "resize" ? (
                 <div className="relative">
                   <ChipButton
@@ -4025,6 +4077,30 @@ export function CreateImageView({
                     </DropdownPanel>
                   )}
                 </div>
+              ) : createFlow === "theme_create" ? (
+                <div className="relative">
+                  <ChipButton
+                    label={`Size - ${selectedSizes[0] === "1080x1920" ? "9:16" : "16:9"}`}
+                    active={activeChip === "sizes"}
+                    onClick={() => toggleChip("sizes")}
+                  />
+                  {activeChip === "sizes" && (
+                    <DropdownPanel className="left-0 w-64">
+                      <DropdownLabel>Gemini-native output</DropdownLabel>
+                      {THEME_CREATE_SIZES.map((size) => (
+                        <DropdownItem
+                          key={size.id}
+                          label={size.label}
+                          selected={selectedSizes[0] === size.id}
+                          onClick={() => {
+                            setSelectedSizes([size.id]);
+                            setActiveChip(null);
+                          }}
+                        />
+                      ))}
+                    </DropdownPanel>
+                  )}
+                </div>
               ) : createFlow === "remediation" ? (
                 <div className="flex items-center rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
                   Output - Original size
@@ -4035,7 +4111,7 @@ export function CreateImageView({
                 </div>
               )}
 
-              {createFlow === "resize" && selectedSizes.includes("1200x600") && (
+              {createFlow === "resize" && selectedSizes.some((size) => RESIZE_GACHA_DISCLOSURE_SIZES.has(size)) && (
                 <button
                   type="button"
                   onClick={() => setIncludeResizeGachaDisclosure((value) => !value)}
@@ -4204,6 +4280,11 @@ export function CreateImageView({
                       resizeFileRef.current?.click();
                     }
                   }}
+                  onChooseFromLibrary={
+                    createFlow === "resize" && resizeSourceAssets.length < MAX_RESIZE_SOURCE_IMAGES
+                      ? () => setResizeLibraryPickerOpen(true)
+                      : undefined
+                  }
                   uploadDisabled={
                     (createFlow !== "resize" && createFlow !== "remediation") ||
                     (createFlow === "resize" && resizeSourceAssets.length >= MAX_RESIZE_SOURCE_IMAGES) ||
@@ -4471,6 +4552,27 @@ export function CreateImageView({
         previewAssetIndex={kakaoBatchPreviewAssetIndex}
         onPreviewAssetChange={setKakaoBatchPreviewAssetIndex}
       />
+    )}
+
+    {resizeLibraryPickerOpen && (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="resize-library-title" onMouseDown={() => setResizeLibraryPickerOpen(false)}>
+        <div className="flex max-h-[86vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="flex items-start justify-between gap-4 border-b px-5 py-4">
+            <div><p className="text-xs font-semibold uppercase tracking-[0.13em] text-accent">Resize source</p><h2 id="resize-library-title" className="mt-1 text-lg font-semibold">Choose an image from Library</h2><p className="mt-1 text-sm text-muted-foreground">Choose an existing image to add as a Resize source. You can add up to {MAX_RESIZE_SOURCE_IMAGES} images.</p></div>
+            <button type="button" onClick={() => setResizeLibraryPickerOpen(false)} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close Library picker"><X className="size-4" /></button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            {liveAssets.filter((asset) => asset.type === "image" && asset.url && !asset.url.includes("placeholder")).length ? (
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                {liveAssets.filter((asset) => asset.type === "image" && asset.url && !asset.url.includes("placeholder")).map((asset) => {
+                  const alreadyAdded = resizeSourceAssets.some((item) => item.id === asset.id);
+                  return <button key={asset.id} type="button" onClick={() => addResizeSourceFromLibrary(asset)} disabled={alreadyAdded || resizeSourceAssets.length >= MAX_RESIZE_SOURCE_IMAGES} className={cn("overflow-hidden rounded-xl border bg-card text-left transition", alreadyAdded ? "cursor-not-allowed opacity-55" : "hover:-translate-y-0.5 hover:border-accent/70 hover:shadow-md")}><img src={asset.url} alt={asset.title} className="aspect-square w-full object-cover" /><div className="flex items-center justify-between gap-2 p-3"><span className="min-w-0 truncate text-xs font-semibold">{asset.title}</span><span className="shrink-0 text-[10px] font-medium text-accent">{alreadyAdded ? "Added" : "Use image"}</span></div></button>;
+                })}
+              </div>
+            ) : <div className="rounded-xl border border-dashed bg-muted/20 px-6 py-16 text-center"><ImageIcon className="mx-auto size-7 text-muted-foreground" /><p className="mt-3 text-sm font-semibold">No images in Library yet</p><p className="mt-1 text-sm text-muted-foreground">Upload an image from your computer first, then return here to reuse it.</p></div>}
+          </div>
+        </div>
+      </div>
     )}
 
     {zoomedAsset && (

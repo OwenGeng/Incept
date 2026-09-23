@@ -5,8 +5,8 @@ import { forwardRef, useState, type DragEventHandler, type ReactNode } from "rea
 import { cn } from "@/lib/utils";
 
 interface WorkbenchShellProps {
-  expanded: boolean;
-  onToggleExpanded: () => void;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
   header?: ReactNode;
   body?: ReactNode;
   footer?: ReactNode;
@@ -17,6 +17,10 @@ interface WorkbenchShellProps {
   minimizedContent?: ReactNode;
   viewMode?: "compact" | "standard" | "expanded";
   onViewModeChange?: (mode: "compact" | "standard" | "expanded") => void;
+  /** Let the shell grow with its content instead of using the compact/expanded heights. */
+  autoHeight?: boolean;
+  /** Hide the compact/expanded control when a workspace has no collapsed state. */
+  showExpandControl?: boolean;
   className?: string;
   bodyClassName?: string;
   onDragOver?: DragEventHandler<HTMLDivElement>;
@@ -27,7 +31,7 @@ interface WorkbenchShellProps {
 export const WorkbenchShell = forwardRef<HTMLDivElement, WorkbenchShellProps>(
   function WorkbenchShell(
     {
-      expanded,
+      expanded = false,
       onToggleExpanded,
       header,
       body,
@@ -39,6 +43,8 @@ export const WorkbenchShell = forwardRef<HTMLDivElement, WorkbenchShellProps>(
       minimizedContent,
       viewMode,
       onViewModeChange,
+      autoHeight = false,
+      showExpandControl = true,
       className,
       bodyClassName,
       onDragOver,
@@ -55,10 +61,10 @@ export const WorkbenchShell = forwardRef<HTMLDivElement, WorkbenchShellProps>(
         ref={ref}
         className={cn(
           "relative flex flex-col overflow-visible rounded-[28px] border border-border bg-card shadow-[0_8px_32px_rgba(0,0,0,0.08)] transition-all duration-200",
-          minimized ? "h-[64px]" : expanded ? "h-[520px]" : "h-[300px]",
+          minimized ? "h-[64px]" : autoHeight ? "h-auto" : expanded ? "h-[520px]" : "h-[300px]",
           className,
         )}
-        style={{ maxHeight: minimized ? "64px" : expanded ? "calc(100svh - 140px)" : "calc(100svh - 260px)" }}
+        style={autoHeight ? undefined : { maxHeight: minimized ? "64px" : expanded ? "calc(100svh - 140px)" : "calc(100svh - 260px)" }}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -69,7 +75,7 @@ export const WorkbenchShell = forwardRef<HTMLDivElement, WorkbenchShellProps>(
           <>
             {overlay}
 
-            <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+            {isControlledView || onToggleMinimized || showExpandControl ? <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
               {isControlledView ? (
                 <div className="relative">
                   <button
@@ -111,7 +117,7 @@ export const WorkbenchShell = forwardRef<HTMLDivElement, WorkbenchShellProps>(
                   Minimize
                 </button>
               ) : null}
-              {!isControlledView ? <button
+              {!isControlledView && showExpandControl ? <button
                 type="button"
                 onClick={onToggleExpanded}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground"
@@ -119,7 +125,7 @@ export const WorkbenchShell = forwardRef<HTMLDivElement, WorkbenchShellProps>(
                 {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
                 {expanded ? "Collapse" : "Expand"}
               </button> : null}
-            </div>
+            </div> : null}
 
             {header ? <div className="shrink-0">{header}</div> : null}
 

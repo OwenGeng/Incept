@@ -1,0 +1,80 @@
+responsibility_cluster	module	files	deep	cluster	evidence	anchors	codegraph_nodes
+client:__mocks__	A-01 application host	4	0	0	4	frontend/src/__mocks__/@lobehub/icons.tsx; frontend/src/__mocks__/EpisodeHeader.tsx; frontend/src/__mocks__/ScriptReviewGate.tsx	9
+client:actions	A-01 application host	2	0	1	1	frontend/src/actions/generation.ts	40
+client:api	A-13 client transport	3	3	0	0	frontend/src/api/errors.ts; frontend/src/api/types.ts; frontend/src/api/transport.ts	82
+client:api.test.ts	A-01 application host	1	0	0	1	frontend/src/api.test.ts	18
+client:api.ts	A-01 application host	1	0	1	0	frontend/src/api.ts	232
+client:app-routes.ts	A-01 application host	1	0	1	0	frontend/src/app-routes.ts	17
+client:branding.ts	A-01 application host	1	0	1	0	frontend/src/branding.ts	5
+client:data	A-01 application host	1	0	1	0	frontend/src/data/style-templates.ts	6
+client:hooks	A-01 to A-21 shared client behavior	40	0	23	17	frontend/src/hooks/useProjectEventsSSE.ts; frontend/src/hooks/useAssistantSession.ts; frontend/src/hooks/useScriptReviewDraft.ts	387
+client:i18n	A-22 localisation	29	0	29	0	frontend/src/i18n/index.ts; frontend/src/i18n/vi/templates.ts; frontend/src/i18n/zh/templates.ts	63
+client:main.tsx	A-01 application host	1	1	0	0	frontend/src/main.tsx	16
+client:onboarding	A-01 application host	19	0	11	8	frontend/src/onboarding/tour.ts; frontend/src/onboarding/demo-project.ts; frontend/src/onboarding/steps.ts	195
+client:router.test.tsx	A-01 application host	1	0	0	1	frontend/src/router.test.tsx	16
+client:router.tsx	A-01 application host	1	1	0	0	frontend/src/router.tsx	30
+client:stores	A-13 client state	28	16	0	12	frontend/src/stores/tasks-store.ts; frontend/src/stores/app-store.ts; frontend/src/stores/usage-records-store.ts	383
+client:test	A-01 application host	6	0	6	0	frontend/src/test/fakeSseFetch.ts; frontend/src/test/setup.ts; frontend/src/test/fakeSseStream.ts	64
+client:types	A-13 client contracts	23	0	22	1	frontend/src/types/custom-endpoint.ts; frontend/src/types/script.ts; frontend/src/types/project.ts	351
+client:utils	A-01 application host	49	0	29	20	frontend/src/utils/entry-projection.ts; frontend/src/utils/reference-mentions.ts; frontend/src/utils/provider-models.ts	365
+domain:__init__.py	unassigned — triage required	1	0	1	0	lib/__init__.py	6
+domain:agent	A-16 agent sessions	13	1	12	0	lib/agent/agent_session_store/models.py	218
+domain:artifacts	A-11 to A-12 edit and delivery	18	18	0	0	lib/artifacts/artifact_manifest.py; lib/artifacts/artifact_planner.py; lib/artifacts/version_manager.py	668
+domain:backends	A-14 provider adapters	62	62	0	0	lib/backends/backend_runtime.py; lib/backends/video_backends/agnes.py; lib/backends/video_backends/dashscope.py	1508
+domain:billing	unassigned — triage required	9	0	9	0	lib/billing/ledger.py; lib/billing/usage_summary.py; lib/billing/call_failure.py	159
+domain:config	unassigned — triage required	10	0	10	0	lib/config/resolver.py; lib/config/service.py; lib/config/registry.py	341
+domain:custom_provider	A-14 provider adapters	48	48	0	0	lib/custom_provider/comfyui/inference.py; lib/custom_provider/endpoints.py; lib/custom_provider/endpoint_test/trial_run.py	1284
+domain:db	A-20 persistence and migrations	33	33	0	0	lib/db/repositories/task_repo.py; lib/db/repositories/usage_repo.py; lib/db/repositories/custom_provider_repo.py	451
+domain:episode	unassigned — triage required	7	0	7	0	lib/episode/episode_planner.py; lib/episode/episode_ledger.py; lib/episode/episode_reset.py	194
+domain:generation	A-09 to A-10 generation jobs	14	14	0	0	lib/generation/generation_queue.py; lib/generation/generation_worker.py; lib/generation/generation_result.py	523
+domain:i18n	unassigned — triage required	28	0	28	0	lib/i18n/__init__.py; lib/i18n/en/assets.py; lib/i18n/en/emails.py	85
+domain:infra	unassigned — triage required	19	0	19	0	lib/infra/logging_utils.py; lib/infra/retry.py; lib/infra/content_digest.py	288
+domain:market	unassigned — triage required	14	0	14	0	lib/market/entries.py; lib/market/fetch.py; lib/market/sources.py	316
+domain:project	A-02 to A-04 project domain	37	37	0	0	lib/project/project_manager.py; lib/project/data_validator.py; lib/project/project_migrations/v14_to_v15_formal_script_truth.py	977
+domain:prompts	unassigned — triage required	14	1	13	0	lib/prompts/prompt_templates/engine.py	202
+domain:references	A-07 reference analysis	4	4	0	0	lib/references/reference_compression.py; lib/references/reference_catalog.py; lib/references/reference_admission.py	71
+domain:script	A-05 script domain	45	1	44	0	lib/script/grid/models.py	1086
+domain:speech	unassigned — triage required	8	0	8	0	lib/speech/narration_delivery.py; lib/speech/speech_presentation.py; lib/speech/speech_composition/__init__.py	251
+domain:workflow	A-08 storyboard domain	4	4	0	0	lib/workflow/workflow_state.py; lib/workflow/workflow_plan.py; lib/workflow/workflow_rules.py	131
+evidence:a-02	A-02 to A-04 project domain	62	0	0	62	tests/integration/lib/project/test_data_validator.py; tests/integration/server/services/project/test_project_archive_service.py; tests/integration/lib/project/test_project_manager.py	1897
+evidence:a-05	A-05 script domain	72	0	0	72	tests/integration/lib/script/test_script_generator.py; tests/integration/server/services/project/test_script_review.py; tests/integration/lib/script/test_script_generator_reference_branch.py	2311
+evidence:a-06	A-06 asset library	19	0	0	19	tests/unit/lib/project/test_asset_rename.py; tests/integration/server/routers/test_assets_router.py; tests/unit/server/routers/test_asset_router_factory.py	463
+evidence:a-07	A-07 reference analysis	24	0	0	24	tests/integration/server/routers/test_reference_videos_router.py; tests/integration/server/services/tasks/test_execute_reference_video_task.py; tests/unit/lib/references/test_reference_compression.py	769
+evidence:a-08	A-08 storyboard and editor	8	0	0	8	tests/unit/server/routers/test_grids_router.py; tests/integration/server/media_tools/test_grid.py; tests/unit/lib/artifacts/test_grid_executor.py	374
+evidence:a-09	A-09 to A-10 generation jobs	70	0	0	70	tests/integration/lib/generation/test_media_generator_module.py; tests/integration/lib/generation/test_generation_worker_module.py; tests/integration/server/agent_runtime/sdk_tools/test_text_generation.py	2363
+evidence:a-11	A-11 to A-12 edit and delivery	16	0	0	16	tests/integration/lib/artifacts/test_artifact_manifest_storage.py; tests/integration/server/services/currency/test_video_artifact_currency.py; tests/integration/lib/artifacts/test_visual_artifact_provenance.py	452
+evidence:a-13	A-13 usage and audit	12	0	0	12	tests/integration/lib/db/repositories/test_usage_repo.py; tests/unit/lib/backends/backend_assembly/test_backend_assembly_specs.py; tests/integration/server/routers/test_usage_router_summary.py	449
+evidence:a-14	A-14 provider adapters	56	0	0	56	tests/unit/server/routers/test_custom_providers_api.py; tests/unit/server/routers/test_providers_api.py; tests/unit/lib/custom_provider/comfyui/test_comfyui_video_backend.py	2100
+evidence:a-16	A-16 agent runtime	60	0	0	60	tests/integration/server/agent_runtime/sdk_tools/test_patch_tools.py; tests/unit/server/agent_runtime/test_event_log.py; tests/integration/server/agent_runtime/sdk_tools/test_promote_draft.py	1947
+evidence:a-17/a-18	A-17/A-18 remote automation	2	0	0	2	tests/integration/server/test_remote_mcp.py; tests/unit/test_frontend_mcp_tool_i18n.py	97
+evidence:a-20	A-20 persistence and migrations	25	0	0	25	tests/unit/lib/db/models/test_credential_api.py; tests/unit/lib/db/models/test_db_models.py; tests/integration/lib/db/migrations/test_alembic_collapse_image_backend_buckets.py	267
+evidence:cross-cutting	cross-cutting test evidence	258	0	0	258	tests/integration/server/media_tools/test_videos.py; tests/integration/lib/config/test_config_resolver.py; tests/unit/lib/backends/test_backend_runtime.py	8306
+excluded:reference-tooling	non-product tooling — excluded	228	0	228	0	.agents/skills/impeccable/scripts/live-browser.js; .claude/skills/impeccable/scripts/live-browser.js; .agents/skills/impeccable/scripts/detector/detect-antipatterns-browser.js	7449
+persistence:alembic	A-20 database migrations	55	0	55	0	alembic/env.py; alembic/versions/8c2b1e7d4a90_split_minimax_video_endpoints.py; alembic/versions/b7f2c41d9a30_collapse_image_backend_buckets_to_default.py	612
+server:__init__.py	A-01 to A-20 service host	1	0	1	0	server/__init__.py	1
+server:agent_runtime	A-16 agent runtime	41	41	0	0	server/agent_runtime/session_manager.py; server/agent_runtime/event_log.py; server/agent_runtime/service.py	830
+server:app.py	A-01 to A-20 service host	1	1	0	0	server/app.py	75
+server:auth.py	A-01 to A-20 service host	1	1	0	0	server/auth.py	55
+server:cors_config.py	A-01 to A-20 service host	1	0	1	0	server/cors_config.py	5
+server:dependencies.py	A-01 to A-20 service host	1	1	0	0	server/dependencies.py	10
+server:draft_workflow.py	A-01 to A-20 service host	1	0	1	0	server/draft_workflow.py	81
+server:error_handlers.py	A-01 to A-20 service host	1	0	1	0	server/error_handlers.py	23
+server:i18n.py	A-01 to A-20 service host	1	0	1	0	server/i18n.py	10
+server:media_tools	A-09 to A-12 media operations	9	0	9	0	server/media_tools/videos.py; server/media_tools/context.py; server/media_tools/grid.py	282
+server:remote_mcp.py	A-01 to A-20 service host	1	1	0	0	server/remote_mcp.py	106
+server:routers	A-01 to A-20 HTTP contracts	43	43	0	0	server/routers/projects.py; server/routers/custom_providers.py; server/routers/files.py	1707
+server:services	A-01 to A-20 service host	35	7	28	0	server/services/project/project_archive.py; server/services/project/project_events.py; server/services/project/script_review.py	1198
+server:sse_channel.py	A-01 to A-20 service host	1	0	1	0	server/sse_channel.py	30
+server:text_generation.py	A-01 to A-20 service host	1	0	1	0	server/text_generation.py	108
+server:tool_runtime.py	A-01 to A-20 service host	1	1	0	0	server/tool_runtime.py	195
+ui:agent	A-16 scoped copilot	11	0	7	4	frontend/src/components/agent/AgentMemoryCabinet.tsx; frontend/src/components/agent/AddCredentialModal.tsx; frontend/src/components/agent/CredentialsSection.tsx	127
+ui:assets	A-06 asset library	10	0	6	4	frontend/src/components/assets/AssetFormModal.tsx; frontend/src/components/assets/AssetPickerModal.tsx; frontend/src/components/assets/AssetCard.tsx	91
+ui:canvas	A-08 storyboard and editor	120	0	67	53	frontend/src/components/canvas/timeline/ShotDetail.tsx; frontend/src/components/canvas/reference/ReferenceVideoCanvas.tsx; frontend/src/components/canvas/StudioCanvasRouter.tsx	1497
+ui:copilot	A-16 scoped copilot	30	0	20	10	frontend/src/components/copilot/AgentCopilot.tsx; frontend/src/components/copilot/chat/ContentBlockRenderer.tsx; frontend/src/components/copilot/chat/MessageRow.tsx	306
+ui:layout	A-21 shared UI and interaction	17	0	14	3	frontend/src/components/layout/GlobalHeader.tsx; frontend/src/components/layout/StudioLayout.tsx; frontend/src/components/layout/ExportScopeDialog.tsx	187
+ui:pages	A-01 to A-04 product surfaces	89	0	55	34	frontend/src/components/pages/ProjectsPage.tsx; frontend/src/components/pages/settings/CustomProviderForm.tsx; frontend/src/components/pages/settings/endpoints/comfyui-bindings.ts	1351
+ui:shared	A-21 shared UI and interaction	28	0	19	9	frontend/src/components/shared/ModelConfigSection.tsx; frontend/src/components/shared/LayeredModelFields.tsx; frontend/src/components/shared/VideoModelSpecBar.tsx	290
+ui:ui	A-21 shared UI and interaction	46	0	33	13	frontend/src/components/ui/SegmentRefsEditModal.tsx; frontend/src/components/ui/darkroom-tokens.ts; frontend/src/components/ui/RefThumbnail.tsx	369
+ui:usage	A-13 usage and audit	36	0	21	15	frontend/src/components/usage/UsagePopover.tsx; frontend/src/components/usage/UsageTrendChart.tsx; frontend/src/components/usage/usage-record-format.ts	492
+ui:workflow	A-21 shared UI and interaction	14	12	0	2	frontend/src/components/workflow/problem-views.ts; frontend/src/components/workflow/WorkflowPanel.tsx; frontend/src/components/workflow/WorkflowStepRow.tsx	144
+unassigned-—-triage-required	unassigned — triage required	20	0	18	2	scripts/audit_tests.py; agent_runtime_profile/.claude/skills/compose-video/scripts/compose_video.py; scripts/project_status_sync.py	458

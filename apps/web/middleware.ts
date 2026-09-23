@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { isDeferredProductSurfaceEnabled } from "@/lib/release-surfaces";
 import { NextResponse } from "next/server";
 import type { UserRole } from "@/types/next-auth";
 
@@ -28,6 +29,21 @@ function getAllowedRoles(pathname: string): UserRole[] | null {
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
+
+  // Preserve deferred products in source control while making their routes
+  // unreachable in the Image + AI Video release profile.
+  if (
+    !isDeferredProductSurfaceEnabled("videoProduction") &&
+    (pathname === "/video-production" || pathname.startsWith("/video-production/"))
+  ) {
+    return new NextResponse(null, { status: 404 });
+  }
+  if (
+    !isDeferredProductSurfaceEnabled("gamingPlayable") &&
+    (pathname === "/gaming-playable" || pathname.startsWith("/gaming-playable/"))
+  ) {
+    return new NextResponse(null, { status: 404 });
+  }
 
   // Dev mode: skip all auth checks
   if (process.env.AUTH_DEV_SKIP_SIGN_IN === "true") {

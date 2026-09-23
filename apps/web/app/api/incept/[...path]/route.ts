@@ -31,11 +31,16 @@ const FORWARDED_RES_HEADERS = [
   "content-type",
   "content-disposition",
   "content-length",
+  "content-range",
   "cache-control",
   "accept-ranges",
 ];
 
 type Ctx = { params: Promise<{ path: string[] }> };
+
+const delay = (milliseconds: number) => new Promise<void>((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
 
 async function getCloudRunIdentityToken(audience: string): Promise<string | null> {
   if (!process.env.K_SERVICE) return null;
@@ -88,6 +93,10 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
   // Preserve Content-Type so multipart uploads and JSON reach the backend intact
   const ct = req.headers.get("content-type");
   if (ct) fwd["content-type"] = ct;
+  // Video elements use Range requests to load MP4 metadata and seek. Preserve
+  // this hop-by-hop request header so the backend can return 206 responses.
+  const range = req.headers.get("range");
+  if (range) fwd.range = range;
 
   // ── 4. Forward to incept-api ──────────────────────────────────────────────
   let upstream: Response;
@@ -101,11 +110,31 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
       duplex: "half",
     });
   } catch (err) {
+    // `uvicorn --reload` briefly drops existing sockets while replacing the
+    // worker. A read request is safe to retry and should not surface a random
+    // 502 in the UI. Never retry mutations here: a POST can create a second
+    // generation job and must remain explicitly user-driven.
+    if (req.method === "GET" || req.method === "HEAD") {
+      try {
+        await delay(250);
+        upstream = await fetch(target, {
+          method: req.method,
+          headers: fwd,
+        });
+      } catch (retryErr) {
+        console.error("[incept proxy] upstream unreachable after retry:", retryErr);
+        return NextResponse.json(
+          { error: "nbs-api unreachable" },
+          { status: 502 },
+        );
+      }
+    } else {
     console.error("[incept proxy] upstream unreachable:", err);
     return NextResponse.json(
       { error: "nbs-api unreachable" },
       { status: 502 },
     );
+    }
   }
 
   // ── 5. Stream response back ───────────────────────────────────────────────

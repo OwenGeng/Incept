@@ -1,4 +1,5 @@
 ﻿import os
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -36,8 +37,13 @@ class Settings(BaseModel):
     # Gemini image generation (generate_content API — replaces Imagen long-term)
     vertex_gemini_image_model: str = Field(default="gemini-3.1-flash-image")
     vertex_gemini_enabled: bool = Field(default=True)
-    vertex_gemini_model: str = Field(default="gemini-3.1-flash-lite")
+    vertex_gemini_model: str = Field(default="gemini-3.6-flash")
     vertex_playable_model: str = Field(default="gemini-3.6-flash")
+    # GamingPlayable's conversational planner has an explicit, intentionally
+    # small model menu. Keep these independent from legacy video-to-playable
+    # generation so an environment override cannot silently change that flow.
+    vertex_playable_flash_model: str = Field(default="gemini-3.8-flash")
+    vertex_playable_pro_model: str = Field(default="gemini-3.1-pro-preview")
     # Keep video planning on the richer model without changing image/remediation analysis.
     vertex_video_analysis_model: str = Field(default="gemini-3.6-flash")
     vertex_lyria_model: str = Field(default="lyria-3-clip-preview")
@@ -48,6 +54,16 @@ class Settings(BaseModel):
     vertex_veo_model: str = Field(default="")
     studio_user_budget_usd: float = Field(default=500.0)
     veo_fast_estimated_cost_per_second_usd: float = Field(default=0.08)
+    # Gemini text pricing is deployment-owned. Keep the default at zero rather
+    # than silently inventing a price; usage is still metered by tokens.
+    studio_copilot_estimated_cost_per_1k_tokens_usd: float = Field(default=0.0)
+    studio_copilot_requests_per_minute: int = Field(default=12)
+    studio_copilot_max_message_chars: int = Field(default=12_000)
+    # Remote MCP is disabled unless deployment supplies both a public resource
+    # URL and opaque bearer credentials. Values are a JSON object: token ->
+    # non-secret caller identity used by normal Incept authorization.
+    video_production_mcp_public_url: str | None = Field(default=None)
+    video_production_mcp_api_keys: dict[str, dict[str, str]] = Field(default_factory=dict)
     creative_core_home: str = Field(default="")
     playable_capture_chrome_path: str = Field(default="")
     playable_capture_ffmpeg_path: str = Field(default="")
@@ -65,6 +81,30 @@ def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _json_object(value: str | None) -> dict[str, dict[str, str]]:
+    """Read deployment-owned MCP principals without logging bearer tokens."""
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    principals: dict[str, dict[str, str]] = {}
+    for token, principal in parsed.items():
+        if not isinstance(token, str) or not token or not isinstance(principal, dict):
+            continue
+        normalized = {
+            str(key): str(item)
+            for key, item in principal.items()
+            if isinstance(key, str) and isinstance(item, (str, int, float))
+        }
+        if normalized:
+            principals[token] = normalized
+    return principals
 
 
 @lru_cache
@@ -91,8 +131,10 @@ def get_settings() -> Settings:
         vertex_imagen_edit_model=os.getenv("VERTEX_IMAGEN_EDIT_MODEL", "imagen-4.0-generate-001"),
         vertex_gemini_image_model=os.getenv("VERTEX_GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
         vertex_gemini_enabled=os.getenv("VERTEX_GEMINI_ENABLED", "true").lower() == "true",
-        vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.1-flash-lite"),
+        vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.6-flash"),
         vertex_playable_model=os.getenv("VERTEX_PLAYABLE_MODEL", "gemini-3.6-flash"),
+        vertex_playable_flash_model=os.getenv("VERTEX_PLAYABLE_FLASH_MODEL", "gemini-3.8-flash"),
+        vertex_playable_pro_model=os.getenv("VERTEX_PLAYABLE_PRO_MODEL", "gemini-3.1-pro-preview"),
         vertex_video_analysis_model=os.getenv("VERTEX_VIDEO_ANALYSIS_MODEL", "gemini-3.6-flash"),
         vertex_lyria_model=os.getenv("VERTEX_LYRIA_MODEL", "lyria-3-clip-preview"),
         vertex_lyria_location=os.getenv("VERTEX_LYRIA_LOCATION", "global"),
@@ -102,6 +144,11 @@ def get_settings() -> Settings:
         vertex_veo_model=os.getenv("VERTEX_VEO_MODEL", ""),
         studio_user_budget_usd=float(os.getenv("STUDIO_USER_BUDGET_USD", "500")),
         veo_fast_estimated_cost_per_second_usd=float(os.getenv("VEO_FAST_ESTIMATED_COST_PER_SECOND_USD", "0.08")),
+        studio_copilot_estimated_cost_per_1k_tokens_usd=float(os.getenv("STUDIO_COPILOT_ESTIMATED_COST_PER_1K_TOKENS_USD", "0")),
+        studio_copilot_requests_per_minute=int(os.getenv("STUDIO_COPILOT_REQUESTS_PER_MINUTE", "12")),
+        studio_copilot_max_message_chars=int(os.getenv("STUDIO_COPILOT_MAX_MESSAGE_CHARS", "12000")),
+        video_production_mcp_public_url=os.getenv("INCEPT_VIDEO_MCP_PUBLIC_URL") or None,
+        video_production_mcp_api_keys=_json_object(os.getenv("INCEPT_VIDEO_MCP_API_KEYS")),
         creative_core_home=os.getenv("CREATIVE_CORE_HOME", ""),
         playable_capture_chrome_path=os.getenv("PLAYABLE_CAPTURE_CHROME_PATH", ""),
         playable_capture_ffmpeg_path=os.getenv("PLAYABLE_CAPTURE_FFMPEG_PATH", ""),

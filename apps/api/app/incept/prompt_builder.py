@@ -362,13 +362,15 @@ def build_image_remediation_prompt(
 _RESIZE_MICRO_BANNER_SIZES = {"320x50", "640x100"}
 _RESIZE_LARGE_BANNER_SIZES = {"1200x222"}
 _RESIZE_ULTRA_NARROW_LEADERBOARD_SIZES = {"728x90"}
-_RESIZE_LANDSCAPE_SIZES = {"1200x628", "1200x600", "640x360"}
-_RESIZE_PORTRAIT_SQUARE_SIZES = {"720x720", "300x250", "480x480", "320x480", "360x640"}
+_RESIZE_STRICT_PRESERVE_SIZES = {"1080x1920", "1920x1080"}
+_RESIZE_LANDSCAPE_SIZES = {"1200x628", "1200x600", "640x360", "1920x1080"}
+_RESIZE_PORTRAIT_SQUARE_SIZES = {"720x720", "300x250", "480x480", "320x480", "360x640", "1080x1920"}
 
 _GEMINI_MICRO_BANNER_RESIZE_TEMPLATE = """You are an expert production designer specializing in high-performance responsive micro-banners. Adapt the provided input image into an ultra-thin, wide banner format with the exact resolution of {target_size} (e.g., 320x50, 640x100).
 
 CRITICAL RESPONSIVE LIQUID-LAYOUT CONSTRAINTS:
 1. PERFECT ASSET PRESERVATION: Every original textual layer, graphic logo, branding asset, and the CTA/Text block from the source image must be preserved with 100% pixel-perfect fidelity. Do not alter fonts, colors, or language.
+   - FINAL DELIVERY SAFE AREA (MANDATORY): This generation is exported to a slightly narrower final banner. Treat the outermost 10% of the canvas on BOTH the left and right as disposable background-only bleed. Keep every logo, CTA, offer, product, face, and readable text completely inside the central 80% safe area. Nothing important may touch or enter either outer bleed zone.
 2. SINGLE FLUID CANVAS (ANTI-ISOLATION): 
    - The background across the entire banner must be ONE single, continuous, undivided, and un-interrupted organic environment cloned directly from the source image (e.g., continuous grass, textures, and lighting). 
    - You are strictly FORBIDDEN from creating any visual vertical columns, rectangular panel partitions, vertical division lines, or tone-breaking color blocks. There must be ZERO geometric separation or isolation between the assets and the background.
@@ -377,9 +379,10 @@ CRITICAL RESPONSIVE LIQUID-LAYOUT CONSTRAINTS:
    - The background textures must flow seamlessly and smoothly underneath and between the Logo, the Center Subject, and the CTA with perfect color and gradient continuity, blending them into one natural scene.
 4. AGGRESSIVE VISUAL SCALE: Scale up all main assets (Logo, CTA, and the core Subject/Hero element) so they dominate the vertical space, occupying at least 80% of the banner's height.
 5. HORIZONTAL POSITIONING LOGIC:
-   - Position the single brand LOGO on the leftmost side, drifting slightly inward from the edge.
+   - Position the single brand LOGO within the left side of the CENTRAL SAFE AREA, never against the physical left edge.
    - Position the main SUBJECT MATTER / HERO IMAGE perfectly in the horizontal center.
-   - Position the preserved CTA / Main text block on the right side, shifted INWARD (to the left) by approximately 15% of the canvas width to maintain a strict, clear empty safety margin on the far-right edge."""
+   - Position the preserved CTA / Main text block within the right side of the CENTRAL SAFE AREA, shifted INWARD from the physical right edge by at least 15% of the canvas width.
+6. FINAL PRE-FLIGHT CHECK: Before rendering, verify that cropping away the outer 10% on both sides would still leave one complete logo, one complete hero subject, and one complete CTA/text block. If not, scale down and move the elements inward until it would."""
 
 _GEMINI_LARGE_BANNER_RESIZE_TEMPLATE = """You are an expert production designer. Adapt the provided input image into a large, wide banner format with the exact resolution of {target_size}.
 
@@ -425,6 +428,15 @@ CRITICAL VISUAL CONSTRAINTS:
 2. COMPOSITION: Keep the original relative positioning of all elements. Do not rearrange or swap their positions.
 3. CANVAS FILL: Intelligently expand or crop the background to fit the new aspect ratio. Ensure the final output is sharp, with zero distortion, stretching, or squashing of the main elements."""
 
+_GEMINI_STRICT_PRESERVE_RESIZE_TEMPLATE = """Resize the provided source image to exactly {target_size}. This is a strict preservation task, not a redesign.
+
+NON-NEGOTIABLE RULES:
+1. Treat the source image as the complete visual source of truth. Preserve every existing person, object, logo, brand mark, letter, word, number, subtitle, UI element, color, typography, and relative placement exactly as shown.
+2. Do not add, remove, translate, rewrite, correct, replace, duplicate, stylize, or invent any visual element. In particular, never add English copy, logos, labels, captions, watermarks, buttons, or decorative text that is absent from the source.
+3. Do not delete, obscure, crop away, or alter any source logo or source text. Do not move or rearrange the existing composition.
+4. To reach the target canvas, only extend the existing background naturally at the outer edges when necessary. If cropping is unavoidable, crop background before any meaningful source element. Never stretch or squash the source.
+5. Output one clean final image only: no grids, side-by-side comparisons, frames, annotations, dimension labels, or before/after layouts."""
+
 _GEMINI_PORTRAIT_SQUARE_RESIZE_TEMPLATE = """You are an expert production designer. Re-layout and adapt the provided input image into a Portrait/Square format with the exact resolution of {target_size}.
 
 CRITICAL VISUAL CONSTRAINTS:
@@ -451,6 +463,8 @@ _GEMINI_LARGE_BANNER_NEGATIVE_PROMPT = (
 
 
 def _get_resize_template(target_size: str) -> str:
+    if target_size in _RESIZE_STRICT_PRESERVE_SIZES:
+        return _GEMINI_STRICT_PRESERVE_RESIZE_TEMPLATE
     if target_size in _RESIZE_MICRO_BANNER_SIZES:
         return _GEMINI_MICRO_BANNER_RESIZE_TEMPLATE
     if target_size in _RESIZE_LARGE_BANNER_SIZES:
@@ -482,9 +496,18 @@ def build_resize_prompt(
         extras.append(f"Additional user instruction: {user_note.strip()}")
     default_negative_prompt = (
         _GEMINI_LARGE_BANNER_NEGATIVE_PROMPT
-        if target_size in (_RESIZE_MICRO_BANNER_SIZES | _RESIZE_LARGE_BANNER_SIZES)
+        if target_size in (
+            _RESIZE_MICRO_BANNER_SIZES
+            | _RESIZE_LARGE_BANNER_SIZES
+        )
         else _GEMINI_RESIZE_NEGATIVE_PROMPT
     )
+    if target_size in _RESIZE_STRICT_PRESERVE_SIZES:
+        default_negative_prompt = (
+            "new text, English text, translated text, invented logo, removed logo, changed logo, "
+            "missing text, rewritten copy, altered typography, duplicated elements, added UI, watermark, "
+            "redesign, collage, before and after, grid, label, annotation, cropped subject, stretched subject"
+        )
     negative_prompt = (negative_prompt_override or "").strip() or default_negative_prompt
     extras.append(f"Negative Prompt: {negative_prompt}")
 

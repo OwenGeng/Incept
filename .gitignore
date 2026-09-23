@@ -52,6 +52,7 @@ apps/incept-api/static/generated/
 apps/incept-api/static/uploads/
 apps/api/static/generated/
 apps/api/static/uploads/
+apps/api/static/ai-video-files/
 # Regression test image outputs
 apps/incept-api/regression_*/
 
@@ -60,3 +61,5 @@ apps/incept-api/regression_*/
 .codegraph/
 .DS_Store
 Thumbs.db
+# Added by code-review-graph
+.code-review-graph/

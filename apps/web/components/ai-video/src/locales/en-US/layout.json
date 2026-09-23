@@ -1,0 +1,30 @@
+{
+  "title": "Linglong Lab",
+  "subtitle": "AI Video",
+  "product": "AI Video",
+  "welcome": "Welcome to AI Video",
+  "navLabel": "AI Video navigation",
+  "languageLabel": "Language",
+  "collapseSidebar": "Collapse sidebar",
+  "expandSidebar": "Expand sidebar",
+  "nav": {
+    "projects": "Projects",
+    "assets": "Assets",
+    "prompts": "Prompt templates",
+    "models": "Models",
+    "settings": "Settings"
+  },
+  "menu": {
+    "settings": "Settings"
+  },
+  "user": {
+    "accountSettings": "Account settings",
+    "profile": "Profile",
+    "logout": "Logout",
+    "role": "System administrator"
+  },
+  "lang": {
+    "zh": "Chinese (Simplified)",
+    "en": "English"
+  }
+}
