@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.ai_video.core.database_url import build_cloud_sql_database_url
@@ -32,7 +33,10 @@ class Settings(BaseSettings):
 
     # The mounted module receives requests only through Linglong's authenticated
     # Next proxy and shares Incept's internal service credential.
-    internal_api_key: str = ""
+    internal_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("AI_VIDEO_INTERNAL_API_KEY", "INCEPT_INTERNAL_API_KEY"),
+    )
 
     # Provider credentials are intentionally server-only.  Creatify's API uses
     # two named headers: API ID and API key.  Environment values take precedence
@@ -48,9 +52,18 @@ class Settings(BaseSettings):
     # Linglong Lab uses ADC for Vertex AI. Do not supply model defaults here: model
     # IDs and locations remain user-owned configuration in the Provider/Model
     # records and the existing Incept deployment configuration.
-    vertex_ai_enabled: bool = False
-    gcp_project_id: str = ""
-    gcp_location: str = "global"
+    vertex_ai_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AI_VIDEO_VERTEX_AI_ENABLED", "VERTEX_AI_ENABLED"),
+    )
+    gcp_project_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("AI_VIDEO_GCP_PROJECT_ID", "GCP_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"),
+    )
+    gcp_location: str = Field(
+        default="global",
+        validation_alias=AliasChoices("AI_VIDEO_GCP_LOCATION", "GCP_LOCATION", "GOOGLE_CLOUD_LOCATION"),
+    )
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./linglong_ai_video.db"
@@ -114,7 +127,10 @@ class Settings(BaseSettings):
 
     # Google Cloud Storage is the production asset store. The legacy S3 fields
     # remain available for local RustFS/AWS development only.
-    gcs_bucket_name: str = ""
+    gcs_bucket_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("AI_VIDEO_GCS_BUCKET_NAME", "GCS_BUCKET_NAME", "INCEPT_ASSET_BUCKET"),
+    )
     gcs_base_path: str = "ai-video"
     gcs_public_base_url: str = ""
     # A disk fallback keeps the merged API usable for local upload tests when

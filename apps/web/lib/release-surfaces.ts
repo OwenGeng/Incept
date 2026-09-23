@@ -13,10 +13,10 @@ function parseBoolean(value: string | undefined): boolean | undefined {
 }
 
 /**
- * Deferred products remain usable in local development. Production is
- * fail-closed unless a release explicitly enables the corresponding surface.
+ * Deferred products are fail-closed in every environment. A release must
+ * explicitly enable the corresponding surface, including local development.
  */
 export function isDeferredProductSurfaceEnabled(surface: DeferredProductSurface): boolean {
   const configured = parseBoolean(process.env[flagBySurface[surface]]);
-  return configured ?? process.env.NODE_ENV !== "production";
+  return configured ?? false;
 }

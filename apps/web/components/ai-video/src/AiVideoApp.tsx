@@ -1,5 +1,6 @@
 "use client";
 
+import "@ant-design/v5-patch-for-react-19";
 import { Component, useEffect, type ReactNode } from "react";
 import { ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";

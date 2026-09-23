@@ -8,6 +8,8 @@ import inspect
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ai_video.config import settings
+
 try:
     from app.ai_video.main import app  # type: ignore
 except Exception:  # noqa: BLE001
@@ -22,6 +24,12 @@ def client() -> TestClient:
     if app is None:
         pytest.skip("FastAPI app 依赖未满足（例如缺少 langgraph），跳过需要 client 的集成测试。")
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolate_internal_proxy_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit routes run directly, while production is always behind Next's proxy."""
+    monkeypatch.setattr(settings, "internal_api_key", "")
 
 
 def pytest_configure(config: pytest.Config) -> None:
