@@ -152,6 +152,7 @@ import { writeClipboardText } from "@/lib/clipboard";
 import anonymousData from "@/lib/anonymousData";
 import { modelChoices } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { interfaceLanguage, t } from "@/i18n";
 import type { AgentAttachment, AgentConversation, AgentMessage } from "./types";
 import type { AgentEvent } from "@linglonglab/video-runtime-types/agent/types";
 import { createConversationStream, readAgentEvents } from "./replyStream";
@@ -199,11 +200,15 @@ const selectedModelChoice = computed(() => modelChoices.value.find(item => item.
 const contextWindow = computed(() => contextUsage.value?.contextWindow ?? selectedModelChoice.value?.contextWindow ?? 262144);
 const contextPercent = computed(() => (contextUsage.value?.tokens ?? 0) / contextWindow.value * 100);
 const inputTokens = computed(() => stats.value ? stats.value.tokens.input + stats.value.tokens.cacheRead + stats.value.tokens.cacheWrite : 0);
-const welcomeSuggestions = [
+const welcomeSuggestions = computed(() => interfaceLanguage.value === "en" ? [
+  { label: "Build a creative canvas", description: "Turn an idea into a clear node workflow", icon: IconLayoutGrid, prompt: "Help me build a creative canvas. First confirm the nodes and workflow I need." },
+  { label: "Plan a storyboard", description: "Break down the story into scenes and shots", icon: IconMovie, prompt: "Help me turn my story into a storyboard. First confirm the story, duration, and visual style." },
+  { label: "Generate image assets", description: "Explore a visual direction for characters and scenes", icon: IconPhoto, prompt: "Help me generate image assets. First confirm the subject, style, and model to use." },
+] : [
   { label: "搭建创作画布", description: "把创意串成清晰的节点流程", icon: IconLayoutGrid, prompt: "帮我搭建一个创作画布，先和我确认需要的节点与流程。" },
   { label: "梳理故事分镜", description: "拆解故事，安排画面与镜头", icon: IconMovie, prompt: "帮我把故事整理成分镜，先和我确认故事内容、时长和画面风格。" },
   { label: "生成图片素材", description: "为角色和场景寻找视觉方向", icon: IconPhoto, prompt: "帮我生成图片素材，先和我确认画面内容、风格和使用的模型。" },
-];
+]);
 watch([locked, editingId, () => props.active], ([locked, editingId, active]) => {
   if (!active || locked || editingId !== undefined) sender?.disable();
   else sender?.enable();
@@ -473,7 +478,7 @@ async function sendMessage(source?: AgentMessage) {
     }
     if (source && !accepted) throw new Error("服务端未确认重发，请重新打开对话后重试");
     finishStats("success");
-    emit("sent", prompt || attachments[0]?.name || "新对话");
+    emit("sent", prompt || attachments[0]?.name || t("新对话", "New conversation"));
   } catch (error) {
     finishStats(requestController.signal.aborted ? "cancelled" : "failed");
     const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;

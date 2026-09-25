@@ -1,5 +1,6 @@
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import { uiSettings, updateUiSettings } from "@/stores/settings";
+import { dynamicUiTranslations, extendedUiPhraseEntries, nodeUiPhraseEntries, uiPhraseEntries } from "@/i18nCatalog";
 
 export type InterfaceLanguage = "zh-CN" | "en";
 
@@ -185,22 +186,35 @@ const phrases = new Map<string, string>([
   ["加载失败", "Load failed"],
   ["启动失败", "Startup failed"],
   ["无法加载应用，请重试。", "Could not load the app. Try again."],
+  ...uiPhraseEntries,
+  ...extendedUiPhraseEntries,
+  ...nodeUiPhraseEntries,
 ]);
 
-const sortedPhrases = [...phrases.entries()].sort((left, right) => right[0].length - left[0].length);
 const originalText = new WeakMap<Text, string>();
 const originalAttributes = new WeakMap<Element, Map<string, string>>();
 const translatedAttributes = ["aria-label", "title", "placeholder", "aria-description"];
 
 function translate(value: string) {
-  let result = value;
-  for (const [source, target] of sortedPhrases) result = result.replaceAll(source, target);
-  return result;
+  const leading = value.match(/^\s*/u)?.[0] ?? "";
+  const trailing = value.match(/\s*$/u)?.[0] ?? "";
+  const source = value.slice(leading.length, value.length - trailing.length);
+  const exact = phrases.get(source);
+  if (exact !== undefined) return `${leading}${exact}${trailing}`;
+  const clearShortcut = source.match(/^清除(.+)快捷键$/u);
+  if (clearShortcut) return `${leading}Clear ${phrases.get(clearShortcut[1]!) ?? clearShortcut[1]} shortcut${trailing}`;
+  const shortcut = source.match(/^(.+)快捷键$/u);
+  if (shortcut) return `${leading}${phrases.get(shortcut[1]!) ?? shortcut[1]} shortcut${trailing}`;
+  const shortcutConflict = source.match(/^与「(.+)」重复，请换一个快捷键。$/u);
+  if (shortcutConflict) return `${leading}Conflicts with “${phrases.get(shortcutConflict[1]!) ?? shortcutConflict[1]}”. Choose a different shortcut.${trailing}`;
+  let result = source;
+  for (const [pattern, replacement] of dynamicUiTranslations) result = result.replace(pattern, replacement);
+  return `${leading}${result}${trailing}`;
 }
 
 function shouldSkip(node: Node) {
   const parent = node instanceof Element ? node : node.parentElement;
-  return !!parent?.closest("script, style, textarea, input, [contenteditable='true'], .ProseMirror, .messageMarkdown, .projectName, .projectPath, .nodeLabel, [data-no-translate]");
+  return !!parent?.closest("script, style, [contenteditable='true'], .ProseMirror, .messageMarkdown, .messageText, .questionTitle, .questionText, .answerText, .projectName, .projectPath, .conversationName, .conversationTitle, .subAgentName, .historyName, .fileName, .entryName, .assetName, .documentName, .nodeLabel, .nodeFocusName, [data-no-translate]");
 }
 
 function translateNode(node: Node, english: boolean) {
@@ -215,7 +229,11 @@ function translateNode(node: Node, english: boolean) {
     if (node.data !== target) node.data = target;
     return;
   }
-  if (!(node instanceof Element) || shouldSkip(node)) return;
+  if (!(node instanceof Element)) return;
+  const skippedContent = shouldSkip(node);
+  // Editable roots contain user-authored text, while their ARIA label and
+  // placeholder are application chrome and still need localization.
+  if (skippedContent && !node.matches("[contenteditable='true'], .ProseMirror")) return;
   let stored = originalAttributes.get(node);
   if (!stored) {
     stored = new Map();
@@ -234,11 +252,12 @@ function translateNode(node: Node, english: boolean) {
     const target = translate(stored.get(name) ?? value);
     if (value !== target) node.setAttribute(name, target);
   }
-  for (const child of node.childNodes) translateNode(child, english);
+  if (!skippedContent) for (const child of node.childNodes) translateNode(child, english);
 }
 
 export function useLegacyLocaleBridge() {
   let cleanupRefresh: (() => void) | undefined;
+  let observer: MutationObserver | undefined;
   let applying = false;
   const apply = () => {
     if (!document.body || applying) return;
@@ -267,12 +286,40 @@ export function useLegacyLocaleBridge() {
       }
     };
     for (const event of ["click", "change", "hashchange"]) window.addEventListener(event, schedule, true);
+    const body = document.body;
+    const ownerWindow = body?.ownerDocument.defaultView;
+    if (body && ownerWindow) {
+      observer = new ownerWindow.MutationObserver(records => {
+        if (applying) return;
+        applying = true;
+        try {
+          for (const record of records) {
+            if (record.type === "attributes" || record.type === "characterData") translateNode(record.target, isEnglish.value);
+            else for (const node of record.addedNodes) translateNode(node, isEnglish.value);
+          }
+        } finally {
+          applying = false;
+        }
+      });
+      try {
+        observer.observe(body, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: translatedAttributes,
+        });
+      } catch {
+        observer = undefined;
+      }
+    }
     cleanupRefresh = () => {
       for (const event of ["click", "change", "hashchange"]) window.removeEventListener(event, schedule, true);
       for (const timer of timers) window.clearTimeout(timer);
     };
   });
   onUnmounted(() => {
+    observer?.disconnect();
     cleanupRefresh?.();
     stopLanguage();
   });

@@ -3,7 +3,7 @@
     <agentMenu
       :key="conversationKey"
       :name="name"
-      :history="history"
+      :history="localizedHistory"
       :sessionFile="sessionFile"
       :parentFile="selectedConversation?.parentFile"
       :subAgents="selectedConversation?.subAgents"
@@ -42,6 +42,7 @@ import type { AgentConversation, AgentHistory } from "./types";
 import type { AgentEvent, AgentSubAgent } from "@linglonglab/video-runtime-types/agent/types";
 import agentMenu from "./menu.vue";
 import conversation from "./conversation.vue";
+import { t } from "@/i18n";
 
 const visible = defineModel<boolean>({ default: false });
 type OpenConversation = { key: number; name: string; file?: string; parentFile?: string; subAgents: AgentSubAgent[]; session: AgentConversation | null };
@@ -49,10 +50,16 @@ type OpenConversation = { key: number; name: string; file?: string; parentFile?:
 const conversations = ref<OpenConversation[]>([]);
 const conversationKey = ref(0);
 const selectedConversation = computed(() => conversations.value.find(item => item.key === conversationKey.value));
-const name = computed(() => selectedConversation.value?.name || "新对话");
+const name = computed(() => {
+  const value = selectedConversation.value?.name;
+  return !value || value === "新对话" ? t("新对话", "New conversation") : value;
+});
 const sessionFile = computed(() => selectedConversation.value?.file);
 const workspaceStore = useWorkspaceStore();
 const history = ref<AgentHistory[]>([]);
+const localizedHistory = computed(() => history.value.map(item => item.name === "新对话"
+  ? { ...item, name: t("新对话", "New conversation") }
+  : item));
 const loading = ref(false);
 const historyLoading = ref(false);
 const initialized = ref(false);
@@ -125,7 +132,7 @@ function backToParent() {
 }
 
 function updateConversationName(item: OpenConversation, prompt: string) {
-  if (item.name !== "新对话") return;
+  if (item.name !== "新对话" && item.name !== "New conversation") return;
   item.name = prompt.slice(0, 80);
   const entry = history.value.find(entry => entry.file === item.file);
   if (entry) entry.name = item.name;
