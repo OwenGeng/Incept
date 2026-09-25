@@ -13,6 +13,7 @@ from app.ai_video.schemas.common import ApiResponse, PaginatedData, created_resp
 from app.ai_video.schemas.llm import (
     ImageGenerationOptionsRead,
     ModelCreate,
+    ModelPricingCatalogRead,
     ModelRead,
     ModelSettingsRead,
     ModelSettingsUpdate,
@@ -42,6 +43,7 @@ from app.ai_video.services.llm.manage import (
     update_provider as update_provider_service,
 )
 from app.ai_video.services.llm.creatify_catalog import sync_creatify_catalog
+from app.ai_video.services.llm.pricing_catalog import list_model_pricing_catalogs
 
 router = APIRouter()
 
@@ -89,6 +91,15 @@ async def list_supported_providers(
 ) -> ApiResponse[list[ProviderSupportedRead]]:
     items = list_supported_providers_service(category=category)
     return success_response(items)
+
+
+@router.get(
+    "/pricing-catalog",
+    response_model=ApiResponse[list[ModelPricingCatalogRead]],
+    summary="列出带来源与核验日期的本地模型价格表",
+)
+async def list_pricing_catalog() -> ApiResponse[list[ModelPricingCatalogRead]]:
+    return success_response([ModelPricingCatalogRead.model_validate(item) for item in list_model_pricing_catalogs()])
 
 
 @router.get(

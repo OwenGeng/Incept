@@ -293,7 +293,8 @@ def compose_shot_frame_rendered_prompt(
     if mappings:
         lines.append("## 图片内容说明")
         for mapping in mappings:
-            lines.append(f"{mapping.token}: {mapping.name}")
+            suffix = "（商品真值参考：保持包装、Logo、标签、颜色与形状一致，不得臆造或改写）" if mapping.type == "product" else ""
+            lines.append(f"{mapping.token}: {mapping.name}{suffix}")
         lines.append("")
     lines.append("## 生成内容")
     lines.append((replaced_prompt or "").strip())

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     AsyncEngine,
@@ -62,16 +63,34 @@ class Base(DeclarativeBase):
     pass
 
 
+def _apply_additive_ai_video_schema_updates(sync_conn: Any) -> None:
+    """Apply small additive updates for deployments that predate migrations."""
+    inspector = inspect(sync_conn)
+    if "project_research" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("project_research")}
+    if "entry_mode" not in columns:
+        sync_conn.exec_driver_sql(
+            "ALTER TABLE project_research "
+            "ADD COLUMN entry_mode VARCHAR(16) NOT NULL DEFAULT 'research'"
+        )
+
+
 async def init_db() -> None:
     """创建所有表（开发/迁移用）。"""
     # 确保 ORM 模型已导入，从而注册到 Base.metadata
     import app.ai_video.models.llm  # noqa: F401  # pylint: disable=unused-import
+    import app.ai_video.models.integration_hub  # noqa: F401
+    import app.ai_video.models.production_control  # noqa: F401
+    import app.ai_video.models.production_execution  # noqa: F401
+    import app.ai_video.models.studio_products  # noqa: F401
     import app.ai_video.models.studio  # noqa: F401
     import app.ai_video.models.task  # noqa: F401
     import app.ai_video.models.task_links  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_apply_additive_ai_video_schema_updates)
     from app.ai_video.services.llm.builtin_model_catalog import seed_user_approved_models
 
     async with async_session_maker() as session:

@@ -12,7 +12,7 @@ import {
   Modal,
   Form,
   Select,
-  message,
+  App as AntApp,
   Tooltip,
   Empty,
   Grid,
@@ -46,6 +46,7 @@ import {
 import { useAppStore } from '../../../store/useAppStore'
 
 export default function ProvidersTab() {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const [providers, setProviders] = useState<ProviderRead[]>([])
@@ -746,7 +747,7 @@ export default function ProvidersTab() {
         }}
         onOk={() => void handleSaveProvider()}
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" className="pt-2">
           <Form.Item name="name" label={copy('Name', '名称')} rules={[{ required: true, message: copy('Choose a provider', '请选择供应商') }]}>

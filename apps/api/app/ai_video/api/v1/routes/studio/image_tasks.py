@@ -47,9 +47,25 @@ from app.ai_video.services.studio.generation.frame.derive_preview import (
     to_rendered_shot_frame_prompt_read as _to_rendered_shot_frame_prompt_read_service,
 )
 from app.ai_video.services.studio.image_task_runner import create_image_task_and_link as _create_image_task_and_link_service
+from app.ai_video.services.studio.products import selected_product_reference_items
 
 
 router = APIRouter()
+
+
+async def _with_selected_product_references(
+    db: AsyncSession,
+    *,
+    shot_id: str,
+    items: list[ShotLinkedAssetItem],
+) -> list[ShotLinkedAssetItem]:
+    ordered = list(items or [])
+    seen_file_ids = {str(item.file_id) for item in ordered if item.file_id}
+    for item in await selected_product_reference_items(db, shot_id=shot_id):
+        if item.file_id and item.file_id not in seen_file_ids:
+            ordered.append(item)
+            seen_file_ids.add(item.file_id)
+    return ordered
 
 
 class StudioImageTaskRequest(BaseModel):
@@ -406,10 +422,11 @@ async def create_shot_frame_image_generation_task(
         composition_anchor=render_guidance["composition_anchor"],
         screen_direction_guidance=render_guidance["screen_direction_guidance"],
     )
+    frame_items = await _with_selected_product_references(db, shot_id=shot_id, items=body.images)
     context = _build_frame_context_service(
         shot_id=shot_id,
         frame_type=body.frame_type,
-        items=body.images,
+        items=frame_items,
     )
     submission = _build_frame_submission_payload_service(
         base=base,
@@ -492,10 +509,11 @@ async def render_shot_frame_prompt(
         composition_anchor=render_guidance["composition_anchor"],
         screen_direction_guidance=render_guidance["screen_direction_guidance"],
     )
+    frame_items = await _with_selected_product_references(db, shot_id=shot_id, items=body.images)
     context = _build_frame_context_service(
         shot_id=shot_id,
         frame_type=body.frame_type,
-        items=body.images,
+        items=frame_items,
     )
     rendered = _to_rendered_shot_frame_prompt_read_service(
         derived=_derive_frame_preview_service(

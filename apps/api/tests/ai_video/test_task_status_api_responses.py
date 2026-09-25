@@ -307,6 +307,47 @@ def test_create_task_link_returns_created_envelope(client: TestClient) -> None:
     assert body["data"]["task_id"] == "task-1"
 
 
+def test_adopt_video_task_link_selects_take_for_owning_shot(client: TestClient, monkeypatch) -> None:
+    db = _FakeTaskDB()
+    link = GenerationTaskLink(
+        task_id="task-video",
+        resource_type="video",
+        relation_type="video",
+        relation_entity_id="shot-1",
+        file_id="video-file-1",
+        status=GenerationTaskLinkStatus.todo,
+    )
+    link.id = 1
+    link.created_at = datetime.now(UTC)
+    link.updated_at = link.created_at
+    db.links[link.id] = link
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_select(_db, *, shot_id: str, task_id: str):
+        calls.append((shot_id, task_id))
+        link.status = GenerationTaskLinkStatus.accepted
+        return link
+
+    monkeypatch.setattr(task_status_route, "select_generated_video_take", _fake_select)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        response = client.patch(
+            "/api/v1/film/task-links/adopt",
+            json={"task_id": "task-video", "shot_id": "shot-1"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "task_id": "task-video",
+        "link_type": "shot",
+        "entity_id": "shot-1",
+        "is_adopted": True,
+    }
+    assert calls == [("shot-1", "task-video")]
+
+
 def test_get_task_link_not_found_returns_api_response(client: TestClient) -> None:
     db = _FakeTaskDB()
     app.dependency_overrides[get_db] = _override_db(db)

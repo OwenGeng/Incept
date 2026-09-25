@@ -97,6 +97,12 @@ async def require_linglong_proxy_key(request: Request, call_next):
     handling of its own, so this narrow boundary prevents accidental public use
     when the service is deployed outside a private Cloud Run ingress policy.
     """
+    # Remote MCP clients authenticate with their own revocable bearer keys and
+    # cannot know the Next.js server-to-server proxy secret. Keep the exception
+    # exact: every other AI Video route still requires the Linglong bridge key.
+    if request.url.path.rstrip("/").endswith("/api/v1/automation/mcp"):
+        return await call_next(request)
+
     expected = settings.internal_api_key.strip()
     if expected and request.headers.get("x-internal-api-key") != expected:
         body = ApiResponse[None](code=401, message="Unauthorized", data=None, meta=None).model_dump()

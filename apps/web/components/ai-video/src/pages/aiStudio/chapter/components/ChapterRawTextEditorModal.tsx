@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Collapse, Empty, Input, List, Modal, Space, Spin, Tag, message } from 'antd'
+import { App as AntApp, Button, Card, Collapse, Empty, Input, List, Modal, Space, Spin, Tag } from 'antd'
 import {
   CloseCircleOutlined,
   DiffOutlined,
@@ -45,6 +45,7 @@ export function ChapterRawTextEditorModal({
   chapterId: string | undefined
   onSaved?: (next: { rawText?: string; condensedText?: string }) => void
 }) {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = useCallback((english: string, chinese: string) => (language === 'zh-CN' ? chinese : english), [language])
   const localizeTaskCopy = useCallback((preset: TaskCopyPreset, title: string): TaskCopyPreset => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Card, Input, Row, Col, Tag, Button, message, Modal, Space, Pagination, Empty, Result } from 'antd'
+import { App as AntApp, Card, Input, Row, Col, Tag, Button, Modal, Space, Pagination, Empty, Result } from 'antd'
 import { EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import { resolveAssetUrl } from '../utils'
@@ -47,6 +47,7 @@ export function AssetTypeTab({
   deleteAsset: (id: string) => Promise<void>
   onEditAsset?: (asset: StudioAssetLike) => void
 }) {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const [searchParams, setSearchParams] = useSearchParams()

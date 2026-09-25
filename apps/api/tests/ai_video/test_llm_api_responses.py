@@ -224,6 +224,20 @@ def test_list_supported_providers_can_filter_by_category(client: TestClient) -> 
         assert "video" in item["supported_categories"]
 
 
+def test_list_pricing_catalog_returns_sources_and_versioned_rules(client: TestClient) -> None:
+    response = client.get("/api/v1/llm/pricing-catalog")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 200
+    assert len(body["data"]) == 11
+    omni = next(item for item in body["data"] if item["model_id"] == "vertex-gemini-omni-1-1-flash")
+    assert omni["schema_version"] == 2
+    assert omni["verified_on"] == "2026-09-25"
+    assert omni["source_url"].startswith("https://cloud.google.com/")
+    assert any(rule.get("selectors", {}).get("resolution") == "360p" for rule in omni["rules"])
+
+
 def test_get_video_generation_options_returns_ratio_capability(client: TestClient) -> None:
     db = _FakeLlmDB()
     _seed_video_model(db)

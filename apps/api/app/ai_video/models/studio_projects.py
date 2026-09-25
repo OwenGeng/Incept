@@ -11,6 +11,7 @@ from app.ai_video.models.types import ChapterStatus, ProjectStyle, ProjectVisual
 
 if TYPE_CHECKING:
     from app.ai_video.models.studio_assets import Actor, Character, Costume, Prop, Scene
+    from app.ai_video.models.studio_project_research import ProjectResearch
     from app.ai_video.models.studio_shots import Shot
 
 
@@ -48,6 +49,12 @@ class Project(Base, TimestampMixin):
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+    research: Mapped["ProjectResearch | None"] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
     )
     characters: Mapped[list["Character"]] = relationship(
         back_populates="project",

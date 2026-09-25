@@ -1,5 +1,5 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Empty, Input, Result, Select, Space, Tag, message } from 'antd'
+import { App as AntApp, Button, Empty, Input, Result, Select, Space, Tag } from 'antd'
 import { DownloadOutlined, FileImageOutlined, ReloadOutlined, UploadOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import { OpenAPI, StudioFilesService, type FileRead } from '../../../services/generated'
 import { useAppStore } from '../../../store/useAppStore'
@@ -12,6 +12,7 @@ import { useAppStore } from '../../../store/useAppStore'
  * the grid a single, scannable surface.
  */
 const FileManager = () => {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const [files, setFiles] = useState<FileRead[]>([])

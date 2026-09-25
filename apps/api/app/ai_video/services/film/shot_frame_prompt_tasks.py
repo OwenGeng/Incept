@@ -22,6 +22,7 @@ from app.ai_video.models.studio import (
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
+    ProjectResearch,
     Prop,
     Scene,
     Shot,
@@ -32,6 +33,7 @@ from app.ai_video.services.llm.runtime import build_default_text_llm_sync
 from app.ai_video.services.common import entity_not_found, invalid_choice
 from app.ai_video.services.studio.action_beats import infer_action_beat_sequence, pick_action_beat_for_frame
 from app.ai_video.services.studio.shot_status import recompute_shot_status
+from app.ai_video.services.studio.project_research_context import format_approved_creative_brief
 from app.ai_video.services.worker.async_task_support import cancel_if_requested_async
 from app.ai_video.services.worker.task_logging import log_task_event, log_task_failure
 
@@ -654,8 +656,10 @@ async def build_run_args(
     next_title, next_excerpt, next_goal = _summarize_neighbor_shot(next_shot)
     dialog_summary = "\n".join(line.text for line in (detail.dialog_lines or []) if line.text)
     project = getattr(getattr(shot, "chapter", None), "project", None)
-    visual_style = _enum_value(getattr(project, "visual_style", None))
-    style = _enum_value(getattr(project, "style", None))
+    project_research = await db.get(ProjectResearch, getattr(project, "id", None)) if project is not None else None
+    advertising_brief = format_approved_creative_brief(project_research)
+    visual_style = "" if advertising_brief else _enum_value(getattr(project, "visual_style", None))
+    style = "" if advertising_brief else _enum_value(getattr(project, "style", None))
     unify_style = bool(getattr(project, "unify_style", True)) if project is not None else True
 
     characters = [
@@ -721,6 +725,7 @@ async def build_run_args(
             "title": shot.title or "",
             "visual_style": visual_style,
             "style": style,
+            "advertising_brief": advertising_brief,
             "unify_style": unify_style,
             "camera_shot": _enum_value(detail.camera_shot),
             "angle": _enum_value(detail.angle),

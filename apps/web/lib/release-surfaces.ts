@@ -1,7 +1,6 @@
-export type DeferredProductSurface = "videoProduction" | "gamingPlayable";
+export type DeferredProductSurface = "gamingPlayable";
 
 const flagBySurface: Record<DeferredProductSurface, string> = {
-  videoProduction: "INCEPT_ENABLE_VIDEO_PRODUCTION",
   gamingPlayable: "INCEPT_ENABLE_GAMING_PLAYABLE",
 };
 

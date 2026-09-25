@@ -68,23 +68,24 @@ async function getCloudRunIdentityToken(audience: string): Promise<string | null
 }
 
 async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
+  const { path } = await ctx.params;
   // ── 1. Auth ──────────────────────────────────────────────────────────────
+  const isPublicVideoStudio = path[0] === "video-studio";
   const session = isAuthDevSkipped()
     ? null
     : await import("@/auth").then((mod) => mod.auth());
-  if (!isAuthDevSkipped() && !session?.user) {
+  if (!isAuthDevSkipped() && !isPublicVideoStudio && !session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // ── 2. Target URL ─────────────────────────────────────────────────────────
-  const { path } = await ctx.params;
   const target = `${INCEPT_BASE}/${path.join("/")}${req.nextUrl.search}`;
   const identityToken = await getCloudRunIdentityToken(INCEPT_BASE);
 
   // ── 3. Request headers ────────────────────────────────────────────────────
   const fwd: Record<string, string> = {
     "x-internal-api-key": INTERNAL_KEY,
-    "x-user-email":       session?.user?.email ?? "",
+    "x-user-email":       session?.user?.email ?? (isPublicVideoStudio ? "local@linglonglab.internal" : ""),
     "x-user-role":        session?.user?.role  ?? "user",
   };
   if (identityToken) {

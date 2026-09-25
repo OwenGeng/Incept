@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai_video.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
+from app.ai_video.services.llm.pricing_catalog import merge_builtin_pricing_params
 
 
 _PROVIDERS = (
@@ -50,19 +51,21 @@ async def seed_user_approved_models(db: AsyncSession) -> None:
     await db.flush()
 
     for model_id, name, category, description in _MODELS:
-        if await db.get(Model, model_id) is None:
+        model = await db.get(Model, model_id)
+        if model is None:
             provider_id = "openai" if model_id.startswith("openai-") else "vertex"
-            db.add(
-                Model(
-                    id=model_id,
-                    name=name,
-                    category=category,
-                    provider_id=provider_id,
-                    params={"configured_by": "builtin-model-catalog"},
-                    description=description,
-                    created_by="builtin-model-catalog",
-                )
+            model = Model(
+                id=model_id,
+                name=name,
+                category=category,
+                provider_id=provider_id,
+                params=merge_builtin_pricing_params(model_id, {"configured_by": "builtin-model-catalog"}),
+                description=description,
+                created_by="builtin-model-catalog",
             )
+            db.add(model)
+        else:
+            model.params = merge_builtin_pricing_params(model_id, model.params)
     await db.flush()
 
     settings = await db.get(ModelSettings, 1)

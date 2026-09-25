@@ -8,11 +8,17 @@ import {
   FileImageOutlined,
   VideoCameraOutlined,
   SettingOutlined,
+  CompassOutlined,
+  ControlOutlined,
+  ShoppingOutlined,
 } from '@ant-design/icons'
 import type { Chapter } from '../../../../mocks/data'
 
 export type TabKey =
+  | 'research'
   | 'dashboard'
+  | 'production'
+  | 'products'
   | 'chapters'
   | 'actors'
   | 'roles'
@@ -24,7 +30,10 @@ export type TabKey =
   | 'settings'
 
 const TAB_KEYS: TabKey[] = [
+  'research',
   'dashboard',
+  'production',
+  'products',
   'chapters',
   'actors',
   'roles',
@@ -40,9 +49,12 @@ export function isTabKey(s: string): s is TabKey {
   return TAB_KEYS.includes(s as TabKey)
 }
 
-export const DEFAULT_TAB: TabKey = 'dashboard'
+export const DEFAULT_TAB: TabKey = 'research'
 
 export const TAB_CONFIG: { key: TabKey; label: string; icon: React.ReactNode }[] = [
+  { key: 'research', label: '研究', icon: <CompassOutlined /> },
+  { key: 'production', label: '生产', icon: <ControlOutlined /> },
+  { key: 'products', label: '商品', icon: <ShoppingOutlined /> },
   { key: 'dashboard', label: '仪表盘', icon: <HomeOutlined /> },
   { key: 'chapters', label: '章节', icon: <UnorderedListOutlined /> },
   { key: 'actors', label: '演员', icon: <UserOutlined /> },

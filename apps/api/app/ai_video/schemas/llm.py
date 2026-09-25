@@ -81,6 +81,21 @@ class CreatifyCatalogSyncRead(BaseModel):
     skipped: int
 
 
+class ModelPricingCatalogRead(BaseModel):
+    """Auditable local copy of a provider's published standard pricing."""
+
+    model_id: str
+    schema_version: int
+    currency: str
+    provider: str
+    model_name: str
+    billing_mode: str
+    source_url: str
+    verified_on: str
+    rules: list[dict[str, Any]] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class VideoGenerationOptionsRead(BaseModel):
     """当前默认视频模型对应的生成参数选项。"""
 

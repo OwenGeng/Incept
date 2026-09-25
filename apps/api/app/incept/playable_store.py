@@ -29,13 +29,16 @@ from app.incept.models import (
     UsageEvent,
 )
 from app.incept.store import ASSETS, SOURCE_ASSETS, USAGE_EVENTS, current_monthly_studio_spend_usd, monthly_budget_reset_message
-from app.incept.video_production_store import CopilotQuotaExceeded
-from app.incept.video_store import _asset_part_for_text_model, _call_multimodal_text_model
+from app.incept.vertex_generation import _asset_part_for_text_model, _call_multimodal_text_model
 
 _TEMPLATE_VISIBILITIES = {"private", "workspace", "community"}
 _PLAYABLE_COPILOT_MODELS = {"gemini-3.8-flash", "gemini-3.1-pro-preview"}
 _MAX_COPILOT_ASSET_BYTES = 12 * 1024 * 1024
 _MAX_COPILOT_TOTAL_ASSET_BYTES = 30 * 1024 * 1024
+
+
+class CopilotQuotaExceeded(RuntimeError):
+    """The shared Gaming copilot monthly limit has been reached."""
 
 
 def _now() -> datetime:

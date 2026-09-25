@@ -37,19 +37,24 @@ async function getCloudRunIdentityToken(audience: string): Promise<string | null
 
 /** Validates the Linglong session and streams an AI Video request to Incept API. */
 async function proxy(request: NextRequest, context: Context): Promise<Response> {
+  const { path } = await context.params;
+  const joinedPath = path.join("/");
+  const isMcpRequest = joinedPath === "api/v1/automation/mcp";
   // AI Video runs inside this Next.js application and uses this same-origin bridge.
   // The mounted API only permits server-to-server CORS. Let the local bridge work
   // without a NextAuth session; deployed environments always require one.
   const isLocalDevelopment = process.env.NODE_ENV === "development";
   const isLocalRequest = request.nextUrl.hostname === "localhost" || request.nextUrl.hostname === "127.0.0.1";
-  const skipSessionCheck = isAuthDevSkipped() || isLocalDevelopment || isLocalRequest;
+  // MCP is the sole non-cookie entrypoint. It has an independent, scoped,
+  // revocable bearer key verified by the API; every other production request
+  // still requires the normal Linglong session.
+  const skipSessionCheck = isMcpRequest || isAuthDevSkipped() || isLocalDevelopment || isLocalRequest;
   const session = skipSessionCheck ? null : await auth();
   if (!skipSessionCheck && !session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { path } = await context.params;
-  const target = `${INCEPT_API_BASE}/ai-video/${path.join("/")}${request.nextUrl.search}`;
+  const target = `${INCEPT_API_BASE}/ai-video/${joinedPath}${request.nextUrl.search}`;
   const headers: Record<string, string> = {
     "x-internal-api-key": INTERNAL_KEY,
     "x-user-email": session?.user?.email ?? "",
@@ -59,6 +64,19 @@ async function proxy(request: NextRequest, context: Context): Promise<Response> 
   const range = request.headers.get("range");
   if (contentType) headers["content-type"] = contentType;
   if (range) headers.range = range;
+  if (isMcpRequest) {
+    const automationAuthorization = request.headers.get("authorization");
+    if (automationAuthorization) {
+      // Keep the external automation credential separate from a possible
+      // Cloud Run identity token, which also uses Authorization.
+      headers["x-incept-mcp-authorization"] = automationAuthorization;
+      headers.authorization = automationAuthorization;
+    }
+    ["mcp-protocol-version", "mcp-method", "mcp-name", "accept"].forEach((name) => {
+      const value = request.headers.get(name);
+      if (value) headers[name] = value;
+    });
+  }
   const identityToken = await getCloudRunIdentityToken(INCEPT_API_BASE);
   if (identityToken) headers.authorization = `Bearer ${identityToken}`;
 

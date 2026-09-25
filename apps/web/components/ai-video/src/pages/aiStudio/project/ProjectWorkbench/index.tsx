@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Card, Button, Tabs, Space, Dropdown, Empty } from 'antd'
 import type { MenuProps } from 'antd'
 import {
@@ -6,6 +6,7 @@ import {
   EllipsisOutlined,
   ArrowLeftOutlined,
   VideoCameraFilled,
+  RobotOutlined,
 } from '@ant-design/icons'
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { TAB_CONFIG, type TabKey, isTabKey, DEFAULT_TAB } from './constants'
@@ -18,11 +19,16 @@ import { CostumesTab, PropsTab } from './tabs/PropsTab'
 import { FilesTab } from './tabs/FilesTab'
 import { EditTab } from './tabs/EditTab'
 import { SettingsTab } from './tabs/SettingsTab'
+import { ResearchTab } from './tabs/ResearchTab'
+import { ProductionTab } from './tabs/ProductionTab'
+import { ProductsTab } from './tabs/ProductsTab'
 import { getChapterShotsPath, getChapterStudioPath, getProjectEditorPath } from './routes'
 import { useProject, useChapters } from './hooks/useProjectData'
 import { ensureHasShotsBeforeShooting } from './ensureHasShotsBeforeShooting'
 import { getChapterPreparationState } from './chapterPreparation'
 import { useAppStore } from '../../../../store/useAppStore'
+import { CreativeAgentPanel } from './CreativeAgentPanel'
+import { getProjectResearch, type ProjectResearch } from '../../../../services/projectResearch'
 
 const TAB_PARAM = 'tab'
 const CREATE_PARAM = 'create'
@@ -41,6 +47,20 @@ const ProjectWorkbench: React.FC = () => {
   const { project, loading: projectLoading } = useProject(projectId)
   const { chapters } = useChapters(projectId)
   const [activeTab, setActiveTab] = useState<TabKey>(() => resolvedTab)
+  const [research, setResearch] = useState<ProjectResearch | null>(null)
+  const [researchChecked, setResearchChecked] = useState(false)
+  const [agentOpen, setAgentOpen] = useState(false)
+
+  useEffect(() => {
+    if (!projectId) return
+    setResearchChecked(false)
+    getProjectResearch(projectId)
+      .then(setResearch)
+      .catch(() => setResearch(null))
+      .finally(() => setResearchChecked(true))
+  }, [projectId])
+
+  const productionUnlocked = research?.entry_mode === 'preset' || research?.status === 'approved'
 
   const chaptersByIndex = [...chapters].sort((a, b) => a.index - b.index)
 
@@ -64,6 +84,14 @@ const ProjectWorkbench: React.FC = () => {
         hint: copy('Create a chapter before starting storyboard preparation.', '先创建章节，再进入分镜准备流程'),
         icon: <PlusOutlined />,
         onClick: () => {},
+      }
+    }
+    if (researchChecked && !productionUnlocked) {
+      return {
+        label: copy('Complete research brief', '完成研究简报'),
+        hint: copy('Approve a creative direction before script, storyboard, or generation work.', '批准创意方向后，才能进入脚本、分镜和生成。'),
+        icon: <PlusOutlined />,
+        onClick: () => setTabInUrl('research'),
       }
     }
     if (!recommendedChapter) {
@@ -151,7 +179,7 @@ const ProjectWorkbench: React.FC = () => {
     }
   }, [tabFromUrl, setSearchParams])
 
-  const setTabInUrl = (tab: TabKey) => {
+  const setTabInUrl = useCallback((tab: TabKey) => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -160,7 +188,13 @@ const ProjectWorkbench: React.FC = () => {
       },
       { replace: true }
     )
-  }
+  }, [setSearchParams])
+
+  useEffect(() => {
+    if (researchChecked && !productionUnlocked && activeTab !== 'research') {
+      setTabInUrl('research')
+    }
+  }, [activeTab, productionUnlocked, researchChecked, setTabInUrl])
 
   const moreMenuItems: MenuProps['items'] = [
     { key: 'newActor', label: copy('Link actors', '关联演员'), onClick: () => setTabInUrl('actors') },
@@ -193,16 +227,20 @@ const ProjectWorkbench: React.FC = () => {
         <div className="project-workbench-header-content flex flex-wrap items-center justify-between gap-3 pt-2">
           <Tabs
             activeKey={activeTab}
-            onChange={(k) => setTabInUrl(k as TabKey)}
+            onChange={(k) => {
+              const next = k as TabKey
+              setTabInUrl(next === 'research' || productionUnlocked ? next : 'research')
+            }}
             size="middle"
             className="project-workbench-tabs flex-1 min-w-0"
             items={TAB_CONFIG.map(({ key, icon }) => ({
               key,
+              disabled: key !== 'research' && researchChecked && !productionUnlocked,
               label: (
                 <span className="flex items-center gap-1.5">
                   {icon}
                   {copy(
-                    { dashboard: 'Dashboard', chapters: 'Chapters', actors: 'Actors', roles: 'Characters', scenes: 'Scenes', props: 'Props', costumes: 'Costumes', files: 'Files', edit: 'Edit', settings: 'Settings' }[key],
+                    { research: 'Research', production: 'Production', products: 'Products', dashboard: 'Dashboard', chapters: 'Chapters', actors: 'Actors', roles: 'Characters', scenes: 'Scenes', props: 'Props', costumes: 'Costumes', files: 'Files', edit: 'Edit', settings: 'Settings' }[key],
                     TAB_CONFIG.find((item) => item.key === key)?.label ?? key,
                   )}
                 </span>
@@ -210,6 +248,9 @@ const ProjectWorkbench: React.FC = () => {
             }))}
           />
           <Space size="small" wrap className="shrink-0">
+            <Button icon={<RobotOutlined />} onClick={() => setAgentOpen(true)}>
+              {copy('Creative agent', '创意 Agent')}
+            </Button>
             <Button
               type="primary"
               icon={primaryCta.icon}
@@ -217,10 +258,10 @@ const ProjectWorkbench: React.FC = () => {
             >
               {primaryCta.label}
             </Button>
-            <Button icon={<VideoCameraFilled />} onClick={() => projectId && navigate(getProjectEditorPath(projectId))}>
+            <Button disabled={!productionUnlocked} icon={<VideoCameraFilled />} onClick={() => projectId && navigate(getProjectEditorPath(projectId))}>
               {copy('Open post-production', '进入后期剪辑')}
             </Button>
-            <Dropdown menu={{ items: moreMenuItems }} placement="bottomRight">
+            <Dropdown disabled={!productionUnlocked} menu={{ items: moreMenuItems }} placement="bottomRight">
               <Button icon={<EllipsisOutlined />}>{copy('More', '更多')}</Button>
             </Dropdown>
           </Space>
@@ -234,19 +275,26 @@ const ProjectWorkbench: React.FC = () => {
         className="pt-4 animate-fadeIn flex-1 min-h-0 overflow-hidden"
         style={{ animation: 'fadeIn 0.25s ease-out' }}
       >
-        {activeTab === 'dashboard' && <DashboardTab onSelectTab={setTabInUrl} />}
+        {activeTab === 'research' && <ResearchTab onResearchChange={setResearch} />}
 
-        {activeTab === 'chapters' && <ChaptersTab />}
+        {activeTab === 'production' && productionUnlocked && <ProductionTab />}
 
-        {activeTab === 'actors' && <ActorsTab />}
-        {activeTab === 'roles' && <RolesTab />}
-        {activeTab === 'scenes' && <ScenesTab />}
-        {activeTab === 'props' && <PropsTab />}
-        {activeTab === 'costumes' && <CostumesTab />}
-        {activeTab === 'files' && <FilesTab />}
-        {activeTab === 'edit' && <EditTab />}
-        {activeTab === 'settings' && <SettingsTab />}
+        {activeTab === 'products' && productionUnlocked && <ProductsTab />}
+
+        {activeTab === 'dashboard' && productionUnlocked && <DashboardTab onSelectTab={setTabInUrl} />}
+
+        {activeTab === 'chapters' && productionUnlocked && <ChaptersTab />}
+
+        {activeTab === 'actors' && productionUnlocked && <ActorsTab />}
+        {activeTab === 'roles' && productionUnlocked && <RolesTab />}
+        {activeTab === 'scenes' && productionUnlocked && <ScenesTab />}
+        {activeTab === 'props' && productionUnlocked && <PropsTab />}
+        {activeTab === 'costumes' && productionUnlocked && <CostumesTab />}
+        {activeTab === 'files' && productionUnlocked && <FilesTab />}
+        {activeTab === 'edit' && productionUnlocked && <EditTab />}
+        {activeTab === 'settings' && productionUnlocked && <SettingsTab />}
       </div>
+      {projectId ? <CreativeAgentPanel projectId={projectId} open={agentOpen} onClose={() => setAgentOpen(false)} /> : null}
     </div>
   )
 }

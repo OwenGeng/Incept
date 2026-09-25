@@ -1,4 +1,4 @@
-import { message } from 'antd'
+import { aiVideoMessage as message } from '../../../components/aiVideoMessage'
 import { FilmService } from '../../../services/generated'
 import type { TaskStatus } from '../../../services/generated'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'

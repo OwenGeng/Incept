@@ -18,10 +18,6 @@ class Settings(BaseSettings):
     internal_api_key: str = Field(default="", alias="INCEPT_INTERNAL_API_KEY")
     cors_allow_origins: str = Field(default="http://localhost:3000", alias="CORS_ALLOW_ORIGINS")
 
-    # Optional product surfaces are preserved in the repository but are not
-    # exposed by default from a production deployment. Local development keeps
-    # them available unless an explicit flag overrides that behavior.
-    enable_video_production: bool | None = Field(default=None, alias="INCEPT_ENABLE_VIDEO_PRODUCTION")
     enable_gaming_playable: bool | None = Field(default=None, alias="INCEPT_ENABLE_GAMING_PLAYABLE")
 
     gcp_project_deploy: str = Field(default="", alias="GCP_PROJECT_DEPLOY")
@@ -39,12 +35,6 @@ class Settings(BaseSettings):
     @cached_property
     def cors_allow_origins_list(self) -> list[str]:
         return [item.strip() for item in self.cors_allow_origins.split(",") if item.strip()]
-
-    @property
-    def video_production_enabled(self) -> bool:
-        if self.enable_video_production is not None:
-            return self.enable_video_production
-        return self.incept_env.strip().lower() != "production"
 
     @property
     def gaming_playable_enabled(self) -> bool:

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Input, Modal, Pagination, Result, Space, Tag, message } from 'antd'
+import { App as AntApp, Button, Card, Empty, Input, Modal, Pagination, Result, Space, Tag } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -9,6 +9,7 @@ import { ActorEntityFormModal, type ActorEntityLike } from '../components/ActorE
 import { useAppStore } from '../../../../store/useAppStore'
 
 export function ActorsTab() {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const navigate = useNavigate()

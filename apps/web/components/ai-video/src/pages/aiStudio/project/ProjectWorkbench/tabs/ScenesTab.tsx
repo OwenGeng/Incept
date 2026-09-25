@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Input, Modal, Space, message, Pagination } from 'antd'
+import { App as AntApp, Button, Card, Empty, Input, Modal, Space, Pagination } from 'antd'
 import { EditOutlined, LinkOutlined, PlusOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { StudioShotLinksService } from '../../../../../services/generated'
@@ -18,6 +18,7 @@ type SceneLike = {
 }
 
 export function ScenesTab() {
+  const { message } = AntApp.useApp()
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
 

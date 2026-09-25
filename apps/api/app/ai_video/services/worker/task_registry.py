@@ -23,6 +23,7 @@ from app.ai_video.services.script_processing_worker import (
     ScriptSimplificationTaskExecutor,
 )
 from app.ai_video.services.studio.image_task_runner import run_image_generation_task
+from app.ai_video.services.studio.editing import run_timeline_render_task
 from app.ai_video.services.worker.task_executor import AbstractAsyncDelegatingExecutor, AbstractWorkerTaskExecutor
 
 
@@ -57,6 +58,14 @@ task_executor_registry.register(
         task_kind="audio_generation",
         runner=run_audio_generation_task,
         timeout_seconds=900.0,
+    ),
+)
+task_executor_registry.register(
+    "timeline_render",
+    AbstractAsyncDelegatingExecutor(
+        task_kind="timeline_render",
+        runner=run_timeline_render_task,
+        timeout_seconds=7200.0,
     ),
 )
 task_executor_registry.register(

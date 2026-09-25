@@ -49,6 +49,22 @@ class Settings(BaseSettings):
     creatify_poll_max_delay_seconds: int = 120
     openai_api_key: str = ""
 
+    # Server-side integrations reject non-public destinations by default. A
+    # deployment may explicitly opt in a known private ComfyUI hostname; this
+    # allowlist is never writable through the product UI.
+    outbound_private_host_allowlist: str = Field(
+        default="",
+        validation_alias=AliasChoices("AI_VIDEO_OUTBOUND_PRIVATE_HOST_ALLOWLIST"),
+    )
+
+    @property
+    def outbound_private_host_allowlist_set(self) -> set[str]:
+        return {
+            item.strip().lower().rstrip(".")
+            for item in self.outbound_private_host_allowlist.split(",")
+            if item.strip()
+        }
+
     # Linglong Lab uses ADC for Vertex AI. Do not supply model defaults here: model
     # IDs and locations remain user-owned configuration in the Provider/Model
     # records and the existing Incept deployment configuration.
@@ -66,7 +82,10 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///./linglong_ai_video.db"
+    database_url: str = Field(
+        default="sqlite+aiosqlite:///./linglong_ai_video.db",
+        validation_alias=AliasChoices("AI_VIDEO_DATABASE_URL", "DATABASE_URL"),
+    )
     # In Cloud Run this value is mounted from the same Secret Manager contract
     # as Incept API. It takes precedence over local DATABASE_URL.
     database_config_json: str = ""

@@ -15,6 +15,15 @@ from app.ai_video.schemas.studio.prompts import (
     PromptTemplateRead,
     PromptTemplateUpdate,
 )
+from app.ai_video.schemas.studio.research import (
+    CreativeBrief,
+    CreativeDirection,
+    ProjectResearchRead,
+    ProjectResearchWrite,
+    ResearchApprovalRequest,
+    ResearchFinding,
+    ResearchSource,
+)
 
 from app.ai_video.schemas.studio.entity_existence import (
     EntityNameExistenceCheckRequest,

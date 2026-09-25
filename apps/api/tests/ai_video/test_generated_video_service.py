@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.ai_video.core.db import Base
+from app.ai_video.core.contracts.video_generation import VideoGenerationResult
 from app.ai_video.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
+from app.ai_video.models.task import GenerationDeliveryMode, GenerationTask, GenerationTaskStatus
+from app.ai_video.models.task_links import GenerationTaskLink, GenerationTaskLinkStatus
 from app.ai_video.models.studio import (
     CameraAngle,
     CameraMovement,
@@ -26,8 +30,11 @@ from app.ai_video.models.studio import (
 )
 from app.ai_video.services.film.generated_video import (
     build_run_args,
+    persist_generated_video_to_shot,
+    persist_inline_video_for_checkpoint,
     preview_prompt_and_images,
     resolve_default_video_model,
+    select_generated_video_take,
     validate_images_count,
 )
 from app.ai_video.bootstrap import bootstrap_all_registries
@@ -265,6 +272,228 @@ async def test_build_run_args_maps_omni_references_to_verified_gcs_uris(monkeypa
         assert run_args["input"]["reference_media"] == [
             {"uri": "gs://incept-assets/ai-video/files/frame.png", "mime_type": "image/png"}
         ]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_persist_generated_video_creates_candidate_without_replacing_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        existing = FileItem(
+            id="video-existing",
+            type=FileType.video,
+            name="existing",
+            thumbnail="",
+            tags=[],
+            storage_key="videos/existing.mp4",
+        )
+        task = GenerationTask(
+            id="task-new",
+            mode=GenerationDeliveryMode.async_polling,
+            task_kind="video_generation",
+            status=GenerationTaskStatus.running,
+            progress=50,
+            payload={},
+            error="",
+        )
+        link = GenerationTaskLink(
+            task_id=task.id,
+            resource_type="video",
+            relation_type="video",
+            relation_entity_id="s1",
+            status=GenerationTaskLinkStatus.todo,
+        )
+        shot = await db.get(Shot, "s1")
+        assert shot is not None
+        shot.generated_video_file_id = existing.id
+        db.add_all([existing, task, link])
+        await db.commit()
+
+        generated = FileItem(
+            id="video-new",
+            type=FileType.video,
+            name="new",
+            thumbnail="",
+            tags=[],
+            storage_key="videos/new.mp4",
+        )
+
+        async def _fake_create_file(*_args, **_kwargs) -> FileItem:
+            db.add(generated)
+            await db.flush()
+            return generated
+
+        async def _fake_sync_usage(*_args, **_kwargs) -> None:
+            return None
+
+        monkeypatch.setattr(
+            "app.ai_video.services.film.generated_video.create_file_from_url_or_b64",
+            _fake_create_file,
+        )
+        monkeypatch.setattr(
+            "app.ai_video.services.film.generated_video.sync_usage_from_shot_context",
+            _fake_sync_usage,
+        )
+
+        result = await persist_generated_video_to_shot(
+            db,
+            task_id=task.id,
+            shot_id="s1",
+            result=VideoGenerationResult(url="https://example.com/new.mp4"),
+            provider="vertex",
+            api_key="",
+        )
+
+        assert result.id == generated.id
+        assert shot.generated_video_file_id == existing.id
+        assert link.file_id == generated.id
+        assert link.status == GenerationTaskLinkStatus.todo
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_inline_video_is_persisted_before_it_can_enter_a_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        task = GenerationTask(
+            id="task-inline",
+            mode=GenerationDeliveryMode.async_polling,
+            task_kind="video_generation",
+            status=GenerationTaskStatus.running,
+            progress=50,
+            payload={},
+            error="",
+        )
+        link = GenerationTaskLink(
+            task_id=task.id,
+            resource_type="video",
+            relation_type="video",
+            relation_entity_id="s1",
+            status=GenerationTaskLinkStatus.todo,
+        )
+        db.add_all([task, link])
+        await db.commit()
+
+        generated = FileItem(
+            id="video-inline-persisted",
+            type=FileType.video,
+            name="inline",
+            thumbnail="",
+            tags=[],
+            storage_key="videos/inline.mp4",
+        )
+
+        async def _fake_create_file(*_args, **_kwargs) -> FileItem:
+            db.add(generated)
+            await db.flush()
+            return generated
+
+        monkeypatch.setattr(
+            "app.ai_video.services.film.generated_video.create_file_from_url_or_b64",
+            _fake_create_file,
+        )
+        monkeypatch.setattr(
+            "app.ai_video.services.film.generated_video.sync_usage_from_shot_context",
+            AsyncMock(),
+        )
+
+        durable_result, file_obj = await persist_inline_video_for_checkpoint(
+            db,
+            task_id=task.id,
+            shot_id="s1",
+            result=VideoGenerationResult(
+                url="data:video/mp4;base64," + ("A" * 100_000),
+                provider="vertex",
+                status="completed",
+            ),
+            provider="vertex",
+            api_key="",
+        )
+
+        assert file_obj is generated
+        assert durable_result.url is None
+        assert durable_result.file_id == generated.id
+        assert "base64" not in str(durable_result.model_dump(mode="json"))
+        assert link.file_id == generated.id
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_select_generated_video_take_switches_selection_without_deleting_history() -> None:
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        first_file = FileItem(
+            id="video-1",
+            type=FileType.video,
+            name="first",
+            thumbnail="",
+            tags=[],
+            storage_key="videos/1.mp4",
+        )
+        second_file = FileItem(
+            id="video-2",
+            type=FileType.video,
+            name="second",
+            thumbnail="",
+            tags=[],
+            storage_key="videos/2.mp4",
+        )
+        first_task = GenerationTask(
+            id="task-1",
+            mode=GenerationDeliveryMode.async_polling,
+            task_kind="video_generation",
+            status=GenerationTaskStatus.succeeded,
+            progress=100,
+            payload={},
+            error="",
+        )
+        second_task = GenerationTask(
+            id="task-2",
+            mode=GenerationDeliveryMode.async_polling,
+            task_kind="video_generation",
+            status=GenerationTaskStatus.succeeded,
+            progress=100,
+            payload={},
+            error="",
+        )
+        first_link = GenerationTaskLink(
+            task_id=first_task.id,
+            resource_type="video",
+            relation_type="video",
+            relation_entity_id="s1",
+            file_id=first_file.id,
+            status=GenerationTaskLinkStatus.accepted,
+        )
+        second_link = GenerationTaskLink(
+            task_id=second_task.id,
+            resource_type="video",
+            relation_type="video",
+            relation_entity_id="s1",
+            file_id=second_file.id,
+            status=GenerationTaskLinkStatus.todo,
+        )
+        shot = await db.get(Shot, "s1")
+        assert shot is not None
+        shot.generated_video_file_id = first_file.id
+        db.add_all([first_file, second_file, first_task, second_task, first_link, second_link])
+        await db.commit()
+
+        selected = await select_generated_video_take(db, shot_id="s1", task_id=second_task.id)
+        await db.commit()
+
+        assert selected.id == second_link.id
+        assert shot.generated_video_file_id == second_file.id
+        assert first_link.status == GenerationTaskLinkStatus.todo
+        assert second_link.status == GenerationTaskLinkStatus.accepted
+        assert await db.get(FileItem, first_file.id) is not None
+        assert await db.get(FileItem, second_file.id) is not None
     await engine.dispose()
 
 

@@ -30,14 +30,13 @@ function getAllowedRoles(pathname: string): UserRole[] | null {
 export default auth((req) => {
   const { pathname } = req.nextUrl;
 
-  // Preserve deferred products in source control while making their routes
-  // unreachable in the Image + AI Video release profile.
-  if (
-    !isDeferredProductSurfaceEnabled("videoProduction") &&
-    (pathname === "/video-production" || pathname.startsWith("/video-production/"))
-  ) {
-    return new NextResponse(null, { status: 404 });
+  // Video Studio is an internal, intentionally sign-in-free surface. Its
+  // browser requests still pass through the server-side API proxy and the
+  // deployment-owned internal API key; no cloud credential is exposed.
+  if (pathname === "/video" || pathname.startsWith("/video/")) {
+    return NextResponse.next();
   }
+
   if (
     !isDeferredProductSurfaceEnabled("gamingPlayable") &&
     (pathname === "/gaming-playable" || pathname.startsWith("/gaming-playable/"))

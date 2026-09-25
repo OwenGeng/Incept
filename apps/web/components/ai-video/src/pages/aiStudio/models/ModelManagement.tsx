@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import ProvidersTab from './ProvidersTab'
 import ModelsTab from './ModelsTab'
 import SettingsTab from './SettingsTab'
+import IntegrationsTab from './IntegrationsTab'
 
 export default function ModelManagement() {
   const { i18n } = useTranslation()
@@ -24,6 +25,7 @@ export default function ModelManagement() {
             { key: 'providers', label: copy('Providers', '供应商') },
             { key: 'models', label: copy('Models', '模型') },
             { key: 'settings', label: copy('Settings', '设置') },
+            { key: 'integrations', label: copy('Integrations & agents', '集成与 Agent') },
           ]}
         />
       </div>
@@ -32,6 +34,7 @@ export default function ModelManagement() {
         {activeTab === 'providers' && <ProvidersTab />}
         {activeTab === 'models' && <ModelsTab />}
         {activeTab === 'settings' && <SettingsTab />}
+        {activeTab === 'integrations' && <IntegrationsTab />}
       </div>
     </Layout>
   )

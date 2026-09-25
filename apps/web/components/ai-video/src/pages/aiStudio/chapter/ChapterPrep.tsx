@@ -745,7 +745,7 @@ const ChapterPrep: React.FC = () => {
               {/* 左侧导航 */}
               <Card
                 style={{ width: 340, minWidth: 280, maxWidth: 420, height: '100%', overflow: 'hidden', flexShrink: 0 }}
-                bodyStyle={{ padding: 12, height: '100%', minHeight: 0, overflow: 'auto' }}
+                styles={{ body: { padding: 12, height: '100%', minHeight: 0, overflow: 'auto' } }}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-medium">{copy('Extracted results', '提取结果导航')}</div>
@@ -896,7 +896,7 @@ const ChapterPrep: React.FC = () => {
               </Card>
 
               {/* 右侧详情 */}
-              <Card style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden' }} bodyStyle={{ padding: 12, height: '100%', minHeight: 0, overflow: 'auto' }}>
+              <Card style={{ flex: 1, minWidth: 0, height: '100%', overflow: 'hidden' }} styles={{ body: { padding: 12, height: '100%', minHeight: 0, overflow: 'auto' } }}>
                 {selectedKind === 'storyboards' && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -1020,7 +1020,7 @@ const ChapterPrep: React.FC = () => {
         )}
 
         {activeStep === 1 && (
-          <Card title={copy('Scenes', '场景生成')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} bodyStyle={{ padding: 12 }}>
+          <Card title={copy('Scenes', '场景生成')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} styles={{ body: { padding: 12 } }}>
             <div className="flex items-center justify-between mb-3">
               <Space>
                 <Button type="primary" disabled={selectedSceneIds.length === 0} onClick={() => generateImages('scene')}>
@@ -1068,7 +1068,7 @@ const ChapterPrep: React.FC = () => {
         )}
 
         {activeStep === 2 && (
-          <Card title={copy('Props', '道具生成')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} bodyStyle={{ padding: 12 }}>
+          <Card title={copy('Props', '道具生成')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} styles={{ body: { padding: 12 } }}>
             <div className="flex items-center justify-between mb-3">
               <Space>
                 <Button type="primary" disabled={selectedPropIds.length === 0} onClick={() => generateImages('prop')}>
@@ -1116,7 +1116,7 @@ const ChapterPrep: React.FC = () => {
         )}
 
         {activeStep === 3 && (
-          <Card title={copy('Characters', '角色生成')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} bodyStyle={{ padding: 12 }}>
+          <Card title={copy('Characters', '角色生成')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} styles={{ body: { padding: 12 } }}>
             <div className="flex items-center justify-between mb-3">
               <Space>
                 <Button type="primary" disabled={selectedRoleIds.length === 0} onClick={() => generateImages('role')}>
@@ -1164,7 +1164,7 @@ const ChapterPrep: React.FC = () => {
         )}
 
         {activeStep === 4 && (
-          <Card title={copy('Storyboard preview', '分镜预览')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} bodyStyle={{ padding: 12 }}>
+          <Card title={copy('Storyboard preview', '分镜预览')} style={{ flex: 1, minHeight: 0, overflow: 'auto' }} styles={{ body: { padding: 12 } }}>
             <Table<StoryboardDraft>
               rowKey="id"
               dataSource={storyboardDrafts}

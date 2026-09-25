@@ -33,3 +33,23 @@ class VideoGenerationTaskRequest(BaseModel):
         ),
     )
     # seconds 由 ShotDetail.duration 自动确定；请求体不再接收覆盖值。
+
+
+class ConfirmedVideoGenerationTaskRequest(VideoGenerationTaskRequest):
+    quote_fingerprint: str = Field(..., min_length=64, max_length=64, description="预检返回的报价指纹")
+    confirmed_by: str = Field(..., min_length=1, max_length=255, description="确认费用的操作者")
+
+
+class VideoGenerationQuoteRead(BaseModel):
+    complete: bool
+    currency: str
+    amount: str
+    quantity: str
+    unit: str
+    unit_amount: str
+    model_id: str
+    estimate_kind: str | None = None
+    estimate_scope: str | None = None
+    exclusions: list[str] = Field(default_factory=list)
+    pricing_snapshot: dict[str, Any] | None = None
+    quote_fingerprint: str

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Input, Modal, Space, message, Pagination } from 'antd'
+import { App as AntApp, Button, Card, Empty, Input, Modal, Space, Pagination } from 'antd'
 import { EditOutlined, LinkOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { StudioShotLinksService } from '../../../../../services/generated'
@@ -26,6 +26,7 @@ function LinkedAssetTab({
   kind: AssetKind
   projectId: string
 }) {
+  const { message } = AntApp.useApp()
   const navigate = useNavigate()
   const workbenchTab: WorkbenchAssetTabParam = kind === 'prop' ? 'props' : 'costumes'
   const [createModalOpen, setCreateModalOpen] = useState(false)

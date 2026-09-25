@@ -2,9 +2,12 @@
 
 ## Decision
 
-Linglong Production will be a **clean, independently implemented internal
-product**. ArcReel is a product-behaviour reference for the supported production
-workflow; it is not a source-code template.
+Linglong Production will be an **independently implemented internal
+product**. ArcReel is a reference for the supported production workflow at two
+levels: its observable product behaviour, and its source code, which the team
+may study to understand architecture and design. Linglong's code is written
+fresh in this repository; ArcReel source is never copied or ported file by file.
+Linglong remains proprietary and is not licensed under AGPL.
 
 The target is high fidelity in:
 
@@ -17,30 +20,39 @@ The target is high fidelity in:
 The target is not pixel-identical visual expression, copied product wording,
 ArcReel branding/assets, or source-level equivalence.
 
-## Why the comparison is not a line-by-line code diff
+## Source study and the capability contract
 
-A code diff tells us how ArcReel implemented a feature, not the observable
-contract an operator needs. Using it as an implementation recipe would also
-undercut the clean-room boundary for Linglong's own code.
+Source study explains how ArcReel solves a problem. It is research input, not
+the acceptance standard. Parity is still judged against a **capability
+contract** for each operator journey:
 
-Instead, the team will record a **black-box capability contract** for each
-operator journey:
-
-1. Start with an observable action in the reference product or its user-facing
-   documentation.
+1. Start from an observable action in the reference product, its documentation,
+   or a source-study note in `docs/arcreel-study/`.
 2. Write Linglong's own requirement, data contract, screen state and acceptance
    criteria in this repository.
-3. Implement only from that Linglong-owned specification.
+3. Implement from that Linglong-owned specification, in Linglong's own code.
 4. Run the same scenario in both products and compare the resulting state,
    rendered output, recovery behaviour and export.
 5. Save evidence (screenshots, test fixtures and output manifests) under
    Linglong's project records.
 
-The implementation owner must not copy ArcReel source, translations, icons,
-logos, fixtures, prompts, CSS values, component structure, or data migrations.
-ArcReel's AGPL license and NOTICE remain attached to its repository; this is a
-product-research workflow, not a relicensing mechanism. This document is an
-engineering policy, not legal advice.
+Source-study notes describe ArcReel's design in the team's own words: modules,
+responsibilities, data flow, state machines and the trade-offs recorded in its
+ADRs. They must not paste code blocks, prompts, translations or schema/migration
+text.
+
+The implementation owner must not copy ArcReel source code, translations,
+icons, logos, fixtures, prompts, CSS values or data migrations, and must not
+port ArcReel modules file by file. ArcReel's AGPL license and NOTICE remain
+attached to its repository; this is a research workflow, not a relicensing
+mechanism.
+
+**Legal status — pending.** Reimplementing after studying AGPL source weakens
+the independent-creation position compared with a strict clean room (where
+implementers never see the source). Whether this approach keeps Linglong
+outside AGPL obligations has not been confirmed by Moloco Legal. Confirm with
+AI-Legal@moloco.com before relying on it. This document is an engineering
+policy, not legal advice.
 
 ## Scope lock
 
@@ -90,8 +102,9 @@ Each row must carry all of the following before it is marked complete:
 - **Linglong spec:** owned terminology, screen fields, API/data fields and
   permitted error states.
 - **Acceptance checks:** deterministic expected result after each action.
-- **Reference notes:** only observable behaviour, screenshots and public
-  documentation links; no copied code or source-derived implementation notes.
+- **Reference notes:** observable behaviour, screenshots, public documentation
+  links, and links to the relevant `docs/arcreel-study/` notes. No copied code
+  or prompts.
 - **Automated test:** API/unit test where applicable, plus a browser journey for
   user-visible flow.
 - **Visual evidence:** matching viewport screenshots for the Linglong page master

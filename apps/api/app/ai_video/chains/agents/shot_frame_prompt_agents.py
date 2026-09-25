@@ -25,6 +25,7 @@ def _prepare_shot_frame_input(input_dict: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "visual_style",
         "style",
+        "advertising_brief",
         "unify_style",
         "camera_shot",
         "angle",
@@ -71,6 +72,7 @@ _SHOT_FRAME_INPUT_VARS = [
     "title",
     "visual_style",
     "style",
+    "advertising_brief",
     "unify_style",
     "camera_shot",
     "angle",
@@ -117,7 +119,8 @@ _SHOT_FRAME_TEMPLATE = """你是一名专业影视分镜提示词设计师，需
 你的任务是生成“基础提示词”，只描述画面本身，供后续系统继续拼接图片映射说明。
 
 ## 强约束
-1. 必须继承项目级画面表现形式与题材风格：{visual_style} / {style}
+1. 仅当项目视觉风格非空时继承项目级画面表现形式与题材风格：{visual_style} / {style}
+1.1 若提供了广告 Creative Brief，必须以它作为最高优先级的项目创意方向：{advertising_brief}
 2. 项目是否要求统一风格：{unify_style}
 3. 若镜头信息不足，优先向项目风格与已确认实体设定收敛，不要自由发散到其他风格
 4. 当前镜头已确认的角色、场景、道具、服装名称必须原样保留，不得翻译、不得改名、不得替换为同义词

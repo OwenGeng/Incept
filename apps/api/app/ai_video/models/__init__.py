@@ -4,6 +4,21 @@ from app.ai_video.core.db import Base
 from app.ai_video.models.base import TimestampMixin
 
 from app.ai_video.models.llm import Model, ModelSettings, Provider
+from app.ai_video.models.integration_hub import AutomationApiKey, ComfyWorkflow, CustomEndpoint, EndpointMarketEntry, ProjectMemory
+from app.ai_video.models.production_control import (
+    ProductionArtifact,
+    ProductionAuditEvent,
+    ProductionDelivery,
+    ProductionQAReport,
+    ProductionRevision,
+)
+from app.ai_video.models.production_execution import (
+    GenerationBatch,
+    GenerationBatchItem,
+    GenerationIdempotencyRecord,
+    ProviderExecutionCheckpoint,
+    UsageLedgerEntry,
+)
 from app.ai_video.models.task import GenerationTask
 from app.ai_video.models.task_links import GenerationTaskLink
 from app.ai_video.models.types import FileUsageKind
@@ -20,6 +35,8 @@ from app.ai_video.models.studio import (
     FileItem,
     FileUsage,
     Project,
+    Product,
+    ProductAsset,
     Prop,
     PropImage,
     PromptTemplate,
@@ -42,6 +59,8 @@ __all__ = [
     "Base",
     "TimestampMixin",
     "Project",
+    "Product",
+    "ProductAsset",
     "Chapter",
     "Shot",
     "ShotDetail",
@@ -72,6 +91,21 @@ __all__ = [
     "Provider",
     "Model",
     "ModelSettings",
+    "AutomationApiKey",
+    "ComfyWorkflow",
+    "CustomEndpoint",
+    "EndpointMarketEntry",
+    "ProjectMemory",
+    "ProductionArtifact",
+    "ProductionAuditEvent",
+    "ProductionDelivery",
+    "ProductionQAReport",
+    "ProductionRevision",
+    "GenerationBatch",
+    "GenerationBatchItem",
+    "GenerationIdempotencyRecord",
+    "ProviderExecutionCheckpoint",
+    "UsageLedgerEntry",
     "GenerationTask",
     "GenerationTaskLink",
 ]

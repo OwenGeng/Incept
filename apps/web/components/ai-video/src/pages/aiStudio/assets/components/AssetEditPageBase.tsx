@@ -1032,7 +1032,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         cancelText={copy('Cancel', '取消')}
         confirmLoading={Boolean(promptPreviewImage && generatingByImageId[promptPreviewImage.id])}
         onOk={() => void confirmGenerateWithPrompt()}
-        destroyOnClose
+        destroyOnHidden
         width={900}
       >
         {promptPreviewLoading ? (
@@ -1079,7 +1079,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         open={smartDetectOpen}
         onCancel={() => setSmartDetectOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         width={880}
       >
         {smartDetectLoading ? (

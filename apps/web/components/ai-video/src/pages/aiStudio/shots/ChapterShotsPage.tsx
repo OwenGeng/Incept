@@ -599,14 +599,14 @@ export function ChapterShotsPage() {
             </div>
           }
           style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-          bodyStyle={{
+          styles={{ body: {
             flex: 1,
             minHeight: 0,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
             padding: 16,
-          }}
+          } }}
           extra={
             <Space wrap>
               {selectedRowKeys.length > 0 ? (
@@ -746,7 +746,7 @@ export function ChapterShotsPage() {
         closable={!extracting}
         maskClosable={!extracting}
         keyboard={!extracting}
-        destroyOnClose
+        destroyOnHidden
         width={520}
       >
         <Form form={createForm} layout="vertical" preserve={false}>

@@ -1,4 +1,4 @@
-import { message } from 'antd'
+import { aiVideoMessage as message } from '../../../components/aiVideoMessage'
 import { create } from 'zustand'
 import { FilmService } from '../../../services/generated'
 import type { TaskListItemRead, TaskStatus } from '../../../services/generated'

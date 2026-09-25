@@ -291,13 +291,13 @@ class ShotFrameImageRead(ShotFrameImageBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-ShotLinkedAssetType = Literal["character", "prop", "scene", "costume"]
+ShotLinkedAssetType = Literal["character", "prop", "scene", "costume", "product"]
 
 
 class ShotLinkedAssetItem(BaseModel):
     """按分镜聚合返回的关联资产条目（角色/道具/场景/服装）。"""
 
-    type: ShotLinkedAssetType = Field(..., description="实体类型：character/prop/scene/costume")
+    type: ShotLinkedAssetType = Field(..., description="实体类型：character/prop/scene/costume/product")
     id: str = Field(..., description="实体 ID（如 character_id/prop_id/scene_id/costume_id）")
     image_id: int | None = Field(
         None,
@@ -483,6 +483,7 @@ class ShotVideoPromptPackRead(BaseModel):
     atmosphere: str = Field("", description="氛围描述")
     visual_style: str = Field("", description="项目视觉风格")
     style: str = Field("", description="项目题材/风格")
+    advertising_brief: str = Field("", description="已批准的项目级广告 Creative Brief")
     negative_prompt: str = Field("", description="默认负面提示词")
 
 

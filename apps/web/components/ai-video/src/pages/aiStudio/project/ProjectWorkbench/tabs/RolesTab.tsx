@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Card, Button, Empty, Modal, Input, message, Space, Select, Pagination } from 'antd'
+import { App as AntApp, Card, Button, Empty, Modal, Input, Space, Select, Pagination } from 'antd'
 import { EditOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
@@ -57,6 +57,7 @@ function notifyShotAssetCreatedAndLinked(payload: {
 }
 
 export function RolesTab() {
+  const { message } = AntApp.useApp()
   const { options: projectStyleOptions, defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()

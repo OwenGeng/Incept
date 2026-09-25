@@ -123,7 +123,7 @@ const MainLayout: React.FC = () => {
                 value={language}
                 onChange={(nextLanguage) => handleLanguageChange(nextLanguage as 'en-US' | 'zh-CN')}
                 aria-label={t('languageLabel')}
-                popupClassName="linglong-language-menu"
+                classNames={{ popup: { root: 'linglong-language-menu' } }}
                 options={[
                   { value: 'en-US', label: t('lang.en') },
                   { value: 'zh-CN', label: t('lang.zh') },

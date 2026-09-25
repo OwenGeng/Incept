@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Alert, Card, Form, Select, InputNumber, Button, message } from 'antd'
+import { Alert, App as AntApp, Card, Form, Select, InputNumber, Button } from 'antd'
 import { LlmService } from '../../../services/generated/services/LlmService'
 import type { ModelRead, ModelSettingsRead } from '../../../services/generated'
 import { useAppStore } from '../../../store/useAppStore'
 
 export default function SettingsTab() {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const [settings, setSettings] = useState<ModelSettingsRead | null>(null)

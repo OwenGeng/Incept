@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Card, Divider, Empty, Layout, List, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd'
+import { App as AntApp, Badge, Button, Card, Divider, Empty, Layout, List, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Tooltip, Typography } from 'antd'
 import { ArrowLeftOutlined, ClearOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import type {
   EntityNameExistenceItem,
@@ -180,6 +180,7 @@ function overviewTypeToAssetKind(kind: ShotAssetOverviewItem['type']): AssetKind
 }
 
 export function ChapterShotEditPage() {
+  const { message } = AntApp.useApp()
   const navigate = useNavigate()
   const { projectId, chapterId, shotId } = useParams<{
     projectId: string
@@ -1522,14 +1523,14 @@ export function ChapterShotEditPage() {
         <Card
           title="分镜准备"
           style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-          bodyStyle={{
+          styles={{ body: {
             padding: 12,
             flex: 1,
             minHeight: 0,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-          }}
+          } }}
         >
           {loading ? (
             <div className="flex-1 flex items-center justify-center min-h-[200px]">
@@ -1591,7 +1592,7 @@ export function ChapterShotEditPage() {
                   display: 'flex',
                   flexDirection: 'column',
                 }}
-                bodyStyle={{ padding: 8, flex: 1, minHeight: 0, overflow: 'auto' }}
+                styles={{ body: { padding: 8, flex: 1, minHeight: 0, overflow: 'auto' } }}
               >
                 <div className="mb-3">
                   <Segmented
@@ -1750,7 +1751,7 @@ export function ChapterShotEditPage() {
                   display: 'flex',
                   flexDirection: 'column',
                 }}
-                bodyStyle={{ padding: 12, flex: 1, minHeight: 0, overflow: 'auto' }}
+                styles={{ body: { padding: 12, flex: 1, minHeight: 0, overflow: 'auto' } }}
               >
                 <Tabs
                   activeKey={editorTabKey}

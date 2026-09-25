@@ -94,6 +94,7 @@ _PRIMARY_KEYS = {
     "video_plans": "plan_id",
     "video_productions": "production_id",
     "video_production_events": "event_id",
+    "video_studio_metadata": "record_id",
     "schema_migrations": "migration_id",
 }
 

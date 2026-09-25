@@ -103,8 +103,8 @@ validate_secret_migration_config() {
 }
 
 validate_ai_video_production_config() {
-  # Cloud Run has no persistent Celery worker. Real AI Video generation must
-  # dispatch durable work through a user-owned Cloud Tasks queue.
+  # Cloud Run has no persistent Celery worker. AI Video dispatches durable
+  # generation work through a user-owned Cloud Tasks queue.
   : "${INCEPT_INTERNAL_API_KEY_SECRET:?Set INCEPT_INTERNAL_API_KEY_SECRET for AI Video task dispatch}"
   : "${INCEPT_INTERNAL_API_KEY_SECRET_VERSION:?Set INCEPT_INTERNAL_API_KEY_SECRET_VERSION for AI Video task dispatch}"
   : "${CLOUD_TASKS_LOCATION:?Set CLOUD_TASKS_LOCATION in .env.deploy}"
@@ -143,8 +143,6 @@ ensure_ai_video_task_queue() {
   || gcloud tasks queues create "${CLOUD_TASKS_QUEUE}" \
        --project="${tasks_project}" --location="${CLOUD_TASKS_LOCATION}"
 
-  # The API service creates tasks; the Cloud Tasks service agent mints the OIDC
-  # token used by each task to call the same private Cloud Run service.
   gcloud projects add-iam-policy-binding "${tasks_project}" \
     --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/cloudtasks.enqueuer" --quiet
   gcloud iam service-accounts add-iam-policy-binding "${TASK_RUNNER_SERVICE_ACCOUNT_EMAIL}" \
@@ -210,6 +208,7 @@ deploy_api() {
   # The new Cloud Run revision reads these secrets during startup, so grant
   # access before asking Cloud Run to create that revision.
   ensure_api_runtime_access
+  ensure_asset_bucket_access
   API_SECRET_BINDINGS="DATABASE_CONFIG_JSON=${DATABASE_CONFIG_SECRET}:${DATABASE_CONFIG_SECRET_VERSION}"
   API_SECRET_BINDINGS+=",INCEPT_INTERNAL_API_KEY=${INCEPT_INTERNAL_API_KEY_SECRET}:${INCEPT_INTERNAL_API_KEY_SECRET_VERSION}"
   if [[ "${PRODUCT_RELEASE_PROFILE}" == "full" ]]; then
@@ -240,6 +239,7 @@ deploy_api() {
     --project="${PROJECT_ID}" \
     --region="${REGION}" \
     --platform=managed \
+    --execution-environment=gen2 \
     --service-account="${DEPLOY_SA_EMAIL}" \
     --add-cloudsql-instances="${CLOUD_SQL_INSTANCE_CONNECTION_NAME}" \
     --no-allow-unauthenticated \
@@ -250,11 +250,11 @@ deploy_api() {
     --timeout=900 \
     --concurrency=20 \
     --no-cpu-throttling \
+    --add-volume="mount-path=/app/video-data,type=cloud-storage,bucket=${VIDEO_STUDIO_BUCKET:-${INCEPT_ASSET_BUCKET}},readonly=false" \
     --update-env-vars="\
 INCEPT_ENV=production,\
 INCEPT_API_MODE=live,\
 AUTH_MODE=internal_key_only,\
-INCEPT_ENABLE_VIDEO_PRODUCTION=${INCEPT_ENABLE_VIDEO_PRODUCTION:-false},\
 INCEPT_ENABLE_GAMING_PLAYABLE=${INCEPT_ENABLE_GAMING_PLAYABLE:-false},\
 GCP_PROJECT_DEPLOY=${PROJECT_ID},\
 GOOGLE_CLOUD_PROJECT=${PROJECT_ID},\
@@ -278,6 +278,7 @@ BIGQUERY_DATASET=${BIGQUERY_DATASET},\
 BIGQUERY_ENABLED=${BIGQUERY_ENABLED:-true},\
 GCP_PROJECT_DATA=${GCP_PROJECT_DATA},\
 INCEPT_ASSET_BUCKET=${INCEPT_ASSET_BUCKET},\
+VIDEO_STUDIO_DATA_DIR=/app/video-data/video-studio,\
 INCEPT_REQUIRE_GCS_UPLOAD=true,\
 INCEPT_ADMIN_EMAILS=${INCEPT_ADMIN_EMAILS},\
 CORS_ALLOW_ORIGINS=http://localhost:3000" \
@@ -291,7 +292,7 @@ CORS_ALLOW_ORIGINS=http://localhost:3000" \
     --member="serviceAccount:${DEPLOY_SA_EMAIL}" --role="roles/run.invoker" \
     --quiet
 
-  # Cloud Tasks calls the private API using this exact runtime identity.
+  # Cloud Tasks invokes the private API with this runtime identity.
   gcloud run services add-iam-policy-binding "${API_SERVICE}" \
     --project="${PROJECT_ID}" --region="${REGION}" \
     --member="serviceAccount:${TASK_RUNNER_SERVICE_ACCOUNT_EMAIL}" --role="roles/run.invoker" \
@@ -301,15 +302,14 @@ CORS_ALLOW_ORIGINS=http://localhost:3000" \
     --project="${PROJECT_ID}" --region="${REGION}" \
     --format='value(status.url)')"
 
-  # The API URL is assigned by Cloud Run, so bind it only after the first
-  # deployment. Cloud Tasks then targets /ai-video/... on this same service.
+  # Bind the Cloud Run URL after the service exists; task callbacks target the
+  # mounted /ai-video API on this same private service.
   gcloud run services update "${API_SERVICE}" \
     --project="${PROJECT_ID}" --region="${REGION}" \
     --update-env-vars="TASK_RUNNER_URL=${API_URL}" \
     --quiet
 
   ensure_ai_video_task_queue
-  ensure_asset_bucket_access
   run_ai_video_schema_migration
 
   ok "API live → ${API_URL}"
@@ -337,7 +337,6 @@ deploy_web() {
       --format='value(status.url)' 2>/dev/null || true)"
   fi
   [[ -z "${API_URL}" ]] && err "API service not deployed yet. Run: ./deploy.sh api"
-
   log "Building Web image (context: repo root, Dockerfile: Dockerfile.web)…"
   assert_release_image_absent "${WEB_IMAGE}"
   docker build \

@@ -46,3 +46,36 @@ GamingPlayable UI, API, and persistence layer.
   and recommendation. It does not remove the source material.
 - **Final Delivery** — the selected rendered output of a Video Project after
   review. It remains linked to the project that produced it.
+- **Product Truth Anchor** — an immutable uploaded image that records what the
+  advertised product actually looks like. Generated or standardized product
+  assets retain lineage to this anchor and never replace it.
+- **Standardized Product Asset** — a generation-ready product image derived
+  from a Product Truth Anchor. It is a candidate until the user selects it.
+- **Production Revision** — an immutable, numbered snapshot of an approved or
+  draft script, shot plan, keyframe, motion prompt, or edit. Approval supersedes
+  an older approved sibling without deleting history.
+- **Delivery Manifest** — the machine-readable record that connects a Final
+  Delivery to its approved edit, QA report, source files, revision fingerprints,
+  subtitle sidecar, and rendered MP4.
+
+## AI Video research
+
+- **Research Brief** — the project-scoped, editable advertising intake: the
+  advertiser vertical, delivery channel, product webpage or product assets,
+  and market. It is evidence intake, not a prompt pack.
+- **Research Source** — a traceable product page, competitor video, uploaded
+  reference video, or brand-guideline asset. It records provenance and the
+  uploader's rights acknowledgement; it is never treated as a license to copy.
+- **Research Finding** — an evidence-linked observation such as a visible
+  hook, product-proof mechanism, pacing pattern, or CTA structure. A finding
+  is distinct from an unverified product claim.
+- **Creative Direction** — an editable, project-specific recommendation for a
+  format, playbook, visual direction, and script direction, linked back to
+  research evidence.
+- **Approved Creative Brief** — the one Creative Direction the user approves
+  for a project. It becomes production context while the source research stays
+  visible and editable for auditability.
+- **Project Entry Mode** — either **Research** (the default, requiring a
+  user-approved Creative Direction before production) or **Preset** (a future
+  governed template supplies its own pre-approved direction). It is not a
+  legacy compatibility escape hatch.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Image, Input, Modal, Space, message, Pagination } from 'antd'
+import { App as AntApp, Button, Card, Empty, Image, Input, Modal, Space, Pagination } from 'antd'
 import { EditOutlined, LinkOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { StudioShotLinksService } from '../../../../../services/generated'
@@ -19,6 +19,7 @@ type ActorLike = {
 }
 
 export function ActorsTab() {
+  const { message } = AntApp.useApp()
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
   useProjectCharacters(projectId)

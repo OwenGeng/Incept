@@ -361,7 +361,7 @@ export function TaskCenter() {
                 {copy('Collapse', '收起')}
               </Button>
             }
-            bodyStyle={{ maxHeight: 304, overflow: 'auto' }}
+            styles={{ body: { maxHeight: 304, overflow: 'auto' } }}
           >
             <div className="mb-3 flex flex-col gap-2">
               <Segmented

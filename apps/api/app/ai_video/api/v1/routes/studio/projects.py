@@ -37,6 +37,9 @@ PROJECT_ORDER_FIELDS = {"name", "created_at", "updated_at", "progress"}
 def _build_project_style_options() -> tuple[dict[ProjectVisualStyle, list[ProjectStyle]], dict[ProjectVisualStyle, ProjectStyle]]:
     mapping: dict[ProjectVisualStyle, list[ProjectStyle]] = {key: [] for key in ProjectVisualStyle}
     for item in ProjectStyle:
+        if item is ProjectStyle.advertising_general:
+            mapping[ProjectVisualStyle.live_action].append(item)
+            continue
         if item.name.startswith("real_people_"):
             mapping[ProjectVisualStyle.live_action].append(item)
             continue

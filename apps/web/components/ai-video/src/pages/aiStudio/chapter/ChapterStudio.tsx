@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -115,6 +116,12 @@ import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivis
 import { toRelationTaskStateFromStatusRead } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { useProjectStyleOptions } from '../project/useProjectStyleOptions'
 import { useAppStore } from '../../../store/useAppStore'
+import {
+  createConfirmedVideoGeneration,
+  preflightVideoGeneration,
+  type VideoGenerationQuote,
+  type VideoGenerationRequest,
+} from '../../../services/videoGeneration'
 import './chapterStudio.separation.css'
 
 const { Sider, Content } = Layout
@@ -699,6 +706,11 @@ const ChapterStudio: React.FC = () => {
 
   const patchShotInList = (shotId: string, patch: Partial<StudioShot>) => {
     setShots((prev) => prev.map((s) => (s.id === shotId ? { ...s, ...patch } : s)))
+  }
+
+  const applySelectedVideoTake = (shotId: string, fileId: string) => {
+    patchShotInList(shotId, { generated_video_file_id: fileId })
+    if (selectedShotId === shotId) setPreviewVideoFileId(fileId)
   }
 
   const updateShotTitleInOps = async (shotId: string, title: string) => {
@@ -2423,7 +2435,7 @@ const ChapterStudio: React.FC = () => {
               </Space>
             }
             className="cs-preview-card flex-1 min-h-0"
-            bodyStyle={{ height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 12 }}
+            styles={{ body: { height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 12 } }}
           >
             <div className="flex items-center justify-between gap-2">
               {showPreviewFrameSegmented ? (
@@ -2715,6 +2727,7 @@ const ChapterStudio: React.FC = () => {
                 onPatchShotDetail={patchShotDetailLocal}
                 onPatchShotDetailImmediate={patchShotDetailImmediate}
                 onSelectPreviewVideo={setPreviewVideoFileId}
+                onSelectVideoTake={applySelectedVideoTake}
                 onRefreshShotFrameImages={refreshShotFrameImages}
                 onClose={() => setPrefs((p) => ({ ...p, inspectorOpen: false }))}
               />
@@ -2789,6 +2802,7 @@ const ChapterStudio: React.FC = () => {
                     onPatchShotDetail={patchShotDetailLocal}
                     onPatchShotDetailImmediate={patchShotDetailImmediate}
                     onSelectPreviewVideo={setPreviewVideoFileId}
+                    onSelectVideoTake={applySelectedVideoTake}
                     onRefreshShotFrameImages={refreshShotFrameImages}
                     onClose={() => setPrefs((p) => ({ ...p, inspectorOpen: false }))}
                   />
@@ -2831,7 +2845,7 @@ const ChapterStudio: React.FC = () => {
             </Button>,
           ]}
           width={880}
-          destroyOnClose={false}
+          destroyOnHidden={false}
         >
           {batchVideoReadinessLoading ? (
             <div className="py-10 text-center">
@@ -2934,6 +2948,7 @@ function Inspector(props: {
   onPatchShotDetail: (patch: Partial<ShotDetailRead>) => void
   onPatchShotDetailImmediate: (patch: Partial<ShotDetailRead>) => Promise<void>
   onSelectPreviewVideo: (fileId: string) => void
+  onSelectVideoTake: (shotId: string, fileId: string) => void
   /** 下拉展开时拉取最新分镜帧图，用于「参考」关键帧类型选项动态更新 */
   onRefreshShotFrameImages?: () => Promise<void>
 }) {
@@ -2973,6 +2988,7 @@ function Inspector(props: {
     onPatchShotDetail,
     onPatchShotDetailImmediate,
     onSelectPreviewVideo,
+    onSelectVideoTake,
     onRefreshShotFrameImages,
   } = props
   const currentChapterId = chapterId ?? null
@@ -3038,6 +3054,11 @@ function Inspector(props: {
   const [videoPromptPreviewLoading, setVideoPromptPreviewLoading] = useState(false)
   const [videoPromptPreviewSubmitting, setVideoPromptPreviewSubmitting] = useState(false)
   const [videoPromptContextCollapsed, setVideoPromptContextCollapsed] = useState(true)
+  const [videoResolution, setVideoResolution] = useState<'360p' | '720p' | '1080p' | '4k'>('720p')
+  const [videoQuote, setVideoQuote] = useState<{
+    quote: VideoGenerationQuote
+    request: VideoGenerationRequest
+  } | null>(null)
   const resolveVideoRatioForRequest = useCallback(() => {
     const shotRatio = String(shotDetail?.override_video_ratio ?? '').trim()
     const projectRatio = String(projectDefaultVideoRatio ?? '').trim()
@@ -3054,7 +3075,7 @@ function Inspector(props: {
     { prompt: string },
     { referenceMode: VideoReferenceMode; images: string[] },
     VideoPromptDerived,
-    { taskId: string | null }
+    { quote: VideoGenerationQuote; request: VideoGenerationRequest }
   >({
     initialBase: { prompt: '' },
     initialContext: { referenceMode: 'text_only', images: [] },
@@ -3090,18 +3111,16 @@ function Inspector(props: {
       if (!ratio) {
         throw new Error('video ratio is required')
       }
-      const created = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
-        requestBody: {
-          shot_id: selectedShot.id,
-          reference_mode: context.referenceMode,
-          prompt: (derived.prompt || '').trim(),
-          images: derived.images,
-          ratio,
-        } as any,
-      })
-      return {
-        taskId: created.data?.task_id ?? null,
+      const request: VideoGenerationRequest = {
+        shot_id: selectedShot.id,
+        reference_mode: context.referenceMode,
+        prompt: (derived.prompt || '').trim(),
+        images: derived.images,
+        ratio: ratio as VideoGenerationRequest['ratio'],
+        provider_params: { resolution: videoResolution, audio: false },
       }
+      const quote = await preflightVideoGeneration(request)
+      return { quote, request }
     },
   })
   const videoPromptPreviewDraft = videoPromptDraft.base.prompt
@@ -3131,7 +3150,10 @@ function Inspector(props: {
   const [promptSettledTask, setPromptSettledTask] = useState<RelationTaskState | null>(null)
   const [frameImageTask, setFrameImageTask] = useState<RelationTaskState | null>(null)
   const [frameImageSettledTask, setFrameImageSettledTask] = useState<RelationTaskState | null>(null)
-  const [generatedVideos, setGeneratedVideos] = useState<Array<{ linkId: number; fileId: string; url: string }>>([])
+  const [generatedVideos, setGeneratedVideos] = useState<
+    Array<{ linkId: number; taskId: string; fileId: string; url: string; status: string }>
+  >([])
+  const [selectingVideoTaskId, setSelectingVideoTaskId] = useState<string | null>(null)
   const [videoReadiness, setVideoReadiness] = useState<ShotVideoReadinessRead | null>(null)
   const [videoReadinessLoading, setVideoReadinessLoading] = useState(false)
   const [keyframeCards, setKeyframeCards] = useState<Record<PromptFrameType, KeyframeCardState>>({
@@ -3308,8 +3330,10 @@ function Inspector(props: {
           .filter((l) => Boolean(l.file_id))
           .map((l) => ({
             linkId: l.id,
+            taskId: l.task_id,
             fileId: String(l.file_id),
             url: buildFileDownloadUrl(String(l.file_id)) ?? '',
+            status: l.status,
           }))
           .filter((v) => Boolean(v.url))
           .filter((v) => {
@@ -3320,7 +3344,9 @@ function Inspector(props: {
         const currentId = selectedShot.generated_video_file_id?.trim() || ''
         if (currentId && !list.some((x) => x.fileId === currentId)) {
           const currentUrl = buildFileDownloadUrl(currentId) ?? ''
-          if (currentUrl) list.unshift({ linkId: -1, fileId: currentId, url: currentUrl })
+          if (currentUrl) {
+            list.unshift({ linkId: -1, taskId: '', fileId: currentId, url: currentUrl, status: 'accepted' })
+          }
         }
         setGeneratedVideos(list)
       } catch {
@@ -3331,6 +3357,28 @@ function Inspector(props: {
       canceled = true
     }
   }, [selectedShot?.id, selectedShot?.generated_video_file_id, videoTaskStatus, videoTaskPolling])
+
+  const selectVideoTake = async (taskId: string, fileId: string) => {
+    if (!selectedShot?.id || !taskId) return
+    setSelectingVideoTaskId(taskId)
+    try {
+      await FilmService.adoptTaskLinkApiV1FilmTaskLinksAdoptPatch({
+        requestBody: { task_id: taskId, shot_id: selectedShot.id },
+      })
+      setGeneratedVideos((prev) =>
+        prev.map((item) => ({
+          ...item,
+          status: item.taskId === taskId ? 'accepted' : item.status === 'accepted' ? 'todo' : item.status,
+        })),
+      )
+      onSelectVideoTake(selectedShot.id, fileId)
+      message.success('已采用该视频版本')
+    } catch {
+      message.error('采用视频版本失败')
+    } finally {
+      setSelectingVideoTaskId(null)
+    }
+  }
 
   useEffect(() => {
     setOpsTitleDraft(selectedShot?.title ?? '')
@@ -4260,6 +4308,7 @@ function Inspector(props: {
       context: nextContext,
     })
     setVideoPromptContextCollapsed(true)
+    setVideoQuote(null)
     setVideoPromptPreviewOpen(true)
     setVideoPromptPreviewLoading(true)
     try {
@@ -4300,8 +4349,20 @@ function Inspector(props: {
     }
     setVideoPromptPreviewSubmitting(true)
     try {
-      const submitted = await videoPromptDraft.submitNow()
-      const taskId = submitted?.taskId
+      if (!videoQuote) {
+        const submitted = await videoPromptDraft.submitNow()
+        if (!submitted?.quote?.quote_fingerprint) {
+          message.error('视频价格预检失败')
+          return
+        }
+        setVideoQuote(submitted)
+        return
+      }
+      const created = await createConfirmedVideoGeneration(
+        videoQuote.request,
+        videoQuote.quote.quote_fingerprint,
+      )
+      const taskId = created.task_id
       if (!taskId) {
         message.error('视频生成任务创建失败：缺少任务 ID')
         return
@@ -4316,6 +4377,7 @@ function Inspector(props: {
         cancelRequested: false,
       })
       setVideoSettledTask(null)
+      setVideoQuote(null)
       setVideoPromptPreviewOpen(false)
     } catch {
       message.error('发起视频生成失败')
@@ -5256,7 +5318,7 @@ function Inspector(props: {
                             open={linkRoleOpen}
                             onCancel={() => setLinkRoleOpen(false)}
                             footer={null}
-                            destroyOnClose
+                            destroyOnHidden
                             width={560}
                           >
                             <div className="space-y-2">
@@ -5293,7 +5355,7 @@ function Inspector(props: {
                             open={linkSceneOpen}
                             onCancel={() => setLinkSceneOpen(false)}
                             footer={null}
-                            destroyOnClose
+                            destroyOnHidden
                             width={560}
                           >
                             <div className="space-y-2">
@@ -5325,7 +5387,7 @@ function Inspector(props: {
                             open={linkPropOpen}
                             onCancel={() => setLinkPropOpen(false)}
                             footer={null}
-                            destroyOnClose
+                            destroyOnHidden
                             width={560}
                           >
                             <div className="space-y-2">
@@ -5362,7 +5424,7 @@ function Inspector(props: {
                             open={linkCostumeOpen}
                             onCancel={() => setLinkCostumeOpen(false)}
                             footer={null}
-                            destroyOnClose
+                            destroyOnHidden
                             width={560}
                           >
                             <div className="space-y-2">
@@ -5532,31 +5594,57 @@ function Inspector(props: {
                       <div className="text-xs text-gray-400">当前分镜暂无已生成视频</div>
                     ) : (
                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                        {generatedVideos.map((item, idx) => (
-                          <div key={`${item.linkId}-${item.fileId}`} className="border rounded p-2">
-                            <video
-                              src={item.url}
-                              className="w-full h-20 rounded object-cover bg-black"
-                              preload="metadata"
-                              muted
-                              onClick={() => onSelectPreviewVideo(item.fileId)}
-                              style={{ cursor: 'pointer' }}
-                            />
-                            <div className="mt-2 flex items-center justify-between gap-2">
-                              <span className="text-xs text-gray-500">视频 {idx + 1}</span>
-                              <Tooltip title="下载视频">
-                                <Button
-                                  size="small"
-                                  icon={<DownloadOutlined />}
-                                  onClick={() => {
-                                    if (!item.url) return
-                                    window.open(item.url, '_blank', 'noopener,noreferrer')
-                                  }}
-                                />
-                              </Tooltip>
+                        {generatedVideos.map((item, idx) => {
+                          const isSelected = selectedShot?.generated_video_file_id === item.fileId
+                          return (
+                            <div
+                              key={`${item.linkId}-${item.fileId}`}
+                              className={`border rounded p-2 ${isSelected ? 'border-blue-500 bg-blue-50' : ''}`}
+                            >
+                              <video
+                                src={item.url}
+                                className="w-full h-20 rounded object-cover bg-black"
+                                preload="metadata"
+                                muted
+                                onClick={() => onSelectPreviewVideo(item.fileId)}
+                                style={{ cursor: 'pointer' }}
+                              />
+                              <div className="mt-2 flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-xs text-gray-500">视频 {idx + 1}</div>
+                                  <Tag color={isSelected ? 'blue' : item.status === 'rejected' ? 'default' : 'gold'}>
+                                    {isSelected ? '已采用' : item.status === 'rejected' ? '已废弃' : '候选'}
+                                  </Tag>
+                                </div>
+                                <Space size={4}>
+                                  {!isSelected && item.taskId ? (
+                                    <Button
+                                      size="small"
+                                      type="primary"
+                                      ghost
+                                      icon={<CheckCircleOutlined />}
+                                      loading={selectingVideoTaskId === item.taskId}
+                                      disabled={Boolean(selectingVideoTaskId)}
+                                      onClick={() => void selectVideoTake(item.taskId, item.fileId)}
+                                    >
+                                      采用
+                                    </Button>
+                                  ) : null}
+                                  <Tooltip title="下载视频">
+                                    <Button
+                                      size="small"
+                                      icon={<DownloadOutlined />}
+                                      onClick={() => {
+                                        if (!item.url) return
+                                        window.open(item.url, '_blank', 'noopener,noreferrer')
+                                      }}
+                                    />
+                                  </Tooltip>
+                                </Space>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
                   </div>
@@ -5624,7 +5712,7 @@ function Inspector(props: {
               </Space>
             </div>
           )}
-          destroyOnClose
+          destroyOnHidden
           width={900}
         >
           {(() => {
@@ -6267,14 +6355,15 @@ function Inspector(props: {
           open={videoPromptPreviewOpen}
           onCancel={() => {
             if (videoPromptPreviewSubmitting) return
+            setVideoQuote(null)
             setVideoPromptPreviewOpen(false)
           }}
-          okText="生成"
+          okText={videoQuote ? '确认费用并生成' : '计算价格'}
           cancelText="取消"
           onOk={() => void submitVideoGeneration()}
           confirmLoading={videoPromptPreviewSubmitting}
           width={900}
-          destroyOnClose
+          destroyOnHidden
         >
           {videoPromptPreviewLoading ? (
             <div className="py-8 text-center">
@@ -6282,6 +6371,27 @@ function Inspector(props: {
             </div>
           ) : (
             <div className="space-y-3">
+              <div>
+                <div className="text-xs text-gray-500 mb-2">输出分辨率</div>
+                <Select
+                  className="w-full"
+                  value={videoResolution}
+                  options={['360p', '720p', '1080p', '4k'].map((value) => ({ value, label: value }))}
+                  onChange={(value) => {
+                    setVideoResolution(value)
+                    setVideoQuote(null)
+                  }}
+                  disabled={videoPromptPreviewSubmitting}
+                />
+              </div>
+              {videoQuote ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={`预计费用：${videoQuote.quote.currency} ${videoQuote.quote.amount}`}
+                  description="报价已绑定当前提示词、参考图、模型、时长和分辨率。确认后才会进入付费生成队列。"
+                />
+              ) : null}
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -6403,7 +6513,10 @@ function Inspector(props: {
                 <Input.TextArea
                   rows={10}
                   value={videoPromptPreviewDraft}
-                  onChange={(e) => videoPromptDraft.setBase({ prompt: e.target.value })}
+                  onChange={(e) => {
+                    videoPromptDraft.setBase({ prompt: e.target.value })
+                    setVideoQuote(null)
+                  }}
                   placeholder="请输入视频提示词…"
                   disabled={videoPromptPreviewSubmitting}
                 />

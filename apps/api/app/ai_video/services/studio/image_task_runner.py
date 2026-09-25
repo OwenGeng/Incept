@@ -9,6 +9,7 @@ from app.ai_video.core.task_manager.types import TaskStatus
 from app.ai_video.core.contracts.image_generation import ImageGenerationInput, ImageGenerationResult
 from app.ai_video.core.tasks import ImageGenerationTask
 from app.ai_video.models.llm import Model
+from app.ai_video.models.production_control import ProductionArtifact
 from app.ai_video.models.studio import (
     ActorImage,
     AssetQualityLevel,
@@ -19,6 +20,8 @@ from app.ai_video.models.studio import (
     SceneImage,
     ShotDetail,
     ShotFrameImage,
+    Chapter,
+    Shot,
 )
 from app.ai_video.models.task_links import GenerationTaskLink
 from app.ai_video.models.types import FileUsageKind
@@ -36,6 +39,7 @@ from app.ai_video.services.studio.image_tasks import load_provider_config, resol
 from app.ai_video.services.worker.async_task_support import cancel_if_requested_async
 from app.ai_video.services.worker.task_logging import log_task_event, log_task_failure
 from app.ai_video.utils.files import create_file_from_url_or_b64
+from uuid import uuid4
 
 
 class _CreateOnlyTask:
@@ -209,7 +213,6 @@ async def _persist_images_to_assets(
     elif relation_type == "shot_frame_image":
         image_row = await session.get(ShotFrameImage, int(relation_entity_id))
         if image_row is not None:
-            image_row.file_id = file_id
             detail = await session.get(ShotDetail, image_row.shot_detail_id)
             if detail is not None:
                 await sync_usage_from_shot_context(
@@ -219,6 +222,32 @@ async def _persist_images_to_assets(
                     usage_kind=FileUsageKind.shot_frame,
                     source_ref=f"shot_frame_image:{image_row.id}",
                 )
+                project_stmt = (
+                    select(Chapter.project_id)
+                    .join(Shot, Shot.chapter_id == Chapter.id)
+                    .where(Shot.id == detail.id)
+                )
+                project_id = (await session.execute(project_stmt)).scalars().first()
+                if project_id:
+                    frame_type = getattr(image_row.frame_type, "value", image_row.frame_type)
+                    session.add(
+                        ProductionArtifact(
+                            id=str(uuid4()),
+                            project_id=project_id,
+                            shot_id=detail.id,
+                            artifact_type=f"frame_{frame_type}",
+                            file_id=file_id,
+                            source_revision_id=None,
+                            generation_task_id=task_id,
+                            input_fingerprint=task_id,
+                            currency="current",
+                            lifecycle="candidate",
+                            metadata_json={
+                                "frame_type": str(frame_type),
+                                "shot_frame_image_id": image_row.id,
+                            },
+                        )
+                    )
 
 
 async def _resolve_related_shot_id(

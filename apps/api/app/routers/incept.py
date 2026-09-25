@@ -128,61 +128,6 @@ from app.incept.store import (
 from app.incept.prompt_reviewer import review_prompt
 from app.incept import session_store, thread_store
 from app.incept.tool_registry import get_tools, update_tool_status
-from app.incept.video_store import (
-    assert_video_budget_available,
-    confirm_video_generation_plan_for_request,
-    create_or_update_video_plan,
-    create_video_generation_job,
-    get_video_budget_status,
-    list_video_generation_plans,
-    run_video_generation_background,
-)
-from app.incept.video_production_store import (
-    CopilotQuotaExceeded,
-    create_custom_design_sheet,
-    create_scene_reframe_job,
-    create_video_production_shot,
-    create_production_audio_job,
-    create_design_sheet_job,
-    cancel_design_sheet_generation,
-    create_keyframe_job,
-    create_production_render_job,
-    create_shot_video_job,
-    extract_video_production_bridge_frame,
-    create_video_production,
-    fork_video_production,
-    archive_video_production,
-    restore_video_production,
-    restore_video_production_script_revision,
-    delete_video_production,
-    delete_custom_design_sheet,
-    delete_video_production_shot,
-    get_video_production,
-    list_video_production_events,
-    list_video_productions,
-    lock_script_and_create_storyboard,
-    approve_storyboard,
-    reorder_video_production_shots,
-    run_creative_director,
-    run_audio_producer,
-    run_director_agent,
-    run_edit_reviewer,
-    run_design_sheet_background,
-    run_scene_reframe_background,
-    select_design_sheet_panel,
-    update_custom_design_sheet,
-    run_keyframe_background,
-    run_production_designer,
-    run_production_copilot,
-    cancel_production_copilot,
-    run_production_audio_background,
-    run_production_render_background,
-    run_shot_video_background,
-    run_script_agent,
-    update_video_production,
-    update_video_production_shot,
-)
-from app.incept.video_production_capabilities import configured_video_production_capabilities
 from app.incept.playable_store import (
     create_template as create_playable_template,
     fork_template as fork_playable_template,
@@ -589,19 +534,6 @@ def usage(
     return list_usage_events(workspace_id)
 
 
-@router.get("/video-budget-status", response_model=VideoBudgetStatus)
-def video_budget_status(
-    duration_seconds: int | None = None,
-    variants: int | None = None,
-    user: User = Depends(get_current_user),
-) -> VideoBudgetStatus:
-    return get_video_budget_status(
-        user,
-        duration_seconds=duration_seconds,
-        variants=variants,
-    )
-
-
 @router.get("/usage-summary")
 def usage_summary(user: User = Depends(get_current_user)) -> dict:
     """Return personal Studio usage; admins additionally receive all-user totals."""
@@ -741,6 +673,8 @@ def fork_playable_template_endpoint(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+'''Legacy Video Production routes were removed in favour of VideoProduction.'''
+'''
 @router.get("/video-productions", response_model=list[VideoProduction])
 def video_productions(
     workspace_id: str,
@@ -1371,6 +1305,7 @@ def render_video_production_first_cut(
     return job
 
 
+'''
 @router.get("/theme-create/reports", response_model=list[ThemeCreateStyleReport])
 def theme_create_reports(
     workspace_id: str | None = None,
@@ -1674,6 +1609,8 @@ def remediation_analyze_endpoint(
     return analyze_remediation_assets(request, user.id)
 
 
+'''Legacy AI Video workflow routes were removed in favour of VideoProduction.'''
+'''
 @router.post("/workflows/video-generation", response_model=GenerationJob)
 async def create_video_generation_job_endpoint(
     request: VideoGenerationRequest,
@@ -1740,6 +1677,7 @@ def list_video_plan_endpoint(
     return [VideoPlanResponse(plan=plan) for plan in list_video_generation_plans(thread_id, user)]
 
 
+'''
 @router.post("/workflows/image-edit", response_model=GenerationJob)
 async def image_edit_endpoint(
     request: ImageEditRequest,

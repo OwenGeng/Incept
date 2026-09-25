@@ -14,6 +14,7 @@ class ProjectStyle(str, Enum):
     anime_3d = "动漫3D"
     guoman = "国漫"
     ink_wash = "水墨画"
+    advertising_general = "广告通用"
 
 
 class ProjectVisualStyle(str, Enum):

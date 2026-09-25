@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FC, Key } from 'react'
-import { Card, Tree, Input, Row, Col, Tag, Pagination, Button, Modal, Form, Select, Switch, message } from 'antd'
+import { App as AntApp, Card, Tree, Input, Row, Col, Tag, Pagination, Button, Modal, Form, Select, Switch } from 'antd'
 import type { DataNode } from 'antd/es/tree'
 import { StudioPromptsService } from '../../../services/generated'
 import type { PromptCategory, PromptTemplateRead } from '../../../services/generated'
@@ -122,6 +122,7 @@ function getGroupKey(category: string): (typeof groupOrder)[number] {
 }
 
 const PromptTemplateManager: FC = () => {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const isChinese = language === 'zh-CN'
   const copy = (english: string, chinese: string) => (isChinese ? chinese : english)
@@ -457,7 +458,8 @@ const PromptTemplateManager: FC = () => {
         okText={copy('Save', '保存')}
         cancelText={copy('Cancel', '取消')}
         confirmLoading={submitting}
-        destroyOnClose
+        destroyOnHidden
+        forceRender
       >
         <Form layout="vertical" form={createForm}>
           <Form.Item

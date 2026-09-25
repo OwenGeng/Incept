@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Card, Button, Tag, Space, Table, Empty, Modal, Input, Dropdown, message } from 'antd'
+import { App as AntApp, Card, Button, Tag, Space, Table, Empty, Modal, Input, Dropdown } from 'antd'
 import type { MenuProps, TableColumnsType } from 'antd'
 import {
   EditOutlined,
@@ -36,6 +36,7 @@ const CREATE_PARAM = 'create'
 const EDIT_PARAM = 'edit'
 
 export function ChaptersTab() {
+  const { message } = AntApp.useApp()
   const taskCopy = TASK_COPY.chapterDivision
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()

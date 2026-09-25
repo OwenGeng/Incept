@@ -142,7 +142,7 @@ class TaskLinkAdoptRead(BaseModel):
     task_id: str
     link_type: str = Field(..., description="project | chapter | shot")
     entity_id: str = Field(..., description="项目/章节/镜头 ID")
-    is_adopted: bool = Field(..., description="是否采用（仅可正向变更为 true）")
+    is_adopted: bool = Field(..., description="是否已成为正式采用项")
 
 
 class _CreateOnlyTask:

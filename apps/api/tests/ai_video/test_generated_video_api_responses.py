@@ -135,14 +135,31 @@ def test_preview_video_generation_prompt_not_found_returns_api_response(
 
 def test_create_video_generation_task_returns_created_envelope(client: TestClient, monkeypatch) -> None:
     db = _FakeDB()
+    captured: dict[str, object] = {}
 
-    async def _fake_build_run_args(*_args, **_kwargs):
-        return {"prompt": "最终视频提示词", "images": ["file-1"]}
+    async def _fake_create_video_task_record(*_args, **kwargs):
+        captured.update(kwargs)
+        return "video-task-1", False
 
-    monkeypatch.setattr(route, "build_run_args", _fake_build_run_args)
-    monkeypatch.setattr(route, "TaskManager", _FakeTaskManager)
+    async def _fake_quote(*_args, **_kwargs):
+        return {
+            "complete": True,
+            "currency": "USD",
+            "amount": "0.50",
+            "quantity": "5",
+            "unit": "second",
+            "unit_amount": "0.10",
+            "model_id": "video-model",
+            "estimate_kind": "catalog_output_estimate",
+            "estimate_scope": "video_output",
+            "exclusions": [],
+            "pricing_snapshot": {},
+            "quote_fingerprint": "a" * 64,
+        }
+
+    monkeypatch.setattr(route, "create_video_task_record", _fake_create_video_task_record)
+    monkeypatch.setattr(route, "quote_video_item", _fake_quote)
     monkeypatch.setattr(route, "enqueue_task_execution", lambda task_id: SimpleNamespace(id=f"celery-{task_id}"))
-    monkeypatch.setattr(route, "mark_shot_generating", _async_noop)
     app.dependency_overrides[get_db] = _override_db(db)
     try:
         response = client.post(
@@ -153,6 +170,9 @@ def test_create_video_generation_task_returns_created_envelope(client: TestClien
                 "prompt": "生成一个节奏紧张的视频片段",
                 "images": [],
                 "ratio": "9:16",
+                "provider_params": {"resolution": "720p", "audio": False},
+                "quote_fingerprint": "a" * 64,
+                "confirmed_by": "studio-user",
             },
         )
     finally:
@@ -165,7 +185,77 @@ def test_create_video_generation_task_returns_created_envelope(client: TestClien
     assert body["data"]["task_id"] == "video-task-1"
     assert body["meta"] is None
     assert db.committed is True
-    assert len(db.added) == 1
+    assert captured["idempotency_key"] is None
+    assert captured["item"].shot_id == "shot-1"
+
+
+def test_video_generation_preflight_returns_complete_quote(client: TestClient, monkeypatch) -> None:
+    db = _FakeDB()
+
+    async def _fake_quote(*_args, **_kwargs):
+        return {
+            "complete": True,
+            "currency": "USD",
+            "amount": "0.50",
+            "quantity": "5",
+            "unit": "second",
+            "unit_amount": "0.10",
+            "model_id": "video-model",
+            "estimate_kind": "catalog_output_estimate",
+            "estimate_scope": "video_output",
+            "exclusions": [],
+            "pricing_snapshot": {},
+            "quote_fingerprint": "b" * 64,
+        }
+
+    monkeypatch.setattr(route, "quote_video_item", _fake_quote)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        response = client.post(
+            "/api/v1/film/tasks/video/preflight",
+            json={
+                "shot_id": "shot-1",
+                "reference_mode": "text_only",
+                "prompt": "Show the product",
+                "images": [],
+                "ratio": "9:16",
+                "provider_params": {"resolution": "720p", "audio": False},
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["data"]["quote_fingerprint"] == "b" * 64
+
+
+def test_video_generation_rejects_a_stale_quote(client: TestClient, monkeypatch) -> None:
+    db = _FakeDB()
+
+    async def _fake_quote(*_args, **_kwargs):
+        return {"complete": True, "quote_fingerprint": "c" * 64}
+
+    monkeypatch.setattr(route, "quote_video_item", _fake_quote)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        response = client.post(
+            "/api/v1/film/tasks/video",
+            json={
+                "shot_id": "shot-1",
+                "reference_mode": "text_only",
+                "prompt": "Show the product",
+                "images": [],
+                "ratio": "9:16",
+                "provider_params": {"resolution": "720p", "audio": False},
+                "quote_fingerprint": "d" * 64,
+                "confirmed_by": "studio-user",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert db.committed is False
 
 
 def test_create_video_generation_task_validation_error_returns_api_response(client: TestClient) -> None:

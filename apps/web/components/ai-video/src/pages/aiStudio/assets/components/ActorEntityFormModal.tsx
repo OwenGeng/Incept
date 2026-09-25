@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Input, InputNumber, Modal, message } from 'antd'
+import { App as AntApp, Input, InputNumber, Modal } from 'antd'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 import { ProjectVisualStyleAndStyleFields } from '../../project/ProjectVisualStyleAndStyleFields'
 import { useProjectStyleOptions } from '../../project/useProjectStyleOptions'
@@ -39,6 +39,7 @@ export function ActorEntityFormModal({
   onCancel: () => void
   onSuccess: (detail?: { created?: unknown }) => void | Promise<void>
 }) {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const { options: projectStyleOptions, defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()

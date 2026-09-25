@@ -2,14 +2,16 @@
 
 import "@ant-design/v5-patch-for-react-19";
 import { Component, useEffect, type ReactNode } from "react";
-import { ConfigProvider } from "antd";
+import { App as AntApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
-import App from "./App";
+import RouterApp from "./App";
 import i18n from "./i18n";
 import { isAiVideoMockEnabled } from "./runtime";
 import { useAppStore } from "./store/useAppStore";
 import { SystemTextEnglishAdapter } from "./components/SystemTextEnglishAdapter";
+import { AntdMessageBridge } from "./components/AntdMessageBridge";
+import "./services/openapi";
 
 function AiVideoRoot() {
   const language = useAppStore((state) => state.language);
@@ -39,8 +41,11 @@ function AiVideoRoot() {
         },
       }}
     >
-      <SystemTextEnglishAdapter />
-      <App />
+      <AntApp>
+        <AntdMessageBridge />
+        <SystemTextEnglishAdapter />
+        <RouterApp />
+      </AntApp>
     </ConfigProvider>
   );
 }

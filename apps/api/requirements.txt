@@ -14,6 +14,7 @@ google-genai>=1.16.0
 
 # InterSight
 httpx>=0.28.1
+trafilatura>=2.0.0
 
 # Incept
 openai>=1.30.0

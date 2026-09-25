@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Input, InputNumber, Modal, message } from 'antd'
+import { App as AntApp, Input, InputNumber, Modal } from 'antd'
 import { ProjectVisualStyleAndStyleFields } from '../../project/ProjectVisualStyleAndStyleFields'
 import { useProjectStyleOptions } from '../../project/useProjectStyleOptions'
 import { useAppStore } from '../../../../store/useAppStore'
@@ -108,6 +108,7 @@ export function StudioAssetTypeFormModal({
   } | null
   onSeedConsumed?: () => void
 }) {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const { options: projectStyleOptions, defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()

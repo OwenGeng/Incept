@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.ai_video.models.studio import Chapter, PromptCategory, PromptTemplate, Shot, ShotDetail
+from app.ai_video.models.studio import Chapter, ProjectResearch, PromptCategory, PromptTemplate, Shot, ShotDetail
 from app.ai_video.schemas.studio.shots import (
     ActionBeatPhaseRead,
     ShotPromptAssetRef,
@@ -29,6 +29,7 @@ from app.ai_video.schemas.studio.shots import (
 from app.ai_video.services.common import entity_not_found
 from app.ai_video.services.studio.action_beats import infer_action_beat_sequence
 from app.ai_video.services.studio.shot_assets_overview import get_shot_assets_overview
+from app.ai_video.services.studio.project_research_context import format_approved_creative_brief
 
 
 DEFAULT_VIDEO_NEGATIVE_PROMPT = (
@@ -90,6 +91,7 @@ def _pack_variables(pack: ShotVideoPromptPackRead) -> dict[str, Any]:
         "atmosphere": pack.atmosphere,
         "visual_style": pack.visual_style,
         "style": pack.style,
+        "advertising_brief": pack.advertising_brief,
         "negative_prompt": pack.negative_prompt,
     }
 
@@ -103,6 +105,8 @@ def _render_template(content: str, variables: dict[str, Any]) -> str:
 def _build_guidance_suffix(pack: ShotVideoPromptPackRead) -> str:
     """生成一段稳定的镜头执行约束，供模板渲染结果补强使用。"""
     lines: list[str] = []
+    if pack.advertising_brief:
+        lines.append(pack.advertising_brief)
     if pack.action_beats:
         lines.append(f"动作节拍：{'；'.join(pack.action_beats)}")
     if pack.previous_shot_summary:
@@ -401,6 +405,8 @@ async def build_shot_video_prompt_pack(
 
     detail = shot.detail
     project = getattr(getattr(shot, "chapter", None), "project", None)
+    project_research = await db.get(ProjectResearch, getattr(project, "id", None)) if project is not None else None
+    advertising_brief = format_approved_creative_brief(project_research)
     overview = await get_shot_assets_overview(db, shot_id=shot_id)
     neighbors_stmt = (
         select(Shot)
@@ -488,7 +494,8 @@ async def build_shot_video_prompt_pack(
             duration=getattr(detail, "duration", None),
         ),
         atmosphere=str(getattr(detail, "atmosphere", "") or ""),
-        visual_style=_enum_value(getattr(project, "visual_style", None)),
-        style=_enum_value(getattr(project, "style", None)),
+        visual_style="" if advertising_brief else _enum_value(getattr(project, "visual_style", None)),
+        style="" if advertising_brief else _enum_value(getattr(project, "style", None)),
+        advertising_brief=advertising_brief,
         negative_prompt=DEFAULT_VIDEO_NEGATIVE_PROMPT,
     )

@@ -1,8 +1,9 @@
-import { Card, Form, Input, Select, Button, message } from 'antd'
+import { App as AntApp, Card, Form, Input, Select, Button } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 import { useTranslation } from 'react-i18next'
 
 const Settings: React.FC = () => {
+  const { message } = AntApp.useApp()
   const { t } = useTranslation(['settings', 'common'])
   const user = useAppStore((state) => state.user)
   const setUser = useAppStore((state) => state.setUser)

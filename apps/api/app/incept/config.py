@@ -44,6 +44,9 @@ class Settings(BaseModel):
     # generation so an environment override cannot silently change that flow.
     vertex_playable_flash_model: str = Field(default="gemini-3.8-flash")
     vertex_playable_pro_model: str = Field(default="gemini-3.1-pro-preview")
+    # Research has a separate explicit model choice so its behavior cannot be
+    # changed by GamingPlayable or legacy video-planning configuration.
+    vertex_research_model: str = Field(default="gemini-3.8-flash")
     # Keep video planning on the richer model without changing image/remediation analysis.
     vertex_video_analysis_model: str = Field(default="gemini-3.6-flash")
     vertex_lyria_model: str = Field(default="lyria-3-clip-preview")
@@ -59,11 +62,6 @@ class Settings(BaseModel):
     studio_copilot_estimated_cost_per_1k_tokens_usd: float = Field(default=0.0)
     studio_copilot_requests_per_minute: int = Field(default=12)
     studio_copilot_max_message_chars: int = Field(default=12_000)
-    # Remote MCP is disabled unless deployment supplies both a public resource
-    # URL and opaque bearer credentials. Values are a JSON object: token ->
-    # non-secret caller identity used by normal Incept authorization.
-    video_production_mcp_public_url: str | None = Field(default=None)
-    video_production_mcp_api_keys: dict[str, dict[str, str]] = Field(default_factory=dict)
     creative_core_home: str = Field(default="")
     playable_capture_chrome_path: str = Field(default="")
     playable_capture_ffmpeg_path: str = Field(default="")
@@ -135,6 +133,7 @@ def get_settings() -> Settings:
         vertex_playable_model=os.getenv("VERTEX_PLAYABLE_MODEL", "gemini-3.6-flash"),
         vertex_playable_flash_model=os.getenv("VERTEX_PLAYABLE_FLASH_MODEL", "gemini-3.8-flash"),
         vertex_playable_pro_model=os.getenv("VERTEX_PLAYABLE_PRO_MODEL", "gemini-3.1-pro-preview"),
+        vertex_research_model=os.getenv("VERTEX_RESEARCH_MODEL", "gemini-3.8-flash"),
         vertex_video_analysis_model=os.getenv("VERTEX_VIDEO_ANALYSIS_MODEL", "gemini-3.6-flash"),
         vertex_lyria_model=os.getenv("VERTEX_LYRIA_MODEL", "lyria-3-clip-preview"),
         vertex_lyria_location=os.getenv("VERTEX_LYRIA_LOCATION", "global"),
@@ -147,8 +146,6 @@ def get_settings() -> Settings:
         studio_copilot_estimated_cost_per_1k_tokens_usd=float(os.getenv("STUDIO_COPILOT_ESTIMATED_COST_PER_1K_TOKENS_USD", "0")),
         studio_copilot_requests_per_minute=int(os.getenv("STUDIO_COPILOT_REQUESTS_PER_MINUTE", "12")),
         studio_copilot_max_message_chars=int(os.getenv("STUDIO_COPILOT_MAX_MESSAGE_CHARS", "12000")),
-        video_production_mcp_public_url=os.getenv("INCEPT_VIDEO_MCP_PUBLIC_URL") or None,
-        video_production_mcp_api_keys=_json_object(os.getenv("INCEPT_VIDEO_MCP_API_KEYS")),
         creative_core_home=os.getenv("CREATIVE_CORE_HOME", ""),
         playable_capture_chrome_path=os.getenv("PLAYABLE_CAPTURE_CHROME_PATH", ""),
         playable_capture_ffmpeg_path=os.getenv("PLAYABLE_CAPTURE_FFMPEG_PATH", ""),

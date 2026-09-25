@@ -1,9 +1,15 @@
 """Internal Prompt Reviewer agent, intentionally outside the production context."""
 
+from pathlib import Path
+
 from app.incept.config import get_settings
 from app.incept.models import PromptReviewRequest, PromptReviewResponse
-from app.incept.video_production_agents import PROMPT_REVIEWER_PROMPT
-from app.incept.video_store import _call_multimodal_text_model
+from app.incept.vertex_generation import _call_multimodal_text_model
+
+
+PROMPT_REVIEWER_PROMPT = (
+    Path(__file__).with_name("prompts") / "prompt_reviewer.md"
+).read_text(encoding="utf-8").strip()
 
 
 def review_prompt(request: PromptReviewRequest) -> PromptReviewResponse:

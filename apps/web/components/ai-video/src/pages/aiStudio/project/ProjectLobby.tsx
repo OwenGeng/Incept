@@ -10,15 +10,15 @@ import {
   Modal,
   Form,
   Select,
-  InputNumber,
-  Switch,
-  message,
+  App as AntApp,
+  Upload,
   Space,
   Tag,
   Popconfirm,
   Empty,
   Result,
 } from 'antd'
+import type { UploadFile } from 'antd'
 import {
   PlusOutlined,
   EditOutlined,
@@ -28,22 +28,19 @@ import {
   UnorderedListOutlined,
   BarsOutlined,
   SearchOutlined,
+  InboxOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../../store/useAppStore'
 import { chapters as mockChapters, projects as mockProjects, type Project } from '../../../mocks/data'
 import { StudioChaptersService, StudioProjectsService } from '../../../services/generated'
 import type { ChapterRead, ProjectRead, ProjectStyle } from '../../../services/generated'
-import {
-  ProjectVisualStyleAndStyleFields,
-  type ProjectVisualStyleChoice,
-} from './ProjectVisualStyleAndStyleFields'
-import { useProjectStyleOptions } from './useProjectStyleOptions'
 import { getChapterPreparationState } from './ProjectWorkbench/chapterPreparation'
 import { ensureHasShotsBeforeShooting } from './ProjectWorkbench/ensureHasShotsBeforeShooting'
 import { getChapterShotsPath, getChapterStudioPath } from './ProjectWorkbench/routes'
 import { loadProjectFlowStatsForChapters, type ProjectFlowStats } from './ProjectWorkbench/projectFlowStats'
 import { isAiVideoMockEnabled } from '../../../runtime'
+import { saveProjectResearch, uploadResearchFile } from '../../../services/projectResearch'
 
 type ViewMode = 'grid' | 'compact' | 'large'
 type FilterTab = 'all' | 'editRaw' | 'extractShots' | 'prepareShots' | 'generating' | 'ready'
@@ -60,11 +57,12 @@ type ProjectStageSummary = {
 }
 type ProjectFlowStatsMap = Record<string, ProjectFlowStats>
 type ProjectView = Project & {
-  visualStyle?: ProjectVisualStyleChoice
+  visualStyle?: string
   defaultVideoRatio?: string | null
 }
 
 const ProjectLobby: React.FC = () => {
+  const { message: messageApi } = AntApp.useApp()
   const navigate = useNavigate()
   const language = useAppStore((state) => state.language)
   const copy = useCallback(
@@ -87,15 +85,25 @@ const ProjectLobby: React.FC = () => {
   const [creatingProject, setCreatingProject] = useState(false)
   const [updatingProject, setUpdatingProject] = useState(false)
   const [editingProject, setEditingProject] = useState<ProjectView | null>(null)
+  const [createProductFile, setCreateProductFile] = useState<File | null>(null)
   const [projectStageMap, setProjectStageMap] = useState<Record<string, ProjectStageSummary>>({})
   const [projectFlowStatsMap, setProjectFlowStatsMap] = useState<ProjectFlowStatsMap>({})
-  const {
-    options: projectStyleOptions,
-    videoRatioOptions,
-    defaultVideoRatio,
-  } = useProjectStyleOptions()
   const [form] = Form.useForm()
   const [editForm] = Form.useForm()
+
+  const advertiserVerticalOptions = [
+    { value: 'Gaming', label: copy('Gaming', '游戏') },
+    { value: 'Social & Community', label: copy('Social & Community', '社交与社区') },
+    { value: 'E-commerce / DTC', label: copy('E-commerce / DTC', '电商 / DTC') },
+    { value: 'Utility / Productivity', label: copy('Utility / Productivity', '工具 / 效率') },
+    { value: 'Other app', label: copy('Other app', '其他应用') },
+    { value: 'Brand', label: copy('Brand', '品牌') },
+  ]
+  const deliveryChannelOptions = [
+    { value: 'Mobile in-app', label: copy('Mobile in-app', '移动端应用内') },
+    { value: 'CTV', label: copy('CTV', '联网电视（CTV）') },
+    { value: 'Cross-channel', label: copy('Cross-channel', '跨渠道') },
+  ]
 
   const useMock = isAiVideoMockEnabled
 
@@ -126,7 +134,7 @@ const ProjectLobby: React.FC = () => {
         props: getNum('props'),
       },
       updatedAt,
-      visualStyle: (p.visual_style as ProjectVisualStyleChoice | undefined) ?? '现实',
+      visualStyle: p.visual_style ?? '现实',
       defaultVideoRatio: p.default_video_ratio ?? null,
     }
   }
@@ -398,38 +406,31 @@ const ProjectLobby: React.FC = () => {
         Array.isArray(prev) ? prev.filter((p) => !selectedIds.includes(p.id)) : prev
       )
       setSelectedIds([])
-      message.success(copy('Selected projects deleted', '已批量删除选中项目'))
+      messageApi.success(copy('Selected projects deleted', '已批量删除选中项目'))
     } catch {
-      message.error(copy('Could not delete selected projects', '批量删除失败'))
+      messageApi.error(copy('Could not delete selected projects', '批量删除失败'))
     }
   }
 
   const handleOpenCreate = () => {
     form.resetFields()
-    const defaultVisual = (projectStyleOptions.visualStyles[0]?.value ?? '现实') as ProjectVisualStyleChoice
-    const defaultStyle =
-      projectStyleOptions.defaultStyleByVisual?.[defaultVisual] ??
-      projectStyleOptions.stylesByVisual[defaultVisual]?.[0]?.value
-    form.setFieldsValue({
-      visual_style: defaultVisual,
-      style: defaultStyle,
-      seed: Math.floor(Math.random() * 99999),
-      unifyStyle: true,
-      default_video_ratio: defaultVideoRatio,
-    })
+    setCreateProductFile(null)
     setCreateModalOpen(true)
   }
 
   const handleCreateSubmit = async (values: {
     name: string
     description?: string
-    style: string
-    visual_style: ProjectVisualStyleChoice
-    seed: number
-    unifyStyle: boolean
-    default_video_ratio?: string
+    advertiser_vertical: string
+    delivery_channel: string
+    product_url?: string
+    market?: string
   }) => {
     if (creatingProject) return
+    if (!values.product_url?.trim() && !createProductFile) {
+      messageApi.error(copy('Add a product webpage or upload a product asset.', '请填写产品网页或上传产品素材。'))
+      return
+    }
     setCreatingProject(true)
     try {
       const createdId = newProjectId()
@@ -438,23 +439,63 @@ const ProjectLobby: React.FC = () => {
           id: createdId,
           name: values.name,
           description: values.description ?? '',
-          style: values.style as ProjectStyle,
-          visual_style: values.visual_style as any,
-          seed: values.seed,
-          unify_style: values.unifyStyle,
-          default_video_ratio: values.default_video_ratio || null,
+          style: '广告通用' as ProjectStyle,
+          visual_style: '现实',
+          seed: 0,
+          unify_style: true,
+          default_video_ratio: null,
           progress: 0,
         },
       })
       const created = res.data
       if (!created) throw new Error('empty project')
+      const productAssetIds = createProductFile
+        ? [await uploadResearchFile(created.id, createProductFile)]
+        : []
+      await saveProjectResearch(created.id, {
+        entry_mode: 'research',
+        status: 'draft',
+        brief: {
+          advertiser_vertical: values.advertiser_vertical,
+          delivery_channel: values.delivery_channel,
+          product_name: values.name,
+          product_description: values.description ?? '',
+          product_url: values.product_url?.trim() || null,
+          product_asset_file_ids: productAssetIds,
+          market: values.market?.trim() || null,
+          target_audience: '',
+          conversion_goal: '',
+          key_messages: [],
+          cta: '',
+          legal: '',
+          prohibited_claims: [],
+          claim_evidence: [],
+          aspect_ratios: [],
+          language: 'en',
+          required_overlays: [],
+          brand_colors: [],
+          brand_font_family: 'Arial',
+          safe_area_percent: 5,
+        },
+        sources: [
+          ...(values.product_url?.trim()
+            ? [{ id: `source_${created.id}_url`, type: 'product_page' as const, title: values.name, url: values.product_url.trim(), notes: '', rights_confirmed: true }]
+            : []),
+          ...(productAssetIds.length
+            ? [{ id: `source_${created.id}_asset`, type: 'product_asset' as const, title: createProductFile?.name ?? 'Product asset', file_id: productAssetIds[0], notes: '', rights_confirmed: true }]
+            : []),
+        ],
+        findings: [],
+        creative_directions: [],
+        approved_direction_id: null,
+      })
       const ui = toUIProject(created)
-      message.success(copy('Project created', '项目创建成功'))
+      messageApi.success(copy('Project created', '项目创建成功'))
       setCreateModalOpen(false)
       setProjects((prev) => (Array.isArray(prev) ? [...prev, ui] : [ui]))
-      navigate(`/projects/${ui.id}`)
+      navigate(`/projects/${ui.id}?tab=research`)
     } catch {
-      message.error(copy('Could not create project', '创建失败'))
+      messageApi.error(copy('Could not create project', '创建失败'))
     } finally {
       setCreatingProject(false)
     }
@@ -466,11 +507,6 @@ const ProjectLobby: React.FC = () => {
     editForm.setFieldsValue({
       name: p.name,
       description: p.description,
-      style: p.style,
-      visual_style: p.visualStyle ?? '现实',
-      seed: p.seed,
-      unifyStyle: p.unifyStyle,
-      default_video_ratio: p.defaultVideoRatio ?? undefined,
     })
     setEditModalOpen(true)
   }
@@ -478,11 +514,6 @@ const ProjectLobby: React.FC = () => {
   const handleEditSubmit = async (values: {
     name: string
     description?: string
-    style: string
-    visual_style: ProjectVisualStyleChoice
-    seed: number
-    unifyStyle: boolean
-    default_video_ratio?: string
   }) => {
     if (!editingProject) return
     if (updatingProject) return
@@ -493,24 +524,19 @@ const ProjectLobby: React.FC = () => {
         requestBody: {
           name: values.name,
           description: values.description ?? '',
-          style: values.style as ProjectStyle,
-          visual_style: values.visual_style as any,
-          seed: values.seed,
-          unify_style: values.unifyStyle,
-          default_video_ratio: values.default_video_ratio || null,
         },
       })
       const updated = res.data
       if (!updated) throw new Error('empty project')
       const ui = toUIProject(updated)
-      message.success(copy('Project updated', '项目已更新'))
+      messageApi.success(copy('Project updated', '项目已更新'))
       setEditModalOpen(false)
       setEditingProject(null)
       setProjects((prev) =>
         Array.isArray(prev) ? prev.map((x) => (x.id === ui.id ? ui : x)) : prev
       )
     } catch {
-      message.error(copy('Could not update project', '更新失败'))
+      messageApi.error(copy('Could not update project', '更新失败'))
     } finally {
       setUpdatingProject(false)
     }
@@ -519,10 +545,10 @@ const ProjectLobby: React.FC = () => {
   const handleDelete = async (projectId: string) => {
     try {
       await StudioProjectsService.deleteProjectApiV1StudioProjectsProjectIdDelete({ projectId })
-      message.success(copy('Project deleted', '已删除'))
+      messageApi.success(copy('Project deleted', '已删除'))
       setProjects((prev) => (Array.isArray(prev) ? prev.filter((p) => p.id !== projectId) : []))
     } catch {
-      message.error(copy('Could not delete project', '删除失败'))
+      messageApi.error(copy('Could not delete project', '删除失败'))
     }
   }
 
@@ -585,7 +611,7 @@ const ProjectLobby: React.FC = () => {
         loading={loading}
         size="small"
         className="project-card h-full cursor-pointer"
-        bodyStyle={{ padding: '10px' }}
+        styles={{ body: { padding: '10px' } }}
         tabIndex={0}
         aria-label={copy(`Project: ${p.name}. Press Enter to open.`, `项目：${p.name}。按 Enter 进入。`)}
         onClick={() => {
@@ -1000,8 +1026,10 @@ const ProjectLobby: React.FC = () => {
               size="small"
               title={copy('Project overview', '项目速览')}
               className="project-overview mb-1.5"
-              bodyStyle={{ padding: '10px' }}
-              headStyle={{ minHeight: 36, paddingInline: 10 }}
+              styles={{
+                body: { padding: '10px' },
+                header: { minHeight: 36, paddingInline: 10 },
+              }}
             >
               {selectedProject ? (
                 <div className="space-y-2">
@@ -1014,10 +1042,6 @@ const ProjectLobby: React.FC = () => {
                     <div className="text-xs text-gray-600 line-clamp-2">
                       {selectedProject.description || copy('No description', '暂无描述')}
                     </div>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] text-gray-500">
-                    <span>{copy(`Video style: ${selectedProject.style}`, `视频风格：${selectedProject.style}`)}</span>
-                    <span>{copy(`Seed: ${selectedProject.seed}`, `种子：${selectedProject.seed}`)}</span>
                   </div>
                   <div>
                     <div className="text-[11px] text-gray-500 mb-0.5">{copy('Progress', '进度')}</div>
@@ -1054,55 +1078,61 @@ const ProjectLobby: React.FC = () => {
       </div>
 
       <Modal
-        title={copy('New short-form project', '新建短剧项目')}
+        title={copy('New advertising video project', '新建广告视频项目')}
         open={createModalOpen}
         onCancel={() => setCreateModalOpen(false)}
         footer={null}
-        width={520}
+        width={640}
+        forceRender
       >
         <Form
           form={form}
           layout="vertical"
           onFinish={handleCreateSubmit}
-          initialValues={{
-            visual_style: projectStyleOptions.visualStyles[0]?.value ?? '现实',
-            style:
-              projectStyleOptions.defaultStyleByVisual?.[projectStyleOptions.visualStyles[0]?.value ?? '现实'] ??
-              projectStyleOptions.stylesByVisual[projectStyleOptions.visualStyles[0]?.value ?? '现实']?.[0]?.value ??
-              '真人都市',
-            seed: Math.floor(Math.random() * 99999),
-            unifyStyle: true,
-            default_video_ratio: defaultVideoRatio,
-          }}
+          initialValues={{ advertiser_vertical: 'E-commerce / DTC', delivery_channel: 'Cross-channel' }}
         >
           <Form.Item
             name="name"
             label={copy('Project name', '项目名称')}
             rules={[{ required: true, message: copy('Enter a project name', '请输入项目名称') }]}
           >
-            <Input placeholder={copy('For example: A contemporary romance short drama', '例如：现实都市爱情短剧')} />
+            <Input placeholder={copy('For example: Summer product launch', '例如：夏季产品发布广告')} />
           </Form.Item>
           <Form.Item name="description" label={copy('Description (optional)', '项目简介（选填）')}>
-            <Input.TextArea rows={4} placeholder={copy('Describe the project and visual direction (recommended: 80–120 words)', '项目简介与风格说明，建议 80–120 字')} />
+            <Input.TextArea rows={3} placeholder={copy('Describe the product and intended campaign context.', '描述产品和计划投放场景。')} />
           </Form.Item>
-          <ProjectVisualStyleAndStyleFields form={form} options={projectStyleOptions} />
-          <Form.Item
-            name="seed"
-            label={copy('Global seed', '全局种子值')}
-            tooltip={copy('A fixed seed keeps the visual direction consistent across the project.', '固定种子可确保整部短剧视觉调性一致')}
-          >
-            <InputNumber min={0} className="w-full" />
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="advertiser_vertical" label={copy('Advertiser vertical', '广告主行业')} rules={[{ required: true }]}>
+                <Select options={advertiserVerticalOptions} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="delivery_channel" label={copy('Delivery channel', '投放渠道')} rules={[{ required: true }]}>
+                <Select options={deliveryChannelOptions} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="product_url" label={copy('Product webpage', '产品网页')}>
+            <Input placeholder="https://" />
           </Form.Item>
-          <Form.Item name="default_video_ratio" label={copy('Default video ratio', '默认视频比例')}>
-            <Select allowClear placeholder={copy('Let the model or provider decide', '未设置时由模型/供应商决定')} options={videoRatioOptions} />
+          <Form.Item label={copy('Product asset', '产品素材')} extra={copy('A product webpage or one product asset is required.', '产品网页和产品素材至少提供一项。')}>
+            <Upload.Dragger
+              maxCount={1}
+              beforeUpload={(file) => { setCreateProductFile(file); return false }}
+              onRemove={() => { setCreateProductFile(null); return true }}
+              fileList={createProductFile ? [{
+                uid: createProductFile.name,
+                name: createProductFile.name,
+                status: 'done',
+              } satisfies UploadFile] : []}
+            >
+              <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+              <p>{copy('Drop a product image, video, or brand asset here', '拖入产品图片、视频或品牌素材')}</p>
+            </Upload.Dragger>
           </Form.Item>
-          <Form.Item
-            name="unifyStyle"
-            label={copy('Apply this style to every chapter', '所有章节强制继承此风格')}
-            valuePropName="checked"
-            tooltip={copy('When enabled, every chapter inherits the project style.', '开启后所有章节继承项目风格')}
-          >
-            <Switch />
+          <Form.Item name="market" label={copy('Market (optional)', '市场（选填）')}>
+            <Input placeholder={copy('For example: US, Japan, Global', '例如：美国、日本、全球')} />
           </Form.Item>
           <Form.Item className="mb-0">
             <Space>
@@ -1121,28 +1151,18 @@ const ProjectLobby: React.FC = () => {
         onCancel={() => { setEditModalOpen(false); setEditingProject(null) }}
         footer={null}
         width={520}
+        forceRender
       >
         <Form
           form={editForm}
           layout="vertical"
           onFinish={handleEditSubmit}
-          initialValues={{ style: '真人都市', visual_style: '现实', unifyStyle: true }}
         >
           <Form.Item name="name" label={copy('Project name', '项目名称')} rules={[{ required: true, message: copy('Enter a project name', '请输入项目名称') }]}>
             <Input placeholder={copy('Project name', '项目名称')} />
           </Form.Item>
           <Form.Item name="description" label={copy('Description', '描述')}>
             <Input.TextArea rows={3} placeholder={copy('Project summary and visual direction', '项目简介与风格说明')} />
-          </Form.Item>
-          <ProjectVisualStyleAndStyleFields form={editForm} options={projectStyleOptions} />
-          <Form.Item name="seed" label={copy('Global seed', '全局种子值')} tooltip={copy('A fixed seed keeps the visual direction consistent across the project.', '固定种子可确保整部短剧视觉调性一致')}>
-            <InputNumber min={0} className="w-full" />
-          </Form.Item>
-          <Form.Item name="default_video_ratio" label={copy('Default video ratio', '默认视频比例')}>
-            <Select allowClear placeholder={copy('Let the model or provider decide', '未设置时由模型/供应商决定')} options={videoRatioOptions} />
-          </Form.Item>
-          <Form.Item name="unifyStyle" label={copy('Keep styles consistent', '风格统一')} valuePropName="checked" tooltip={copy('When enabled, every chapter inherits the project style.', '开启后所有章节继承项目风格')}>
-            <Switch />
           </Form.Item>
           <Form.Item className="mb-0">
             <Space>

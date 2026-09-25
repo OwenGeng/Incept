@@ -10,9 +10,10 @@ from app.ai_video.api.utils import apply_order, paginate
 from app.ai_video.core.task_manager import SqlAlchemyTaskStore
 from app.ai_video.core.task_manager.types import TaskStatus
 from app.ai_video.dependencies import get_db
-from app.ai_video.models.task_links import GenerationTaskLink
+from app.ai_video.models.task_links import GenerationTaskLink, GenerationTaskLinkStatus
 from app.ai_video.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.ai_video.services.common import entity_not_found
+from app.ai_video.services.film.generated_video import select_generated_video_take
 from app.ai_video.tasks.execute_task import revoke_task_execution
 
 from .common import (
@@ -215,8 +216,8 @@ async def cancel_task(
 @router.patch(
     "/task-links/adopt",
     response_model=ApiResponse[TaskLinkAdoptRead],
-    summary="更新任务关联的采用状态（仅可正向变更）",
-    description="将指定任务链接的状态设为 accepted；已采用不可改为未采用。",
+    summary="采用生成任务产物",
+    description="采用指定任务产物；视频 take 会成为镜头的唯一正式选择，之前的选择仍保留为候选。",
 )
 async def adopt_task_link(
     body: TaskLinkAdoptRequest,
@@ -235,13 +236,27 @@ async def adopt_task_link(
     if link is None:
         raise HTTPException(status_code=404, detail=entity_not_found("Task link"))
 
-    if str(link.status) == "accepted":
+    if link.resource_type == "video" and link.relation_type == "video":
+        if target_type != "shot" or link.relation_entity_id != entity_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Video take must be adopted through its owning shot",
+            )
+        await select_generated_video_take(db, shot_id=entity_id, task_id=body.task_id)
+        return success_response(
+            TaskLinkAdoptRead(
+                task_id=body.task_id,
+                link_type=target_type,
+                entity_id=entity_id,
+                is_adopted=True,
+            )
+        )
+
+    if link.status == GenerationTaskLinkStatus.accepted:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="状态只可正向变更，已采用不可改为未采用",
         )
-
-    from app.ai_video.models.task_links import GenerationTaskLinkStatus
 
     link.status = GenerationTaskLinkStatus.accepted
     await db.flush()

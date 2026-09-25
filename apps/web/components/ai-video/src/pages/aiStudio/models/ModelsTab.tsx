@@ -14,7 +14,7 @@ import {
   Modal,
   Form,
   Select,
-  message,
+  App as AntApp,
   Tooltip,
   Empty,
   Grid,
@@ -51,6 +51,7 @@ import {
 import { useAppStore } from '../../../store/useAppStore'
 
 export default function ModelsTab() {
+  const { message } = AntApp.useApp()
   const language = useAppStore((state) => state.language)
   const copy = (english: string, chinese: string) => (language === 'zh-CN' ? chinese : english)
   const categoryLabel = (category: ModelCategoryKey) => {
@@ -813,7 +814,7 @@ export default function ModelsTab() {
         }}
         onOk={() => void handleSaveModel()}
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" className="pt-2">
           <Form.Item name="name" label={copy('Name', '名称')} rules={[{ required: true }]}>

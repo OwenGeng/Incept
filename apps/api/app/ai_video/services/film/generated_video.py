@@ -15,9 +15,10 @@ from app.ai_video.core.contracts.provider import ProviderConfig
 from app.ai_video.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
 from app.ai_video.core.tasks import VideoGenerationTask
 from app.ai_video.models.llm import Model, ModelCategoryKey, ModelSettings
-from app.ai_video.models.task_links import GenerationTaskLink
+from app.ai_video.models.production_execution import ProviderExecutionCheckpoint
+from app.ai_video.models.task_links import GenerationTaskLink, GenerationTaskLinkStatus
 from app.ai_video.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
-from app.ai_video.models.types import FileUsageKind
+from app.ai_video.models.types import FileType, FileUsageKind
 from app.ai_video.services.common import entity_not_found
 from app.ai_video.services.llm.provider_resolver import resolve_provider_config_by_model
 from app.ai_video.services.studio.file_usages import sync_usage_from_shot_context
@@ -251,23 +252,28 @@ async def persist_generated_video_to_shot(
     provider: str,
     api_key: str,
 ) -> FileItem:
-    url = (result.url or "").strip()
-    if not url:
-        raise RuntimeError("Video generation result has no download url")
+    if result.file_id:
+        file_obj = await session.get(FileItem, result.file_id)
+        if file_obj is None or file_obj.type != FileType.video:
+            raise RuntimeError("Video generation result references an invalid persisted file")
+    else:
+        url = (result.url or "").strip()
+        if not url:
+            raise RuntimeError("Video generation result has no download url or persisted file")
 
-    url_headers: dict[str, str] | None = None
-    if provider == "openai":
-        url_headers = {"Authorization": f"Bearer {api_key}"}
+        url_headers: dict[str, str] | None = None
+        if provider == "openai":
+            url_headers = {"Authorization": f"Bearer {api_key}"}
 
-    file_obj = await create_file_from_url_or_b64(
-        session,
-        url=None if url.startswith("data:") else url,
-        b64_data=url if url.startswith("data:") else None,
-        name=f"shot-{shot_id}-video",
-        prefix=f"generated-videos/shots/{shot_id}",
-        url_request_headers=url_headers,
-        httpx_timeout=600.0,
-    )
+        file_obj = await create_file_from_url_or_b64(
+            session,
+            url=None if url.startswith("data:") else url,
+            b64_data=url if url.startswith("data:") else None,
+            name=f"shot-{shot_id}-video",
+            prefix=f"generated-videos/shots/{shot_id}",
+            url_request_headers=url_headers,
+            httpx_timeout=600.0,
+        )
 
     link_stmt = (
         select(GenerationTaskLink)
@@ -283,10 +289,6 @@ async def persist_generated_video_to_shot(
     if link_row is not None:
         link_row.file_id = file_obj.id
 
-    shot = await session.get(Shot, shot_id)
-    if shot is not None:
-        shot.generated_video_file_id = file_obj.id
-
     await sync_usage_from_shot_context(
         session,
         file_id=file_obj.id,
@@ -298,15 +300,93 @@ async def persist_generated_video_to_shot(
     return file_obj
 
 
+async def persist_inline_video_for_checkpoint(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    shot_id: str,
+    result: VideoGenerationResult,
+    provider: str,
+    api_key: str,
+) -> tuple[VideoGenerationResult, FileItem | None]:
+    """Replace inline provider bytes with a durable FileItem reference."""
+
+    if not (result.url or "").startswith("data:"):
+        return result, None
+    file_obj = await persist_generated_video_to_shot(
+        session,
+        task_id=task_id,
+        shot_id=shot_id,
+        result=result,
+        provider=provider,
+        api_key=api_key,
+    )
+    return result.model_copy(update={"url": None, "file_id": file_obj.id}), file_obj
+
+
+async def select_generated_video_take(
+    session: AsyncSession,
+    *,
+    shot_id: str,
+    task_id: str,
+) -> GenerationTaskLink:
+    """Select one persisted video take without deleting or replacing its siblings.
+
+    Generation and selection are intentionally separate operations. A successful
+    generation creates a candidate task link; only this explicit operation may
+    update the shot's selected video pointer.
+    """
+
+    shot = await session.get(Shot, shot_id)
+    if shot is None:
+        raise HTTPException(status_code=404, detail=entity_not_found("Shot"))
+
+    stmt = (
+        select(GenerationTaskLink)
+        .where(
+            GenerationTaskLink.resource_type == "video",
+            GenerationTaskLink.relation_type == "video",
+            GenerationTaskLink.relation_entity_id == shot_id,
+        )
+        .order_by(GenerationTaskLink.id.asc())
+        .with_for_update()
+    )
+    links = list((await session.execute(stmt)).scalars().all())
+    selected = next((link for link in links if link.task_id == task_id), None)
+    if selected is None:
+        raise HTTPException(status_code=404, detail=entity_not_found("Video take"))
+    if not selected.file_id:
+        raise HTTPException(status_code=409, detail="Video take has no persisted file")
+
+    for link in links:
+        if link.id == selected.id:
+            link.status = GenerationTaskLinkStatus.accepted
+        elif link.status == GenerationTaskLinkStatus.accepted:
+            # Switching selection must keep the previous paid take available.
+            link.status = GenerationTaskLinkStatus.todo
+
+    shot.generated_video_file_id = selected.file_id
+    await session.flush()
+    return selected
+
+
 async def run_video_generation_task(
     task_id: str,
     run_args: dict,
 ) -> None:
     async with async_session_maker() as session:
         try:
+            from app.ai_video.services.studio.production_execution import (
+                record_provider_completed,
+                settle_video_usage,
+                update_execution_external_pending,
+                update_execution_started,
+            )
+
             store = SqlAlchemyTaskStore(session)
             await store.set_status(task_id, TaskStatus.running)
             await store.set_progress(task_id, 10)
+            await update_execution_started(session, task_id=task_id)
             await session.commit()
             log_task_event("video_generation", task_id, "running")
             if await cancel_if_requested_async(store=store, task_id=task_id, session=session):
@@ -314,13 +394,29 @@ async def run_video_generation_task(
                 return
 
             provider = str(run_args.get("provider") or "")
-            if provider == "creatify":
+            provider_cfg: ProviderConfig | None = None
+            checkpoint = await session.get(ProviderExecutionCheckpoint, task_id)
+            checkpoint_result = (
+                checkpoint.checkpoint.get("provider_result")
+                if checkpoint is not None and isinstance(checkpoint.checkpoint, dict)
+                else None
+            )
+            if checkpoint_result and checkpoint.state in {"provider_completed", "download_failed", "resuming_download"}:
+                result = VideoGenerationResult.model_validate(checkpoint_result)
+                log_task_event("video_generation", task_id, "resume_download", provider=provider)
+            elif provider == "creatify":
                 from app.ai_video.services.integrations.creatify_tasks import advance_creatify_video_job
 
                 result = await advance_creatify_video_job(task_id, run_args)
                 # A non-terminal external task has been persisted and its next
                 # poll scheduled; it must remain `running`, not be marked done.
                 if result is None:
+                    await update_execution_external_pending(
+                        session,
+                        task_id=task_id,
+                        run_args=run_args,
+                    )
+                    await session.commit()
                     log_task_event("video_generation", task_id, "external_pending", provider="creatify")
                     return
             else:
@@ -331,6 +427,7 @@ async def run_video_generation_task(
                 provider_cfg = await load_provider_config_by_model(session, model)
                 if provider_cfg.provider != provider:
                     raise RuntimeError("Provider changed after task creation; cancel and create a new generation task")
+                assert provider_cfg is not None
                 input_dict = dict(run_args.get("input") or {})
 
                 task = VideoGenerationTask(
@@ -350,25 +447,56 @@ async def run_video_generation_task(
                         detailed_error = str(status_dict.get("error") or "")
                     msg = detailed_error or "Video generation task returned no result"
                     raise RuntimeError(msg)
-            if await cancel_if_requested_async(store=store, task_id=task_id, session=session):
-                log_task_event("video_generation", task_id, "cancelled", stage="after_execute")
-                return
-
             shot_id = str(run_args.get("shot_id") or "")
             if not shot_id:
                 raise RuntimeError("run_args missing shot_id for video persistence")
 
-            file_obj = await persist_generated_video_to_shot(
+            if provider == "openai" and provider_cfg is None and not result.file_id:
+                model_id = str(run_args.get("model_id") or "").strip()
+                model = await session.get(Model, model_id)
+                if model is None:
+                    raise RuntimeError(f"Configured video model is unavailable: {model_id}")
+                provider_cfg = await load_provider_config_by_model(session, model)
+                if provider_cfg.provider != provider:
+                    raise RuntimeError("Provider changed after task creation; cancel and create a new generation task")
+
+            persisted_file: FileItem | None = None
+            if not checkpoint_result:
+                # Inline provider media can be many megabytes. Persist it before
+                # checkpointing, then keep only the durable FileItem reference
+                # in the JSON checkpoint used for download retries.
+                result, persisted_file = await persist_inline_video_for_checkpoint(
+                    session,
+                    task_id=task_id,
+                    shot_id=shot_id,
+                    result=result,
+                    provider=provider,
+                    api_key=provider_cfg.api_key if provider_cfg is not None else "",
+                )
+
+            if not checkpoint_result:
+                await record_provider_completed(
+                    session,
+                    task_id=task_id,
+                    result_payload=result.model_dump(mode="json"),
+                )
+                await session.commit()
+            if await cancel_if_requested_async(store=store, task_id=task_id, session=session):
+                log_task_event("video_generation", task_id, "cancelled", stage="after_execute")
+                return
+
+            file_obj = persisted_file or await persist_generated_video_to_shot(
                 session,
                 task_id=task_id,
                 shot_id=shot_id,
                 result=result,
                 provider=provider,
-                api_key=provider_cfg.api_key if provider != "creatify" else "",
+                api_key=provider_cfg.api_key if provider_cfg is not None else "",
             )
 
             result_payload = result.model_dump()
             result_payload["file_id"] = file_obj.id
+            await settle_video_usage(session, task_id=task_id, result_payload=result_payload)
             await store.set_result(task_id, result_payload)
             if await cancel_if_requested_async(store=store, task_id=task_id, session=session):
                 log_task_event("video_generation", task_id, "cancelled", stage="after_persist")
@@ -381,9 +509,12 @@ async def run_video_generation_task(
         except Exception as exc:  # noqa: BLE001
             await session.rollback()
             async with async_session_maker() as s2:
+                from app.ai_video.services.studio.production_execution import fail_video_usage
+
                 store = SqlAlchemyTaskStore(s2)
                 await store.set_error(task_id, str(exc))
                 await store.set_status(task_id, TaskStatus.failed)
+                await fail_video_usage(s2, task_id=task_id, error=str(exc))
                 shot_id = str(run_args.get("shot_id") or "")
                 if shot_id:
                     await recompute_shot_status(s2, shot_id=shot_id)

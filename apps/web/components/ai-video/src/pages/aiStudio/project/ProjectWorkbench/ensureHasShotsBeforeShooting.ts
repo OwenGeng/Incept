@@ -1,4 +1,4 @@
-import { message } from 'antd'
+import { aiVideoMessage as message } from '../../../../components/aiVideoMessage'
 import type { NavigateFunction } from 'react-router-dom'
 
 import { getChapterShotsPath, getChapterStudioPath } from './routes'

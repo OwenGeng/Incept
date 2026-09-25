@@ -16,6 +16,9 @@ from app.ai_video.models.studio_asset_images import (
     SceneImage,
 )
 from app.ai_video.models.studio_prompts_files_timeline import FileItem, PromptTemplate, TimelineClip
+from app.ai_video.models.studio_project_research import ProjectResearch
+from app.ai_video.models.studio_project_agent import ProjectAgentMessage, ProjectAgentSession
+from app.ai_video.models.studio_products import Product, ProductAsset
 from app.ai_video.models.studio_file_usages import FileUsage
 from app.ai_video.models.studio_projects import (
     Chapter,
@@ -79,6 +82,11 @@ __all__ = [
     "PromptCategory",
     # Models
     "Project",
+    "ProjectResearch",
+    "ProjectAgentSession",
+    "ProjectAgentMessage",
+    "Product",
+    "ProductAsset",
     "Chapter",
     "Scene",
     "Prop",

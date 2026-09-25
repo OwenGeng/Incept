@@ -4,10 +4,17 @@ from fastapi import APIRouter
 
 from app.ai_video.api.v1.routes.studio import (
     chapters,
+    editing,
     entities,
     files,
     image_tasks,
+    integration_hub,
     projects,
+    project_research,
+    project_agent,
+    production_control,
+    production_execution,
+    products,
     prompts,
     shots,
     timeline,
@@ -17,6 +24,12 @@ from app.ai_video.api.v1.routes.studio import (
 router = APIRouter()
 
 router.include_router(projects.router, prefix="/projects", tags=["studio/projects"])
+router.include_router(project_research.router, tags=["studio/project-research"])
+router.include_router(project_agent.router, tags=["studio/project-agent"])
+router.include_router(production_control.router, tags=["studio/production-control"])
+router.include_router(production_execution.router, tags=["studio/production-execution"])
+router.include_router(editing.router, tags=["studio/editing"])
+router.include_router(products.router, tags=["studio/products"])
 router.include_router(chapters.router, prefix="/chapters", tags=["studio/chapters"])
 
 router.include_router(shots.router, prefix="/shots", tags=["studio/shots"])
@@ -30,4 +43,5 @@ router.include_router(prompts.router, prefix="/prompts", tags=["studio/prompts"]
 router.include_router(files.router, prefix="/files", tags=["studio/files"])
 router.include_router(timeline.router, prefix="/timeline", tags=["studio/timeline"])
 router.include_router(image_tasks.router, prefix="/image-tasks", tags=["studio/image-tasks"])
+router.include_router(integration_hub.router, tags=["studio/integration-hub"])
 router.include_router(shot_character_links.router, prefix="/shot-character-links", tags=["studio/shot-character-links"])
