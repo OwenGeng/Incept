@@ -481,7 +481,7 @@ def remove_asset_library(body: WorkspaceMutation, email: str = Depends(current_u
 def _default_legacy_settings() -> dict[str, Any]:
     model = platform_settings.gemini_model
     return {
-        "ui": {"theme": "light", "primaryColor": "#6750A4", "fontScale": 100, "radius": 8, "startupAnimation": True},
+        "ui": {"theme": "light", "primaryColor": "#6750A4", "fontScale": 100, "radius": 8, "startupAnimation": True, "language": "en"},
         "general": {"canvasCompositingEnabled": False, "canvasEdgeAnimationEnabled": True},
         "privacy": {"dataCollectionEnabled": False},
         "customProviders": [{

@@ -14,7 +14,7 @@
       :cdnOptions="cdnOptions"
       :components="markdownOverlays"
       :parseMarkdownIntoBlocks="definitions ? keepChunk : undefined"
-      locale="zh-CN" />
+      :locale="interfaceLanguage" />
   </div>
 </template>
 
@@ -23,6 +23,7 @@ import { computed } from "vue";
 import { Markdown, parseMarkdownIntoBlocks } from "vue-stream-markdown";
 import { MarkdownAstParser } from "@markmend/ast";
 import type { CodeOptions, ShikiOptions } from "vue-stream-markdown";
+import { interfaceLanguage } from "@/i18n";
 import "vue-stream-markdown/index.css";
 import "vue-stream-markdown/theme.css";
 import markdownOverlays from "./markdownOverlays";

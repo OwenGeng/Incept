@@ -67,6 +67,7 @@ declare module 'vue' {
     IconSitemap: typeof import('@tabler/icons-vue')['IconSitemap']
     IconTextSize: typeof import('@tabler/icons-vue')['IconTextSize']
     KeyInput: typeof import('./../components/settings/panels/general/keyInput.vue')['default']
+    LanguageSwitch: typeof import('./../components/languageSwitch.vue')['default']
     Mcp: typeof import('./../components/settings/panels/mcp/index.vue')['default']
     Menu: typeof import('./../components/agent/menu.vue')['default']
     MessageMarkdown: typeof import('./../components/messageMarkdown.vue')['default']

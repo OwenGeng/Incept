@@ -60,6 +60,7 @@ def test_vue_settings_and_built_in_nodes_are_server_managed(tmp_path, monkeypatc
     assert response.status_code == 200
     assert response.json()["data"]["privacy"]["dataCollectionEnabled"] is False
     assert response.json()["data"]["customProviders"][0]["apiKey"] == ""
+    assert response.json()["data"]["ui"]["language"] == "en"
 
     nodes = api.get("/video-legacy/api/nodes/get", headers=headers()).json()["data"]
     assert {item["name"] for item in nodes} == {

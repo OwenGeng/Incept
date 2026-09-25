@@ -3,7 +3,10 @@
     <bg class="pageBackground" />
     <el-header class="pageHeader">
       <el-button round size="large" :icon="IconSettings" aria-label="设置" @click="settingsVisible = true">设置</el-button>
-      <el-button round size="large" tag="a" href="/" target="_top">返回 LinglongLab</el-button>
+      <div class="headerActions">
+        <language-switch />
+        <el-button round size="large" tag="a" href="/" target="_top">返回 LinglongLab</el-button>
+      </div>
     </el-header>
     <el-main class="pageContent">
       <section class="creationPanel" aria-label="创建项目">
@@ -53,7 +56,7 @@
               <span class="projectInfo">
                 <span class="projectName" :title="project.name">{{ project.name }}</span>
                 <span class="projectPath" :title="project.directory">{{ project.directory }}</span>
-                <span class="projectTime">最近打开 {{ new Date(project.lastOpenedAt).toLocaleString('zh-CN', { hour12: false }) }}</span>
+                <span class="projectTime">最近打开 {{ formatLastOpened(project.lastOpenedAt) }}</span>
               </span>
             </button>
             <div class="projectActions">
@@ -85,6 +88,8 @@ import modelPopover from "@/components/modelPopover.vue";
 import logoUrl from "@linglonglab/video-assets/logo.png";
 import { useWorkspaceStore, type Project } from "@/stores/workspace";
 import settings from "@/components/settings/index.vue";
+import languageSwitch from "@/components/languageSwitch.vue";
+import { interfaceLanguage, t } from "@/i18n";
 import bg from "./bg.vue";
 
 const settingsVisible = ref(false);
@@ -95,7 +100,7 @@ const importInput = ref<HTMLInputElement>();
 const prompt = ref("");
 const workspaceStore = useWorkspaceStore();
 const { project, projectList } = storeToRefs(workspaceStore);
-const placeholderPhrases = [
+const chinesePlaceholderPhrases = [
   "描述你想创作的内容，让灵感从这里开始…",
   "把一个故事灵感，变成一段精彩的短片…",
   "为你的主角设计独特的外形和性格…",
@@ -107,12 +112,25 @@ const placeholderPhrases = [
   "设计一支富有想象力的产品宣传片…",
   "从一句话开始，搭建你的创作工作流…",
 ];
-const promptPlaceholder = ref(placeholderPhrases[0]!);
+const englishPlaceholderPhrases = [
+  "Describe what you want to create and start from here…",
+  "Turn a story idea into a memorable short film…",
+  "Design a distinctive look and personality for your lead…",
+  "Create a cinematic shot on a rain-soaked street at night…",
+  "Break this text into a coherent visual storyboard…",
+  "Generate scenes and characters for a fantasy adventure…",
+  "Find the right music for your visuals…",
+  "Write a warm voice-over that tells this story…",
+  "Design an imaginative product film…",
+  "Start with one sentence and build a creative workflow…",
+];
+const placeholderPhrases = computed(() => interfaceLanguage.value === "en" ? englishPlaceholderPhrases : chinesePlaceholderPhrases);
+const promptPlaceholder = ref(placeholderPhrases.value[0]!);
 
 onMounted(() => {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   let phraseIndex = 0;
-  watch(() => !!prompt.value, (hasInput, _previous, onCleanup) => {
+  watch([() => !!prompt.value, interfaceLanguage], ([hasInput], _previous, onCleanup) => {
     if (hasInput) return;
     let characterCount = 0;
     let deleting = false;
@@ -120,7 +138,8 @@ onMounted(() => {
     promptPlaceholder.value = "";
 
     function typePlaceholder() {
-      const phrase = placeholderPhrases[phraseIndex]!;
+      const phrases = placeholderPhrases.value;
+      const phrase = phrases[phraseIndex]!;
       characterCount += deleting ? -1 : 1;
       promptPlaceholder.value = phrase.slice(0, characterCount);
       let delay = deleting ? 35 : 85;
@@ -129,7 +148,7 @@ onMounted(() => {
         delay = 1800;
       } else if (characterCount === 0) {
         deleting = false;
-        phraseIndex = (phraseIndex + 1) % placeholderPhrases.length;
+        phraseIndex = (phraseIndex + 1) % phrases.length;
         delay = 300;
       }
       timer = setTimeout(typePlaceholder, delay);
@@ -153,6 +172,10 @@ const viewMode = ref("grid");
 const sortedProjects = computed(() => [...projectList.value].sort((left, right) =>
   sortDescending.value ? right.lastOpenedAt - left.lastOpenedAt : left.lastOpenedAt - right.lastOpenedAt
 ));
+
+function formatLastOpened(timestamp: number) {
+  return new Date(timestamp).toLocaleString(interfaceLanguage.value === "en" ? "en-US" : "zh-CN", { hour12: false });
+}
 
 async function openProject(project: Project) {
   if (creating.value || opening.value) return;
@@ -182,7 +205,10 @@ async function createProject(fromPrompt = true) {
   creating.value = true;
   try {
     const idea = prompt.value.trim();
-    const name = fromPrompt && idea ? idea.slice(0, 36) : `未命名项目 ${new Date().toLocaleDateString("zh-CN")}`;
+    const locale = interfaceLanguage.value === "en" ? "en-US" : "zh-CN";
+    const name = fromPrompt && idea
+      ? idea.slice(0, 36)
+      : `${t("未命名项目", "Untitled project")} ${new Date().toLocaleDateString(locale)}`;
     const created = await workspaceStore.createProject(name, idea);
     await workspaceStore.openProject(created.directory);
     if (fromPrompt && prompt.value.trim()) {
@@ -274,6 +300,12 @@ async function removeProject(project: Project) {
 
     a {
       text-decoration: none;
+    }
+
+    .headerActions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
     .githubAction {

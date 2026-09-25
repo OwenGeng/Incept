@@ -25,7 +25,7 @@ export const settingsStorage = {
   },
 };
 
-export const defaultUiSettings = { theme: "light", primaryColor: "#409eff", fontScale: 100, radius: 8, startupAnimation: true };
+export const defaultUiSettings = { theme: "light", primaryColor: "#409eff", fontScale: 100, radius: 8, startupAnimation: true, language: "en" as "zh-CN" | "en" };
 export const uiSettings = computed(() => {
   const raw = settings.value.ui;
   const ui = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
@@ -35,6 +35,7 @@ export const uiSettings = computed(() => {
     fontScale: typeof ui.fontScale === "number" && Number.isFinite(ui.fontScale) ? Math.min(125, Math.max(85, ui.fontScale)) : defaultUiSettings.fontScale,
     radius: typeof ui.radius === "number" && Number.isFinite(ui.radius) ? Math.min(16, Math.max(0, ui.radius)) : defaultUiSettings.radius,
     startupAnimation: ui.startupAnimation !== false,
+    language: ui.language === "zh-CN" ? "zh-CN" as const : "en" as const,
   };
 });
 

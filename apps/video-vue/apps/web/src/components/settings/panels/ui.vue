@@ -2,6 +2,14 @@
   <div class="ui">
     <p class="intro">让创作空间更合你的习惯，修改会自动保存。</p>
 
+    <section class="settingSection" aria-labelledby="languageTitle">
+      <h3 id="languageTitle">
+        <icon-language :size="18" />
+        语言
+      </h3>
+      <language-switch />
+    </section>
+
     <section class="settingSection" aria-labelledby="themeTitle">
       <h3 id="themeTitle">
         <icon-sun-moon :size="18" />
@@ -119,8 +127,10 @@ import {
   IconSparkles,
   IconCheck,
   IconRestore,
+  IconLanguage,
 } from "@tabler/icons-vue";
 import { defaultUiSettings, uiSettings, updateUiSettings } from "@/stores/settings";
+import languageSwitch from "@/components/languageSwitch.vue";
 
 const fontScale = ref(uiSettings.value.fontScale);
 const radius = ref(uiSettings.value.radius);

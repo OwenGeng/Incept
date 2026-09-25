@@ -18,6 +18,7 @@
         :saveNode="saveDocumentNode" />
     </keep-alive>
     <workspaceMenu class="workspaceMenu" @openSettings="settingsVisible = true" />
+    <language-switch class="languageSwitch" />
     <el-segmented :modelValue="activePanel" class="panelSwitcher" :options="panelOptions" size="small" aria-label="切换面板" @change="switchPanel">
       <template #default="{ item }">
         <span class="panelOption">
@@ -52,6 +53,7 @@ import { registerWorkspaceControl, waitForControlValue } from "@/lib/mcpControl"
 import anonymousData from "@/lib/anonymousData";
 import canvasPanel from "./panels/canvas/canvasHost.vue";
 import workspaceMenu from "./components/workspaceMenu.vue";
+import languageSwitch from "@/components/languageSwitch.vue";
 import floatingAgent from "./components/floatingAgent.vue";
 
 const documentPanel = defineAsyncComponent(() => import("./panels/document/index.vue"));
@@ -201,6 +203,18 @@ function saveDocumentNode(directory: string, canvasPath: string, nodeId: string,
     top: 15px;
     left: 15px;
     z-index: 5;
+  }
+
+  .languageSwitch {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    z-index: 5;
+    padding: 4px;
+    border: 1px solid var(--el-border-color-light);
+    border-radius: calc(var(--ui-radius) + 4px);
+    background: var(--el-bg-color-overlay);
+    box-shadow: var(--el-box-shadow-lighter);
   }
 
   .panelSwitcher {
