@@ -17,6 +17,7 @@ from app.routers import (
     kakao,
     video_studio,
     video_runtime,
+    video_legacy,
 )
 
 
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(kakao.router)
     app.include_router(video_studio.router)
     app.include_router(video_runtime.router)
+    app.include_router(video_legacy.router)
 
     app.mount("/ai-video", ai_video_app)
 

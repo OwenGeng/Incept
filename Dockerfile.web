@@ -17,7 +17,21 @@ COPY apps/web/package.json ./apps/web/
 # Install only what the web app needs
 RUN pnpm install --frozen-lockfile --filter @incept/web...
 
-# ── Stage 2: build ────────────────────────────────────────────────────────────
+# ── Stage 2: build the Vue video workspace ───────────────────────────────────
+FROM node:20-alpine AS video-builder
+WORKDIR /app/apps/video-vue
+
+RUN corepack enable
+
+COPY apps/video-vue/package.json apps/video-vue/pnpm-lock.yaml apps/video-vue/pnpm-workspace.yaml ./
+COPY apps/video-vue/apps ./apps
+COPY apps/video-vue/packages ./packages
+COPY apps/video-vue/postcss.config.ts ./postcss.config.ts
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
+
+# ── Stage 3: build Next.js ───────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -30,6 +44,8 @@ COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 # Copy source (after node_modules for better caching)
 COPY package.json pnpm-workspace.yaml ./
 COPY apps/web ./apps/web
+COPY --from=video-builder /app/apps/video-vue/build/web ./apps/web/public/video-app
+COPY --from=video-builder /app/apps/video-vue/build/nodes ./apps/web/public/video-app/nodes
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
@@ -44,7 +60,7 @@ ENV INCEPT_ENABLE_GAMING_PLAYABLE=${INCEPT_ENABLE_GAMING_PLAYABLE}
 WORKDIR /app/apps/web
 RUN pnpm build
 
-# ── Stage 3: minimal runtime ──────────────────────────────────────────────────
+# ── Stage 4: minimal runtime ──────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 WORKDIR /app
 

@@ -1,6 +1,5 @@
-import { VideoWorkspace } from "@/components/video-studio/VideoWorkspace";
+import { redirect } from "next/navigation";
 
-export default async function VideoWorkspacePage({ params }: { params: Promise<{ projectId: string }> }) {
-  const { projectId } = await params;
-  return <VideoWorkspace projectId={projectId} />;
+export default function VideoWorkspacePage() {
+  redirect("/video");
 }

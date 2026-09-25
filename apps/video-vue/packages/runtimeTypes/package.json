@@ -1,0 +1,12 @@
+{
+  "name": "@linglonglab/video-runtime-types",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./agent/types": "./agent-types.ts",
+    "./desktop": "./desktop.ts"
+  },
+  "dependencies": {
+    "@linglonglab/video-tools-scaffold": "workspace:*"
+  }
+}

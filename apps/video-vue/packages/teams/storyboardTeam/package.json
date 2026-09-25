@@ -1,0 +1,8 @@
+{
+  "name": "@linglonglab/video-team-storyboard",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "bun build.ts", "typecheck": "tsc" },
+  "devDependencies": { "@linglonglab/video-teams-scaffold": "workspace:*" }
+}

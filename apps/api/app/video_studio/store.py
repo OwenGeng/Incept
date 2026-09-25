@@ -79,6 +79,17 @@ def _read_json(path: Path, default: Any) -> Any:
     if path_key:
         value = metadata_repository.read(path_key)
         if value is not None:
+            # Keep a disposable local cache for libraries that require Paths
+            # (FFmpeg, archive export, and the restored Vue workspace).  The
+            # database remains authoritative when configured.
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                temporary = path.with_suffix(f"{path.suffix}.{uuid.uuid4().hex}.tmp")
+                temporary.write_text(
+                    json.dumps(value, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
+                temporary.replace(path)
             return value
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -163,8 +174,22 @@ def _summary(project_root: Path) -> ProjectSummary:
 
 def list_projects(email: str) -> list[ProjectSummary]:
     projects_root = _user_root(email) / "projects"
-    if not projects_root.exists():
-        return []
+    projects_root.mkdir(parents=True, exist_ok=True)
+    prefix = projects_root.resolve().relative_to(_root()).as_posix()
+    for path_key, value in metadata_repository.list_prefix(prefix):
+        relative = Path(path_key).relative_to(prefix)
+        if len(relative.parts) != 2 or relative.parts[1] != "project.json":
+            continue
+        project_id = relative.parts[0]
+        if not _PROJECT_ID.fullmatch(project_id):
+            continue
+        project_path = projects_root / project_id / "project.json"
+        project_path.parent.mkdir(parents=True, exist_ok=True)
+        if not project_path.exists():
+            project_path.write_text(
+                json.dumps(value, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
     projects = [
         _summary(path)
         for path in projects_root.iterdir()
@@ -225,11 +250,11 @@ def update_project(email: str, project_id: str, body: ProjectUpdate) -> ProjectD
 def delete_project(email: str, project_id: str) -> None:
     with _lock:
         project_root = _project_root(email, project_id)
-        if not project_root.exists():
+        if _read_json(project_root / "project.json", None) is None:
             raise FileNotFoundError(project_id)
         project_key = project_root.resolve().relative_to(_root()).as_posix()
         metadata_repository.delete_prefix(project_key)
-        shutil.rmtree(project_root)
+        shutil.rmtree(project_root, ignore_errors=True)
 
 
 def export_project_archive(email: str, project_id: str, target: Path) -> Path:
@@ -312,7 +337,7 @@ def list_canvases(email: str, project_id: str) -> list[CanvasSummary]:
 
 def get_project_canvas(email: str, project_id: str, canvas_id: str) -> CanvasDocument:
     project_root = _project_root(email, project_id)
-    if not (project_root / "project.json").is_file():
+    if _read_json(project_root / "project.json", None) is None:
         raise FileNotFoundError(project_id)
     value = _read_json(_canvas_path(project_root, canvas_id), None)
     if value is None:
@@ -422,7 +447,7 @@ def delete_canvas(email: str, project_id: str, canvas_id: str) -> ProjectDetail:
 
 def assets_root(email: str, project_id: str) -> Path:
     project_root = _project_root(email, project_id)
-    if not (project_root / "project.json").is_file():
+    if _read_json(project_root / "project.json", None) is None:
         raise FileNotFoundError(project_id)
     path = project_root / "assets"
     path.mkdir(exist_ok=True)

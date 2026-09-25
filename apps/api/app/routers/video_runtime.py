@@ -21,6 +21,7 @@ from app.ai_video.core.contracts.provider import ProviderConfig
 from app.ai_video.core.contracts.video_generation import VideoGenerationInput
 from app.ai_video.core.integrations.vertex.images import VertexImageApiAdapter
 from app.ai_video.core.integrations.vertex.video import VertexVideoApiAdapter
+from app.core.config import settings as platform_settings
 from app.incept.config import get_settings
 from app.services.auth import require_internal_key
 
@@ -148,8 +149,8 @@ def _chat_stream(body: dict[str, Any]) -> Iterator[str]:
     from google import genai
     from google.genai import types as genai_types
 
-    settings = get_settings()
-    if not settings.gcp_project_id:
+    project_id = platform_settings.google_cloud_project or get_settings().gcp_project_id
+    if not project_id:
         raise HTTPException(status_code=503, detail="GCP project is not configured")
     system, contents = _gemini_contents(body.get("messages") or [], genai_types)
     if not contents:
@@ -164,9 +165,13 @@ def _chat_stream(body: dict[str, Any]) -> Iterator[str]:
         config["temperature"] = body["temperature"]
     if isinstance(body.get("max_tokens"), int):
         config["max_output_tokens"] = body["max_tokens"]
-    client = genai.Client(enterprise=True, project=settings.gcp_project_id, location=settings.gcp_location)
+    client = genai.Client(
+        enterprise=platform_settings.google_genai_use_enterprise,
+        project=project_id,
+        location=platform_settings.google_cloud_location,
+    )
     stream = client.models.generate_content_stream(
-        model=settings.vertex_gemini_model,
+        model=platform_settings.gemini_model,
         contents=contents,
         config=genai_types.GenerateContentConfig(**config),
     )

@@ -3,8 +3,11 @@
   "private": true,
   "packageManager": "pnpm@10.18.1",
   "scripts": {
-    "dev:web": "pnpm --filter @incept/web dev",
-    "build:web": "pnpm --filter @incept/web build",
+    "build:video-vue": "pnpm --dir apps/video-vue build",
+    "sync:video-vue": "pnpm --dir apps/video-vue sync",
+    "prepare:video-vue": "pnpm --dir apps/video-vue prepare:incept",
+    "dev:web": "pnpm prepare:video-vue && pnpm --filter @incept/web dev",
+    "build:web": "pnpm prepare:video-vue && pnpm --filter @incept/web build",
     "lint:web": "pnpm --filter @incept/web lint",
     "typecheck:web": "pnpm --filter @incept/web exec tsc --noEmit",
     "release:validate": "node scripts/release-manifest.mjs validate"

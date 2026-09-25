@@ -1,0 +1,6 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "packages/nodes/*"
+  - "packages/tools/*"
+  - "packages/teams/*"

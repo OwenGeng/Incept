@@ -53,6 +53,9 @@ apps/incept-api/static/uploads/
 apps/api/static/generated/
 apps/api/static/uploads/
 apps/api/static/ai-video-files/
+apps/web/public/video-app/
+apps/video-vue/build/
+apps/video-vue/node_modules/
 # Regression test image outputs
 apps/incept-api/regression_*/
 

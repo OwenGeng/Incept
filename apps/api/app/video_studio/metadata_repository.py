@@ -65,6 +65,28 @@ def read(path_key: str) -> Any | None:
     return json.loads(row["payload_json"])
 
 
+def list_prefix(path_prefix: str) -> list[tuple[str, Any]]:
+    """Return persisted JSON records below a validated logical path prefix.
+
+    Cloud Run instances do not retain the local video-studio directory between
+    revisions or instance restarts.  Callers use this query to rebuild the
+    small local JSON cache from the deployment database without treating the
+    container filesystem as the source of truth.
+    """
+    if not enabled():
+        return []
+    _ensure_schema()
+    normalized = path_prefix.strip("/")
+    escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    with _connect() as connection:
+        rows = connection.execute(
+            "SELECT path_key, payload_json FROM video_studio_metadata "
+            "WHERE path_key = ? OR path_key LIKE ? ESCAPE '\\' ORDER BY path_key",
+            (normalized, f"{escaped}/%"),
+        ).fetchall()
+    return [(str(row["path_key"]), json.loads(row["payload_json"])) for row in rows]
+
+
 def write(path_key: str, payload: Any) -> None:
     if not enabled():
         return
