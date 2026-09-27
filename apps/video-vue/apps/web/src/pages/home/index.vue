@@ -5,11 +5,11 @@
       <el-button round size="large" :icon="IconSettings" aria-label="设置" @click="settingsVisible = true">设置</el-button>
       <div class="headerActions">
         <language-switch />
-        <el-button round size="large" tag="a" href="/" target="_top">返回 LinglongLab</el-button>
+        <el-button round size="large" tag="a" href="/" target="_top" :aria-label="t('返回 LinglongLab', 'Back to LinglongLab')">LinglongLab</el-button>
       </div>
     </el-header>
     <el-main class="pageContent">
-      <section ref="heroStage" class="heroStage" aria-label="创建项目">
+      <section class="heroStage" aria-label="创建项目">
         <div ref="heroCopy" class="creationPanel">
           <div class="studioLabel">
             <span class="studioLabelDot" />
@@ -41,41 +41,6 @@
             </el-card>
           </div>
         </div>
-        <aside ref="filmPreview" class="filmPreview" aria-hidden="true">
-          <div class="filmHeader">
-            <span>{{ filmPreviewLabel }}</span>
-            <span class="filmStatus"><i />{{ filmStatusLabel }} <em>01—04</em></span>
-          </div>
-          <div class="filmViewport">
-            <span class="filmPerforation filmPerforationTop" />
-            <span class="filmPerforation filmPerforationBottom" />
-            <div class="filmRail">
-              <div class="filmShot filmShotSunset">
-                <div class="filmScene"><i class="filmSun" /><i class="filmDune" /></div>
-                <span class="filmShotMeta"><b>01</b>{{ t("暮色", "DUSK") }}</span>
-              </div>
-              <div class="filmShot filmShotCity">
-                <div class="filmScene"><i class="filmMoon" /><i class="filmSkyline" /></div>
-                <span class="filmShotMeta"><b>02</b>{{ t("城市", "CITY") }}</span>
-              </div>
-              <div class="filmShot filmShotPortrait">
-                <div class="filmScene"><i class="filmSubject" /><i class="filmLight" /></div>
-                <span class="filmShotMeta"><b>03</b>{{ t("人物", "PORTRAIT") }}</span>
-              </div>
-              <div class="filmShot filmShotProduct">
-                <div class="filmScene"><i class="filmProduct" /><i class="filmShadow" /></div>
-                <span class="filmShotMeta"><b>04</b>{{ t("产品", "PRODUCT") }}</span>
-              </div>
-            </div>
-            <span class="filmFocus"><i /><i /><i /><i /></span>
-            <span class="filmPlay"><i /></span>
-          </div>
-          <div class="filmFooter">
-            <span>{{ featuredFramesLabel }}</span>
-            <span class="filmProgress"><i /></span>
-            <span>16:9 · 24 FPS</span>
-          </div>
-        </aside>
       </section>
       <section ref="projectListElement" class="projectList" aria-labelledby="projectListTitle">
         <div class="sectionHeader">
@@ -144,9 +109,7 @@ const router = useRouter();
 const creating = ref(false);
 const opening = ref(false);
 const importInput = ref<HTMLInputElement>();
-const heroStage = ref<HTMLElement>();
 const heroCopy = ref<HTMLElement>();
-const filmPreview = ref<HTMLElement>();
 const projectListElement = ref<HTMLElement>();
 const prompt = ref("");
 const workspaceStore = useWorkspaceStore();
@@ -183,114 +146,20 @@ const heroIntroduction = computed(() => interfaceLanguage.value === "en"
   ? "Start with one sentence, then shape story, image and sound in one creative flow."
   : "从一句话开始，让故事、画面和声音在同一个工作流里成形。"
 );
-const filmPreviewLabel = computed(() => interfaceLanguage.value === "en" ? "LINGLONGLAB FILM" : "LINGLONGLAB 影片");
-const filmStatusLabel = computed(() => interfaceLanguage.value === "en" ? "ROLLING" : "播放中");
-const featuredFramesLabel = computed(() => interfaceLanguage.value === "en" ? "FEATURED FRAMES" : "精选镜头");
 let entranceTimeline: ReturnType<typeof createTimeline> | undefined;
-let filmTimeline: ReturnType<typeof createTimeline> | undefined;
-let filmStartTimer: ReturnType<typeof setTimeout> | undefined;
-let filmEvents: AbortController | undefined;
-let filmVisibilityObserver: IntersectionObserver | undefined;
 
 onMounted(() => {
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  if (reducedMotion.matches) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const copy = heroCopy.value;
-  const preview = filmPreview.value;
   const projects = projectListElement.value;
-  if (!copy || !preview || !projects) return;
+  if (!copy || !projects) return;
 
-  const frames = preview.querySelectorAll<HTMLElement>(".filmShot");
   entranceTimeline = createTimeline({ defaults: { ease: "out(3)" } })
     .add(copy, { opacity: [0, 1], y: [18, 0], duration: 620 }, 0)
-    .add(preview, { opacity: [0, 1], x: [24, 0], duration: 680 }, 100)
-    .add(projects, { opacity: [0, 1], y: [14, 0], duration: 520 }, 300);
-
-  const [sunset, city, portrait, product] = Array.from(frames);
-  const progress = preview.querySelector<HTMLElement>(".filmProgress i");
-  if (!sunset || !city || !portrait || !product || !progress) return;
-
-  const shotWidth = sunset.getBoundingClientRect().width;
-  const position = (offset: number, scale: number) => `translate3d(${Math.round(shotWidth * offset)}px, 0, 0) scale(${scale})`;
-  const center = position(-0.5, 1);
-  const right = position(0.58, 0.86);
-  const farRight = position(1.66, 0.74);
-  const left = position(-1.58, 0.86);
-  const farLeft = position(-2.66, 0.74);
-  const move = { duration: 860, ease: "inOut(3)" };
-
-  Object.assign(sunset.style, { transform: center, opacity: "1", zIndex: "3" });
-  Object.assign(city.style, { transform: right, opacity: "0.38", zIndex: "1" });
-  Object.assign(portrait.style, { transform: farRight, opacity: "0", zIndex: "1" });
-  Object.assign(product.style, { transform: left, opacity: "0.38", zIndex: "1" });
-
-  filmTimeline = createTimeline({ autoplay: false, loop: true, loopDelay: 720 })
-    .add(progress, { transform: ["scaleX(0)", "scaleX(1)"], duration: 10800, ease: "linear" }, 0)
-    .add(sunset, { zIndex: 1, duration: 1 }, 1600)
-    .add(city, { zIndex: 3, duration: 1 }, 1600)
-    .add(sunset, { transform: left, opacity: 0.38, ...move }, 1700)
-    .add(city, { transform: center, opacity: 1, ...move }, 1700)
-    .add(portrait, { transform: right, opacity: 0.38, ...move }, 1700)
-    .add(product, { transform: farLeft, opacity: 0, ...move }, 1700)
-    .add(city, { zIndex: 1, duration: 1 }, 3800)
-    .add(portrait, { zIndex: 3, duration: 1 }, 3800)
-    .add(sunset, { transform: farLeft, opacity: 0, ...move }, 3900)
-    .add(city, { transform: left, opacity: 0.38, ...move }, 3900)
-    .add(portrait, { transform: center, opacity: 1, ...move }, 3900)
-    .add(product, { transform: right, opacity: 0.38, ...move }, 3900)
-    .add(sunset, { transform: farRight, opacity: 0, duration: 1 }, 5950)
-    .add(portrait, { zIndex: 1, duration: 1 }, 6100)
-    .add(product, { zIndex: 3, duration: 1 }, 6100)
-    .add(sunset, { transform: right, opacity: 0.38, ...move }, 6200)
-    .add(city, { transform: farLeft, opacity: 0, ...move }, 6200)
-    .add(portrait, { transform: left, opacity: 0.38, ...move }, 6200)
-    .add(product, { transform: center, opacity: 1, ...move }, 6200)
-    .add(city, { transform: farRight, opacity: 0, duration: 1 }, 8450)
-    .add(product, { zIndex: 1, duration: 1 }, 8600)
-    .add(sunset, { zIndex: 3, duration: 1 }, 8600)
-    .add(sunset, { transform: center, opacity: 1, ...move }, 8700)
-    .add(city, { transform: right, opacity: 0.38, ...move }, 8700)
-    .add(portrait, { transform: farLeft, opacity: 0, ...move }, 8700)
-    .add(product, { transform: left, opacity: 0.38, ...move }, 8700)
-    .add(portrait, { transform: farRight, opacity: 0, duration: 1 }, 10650);
-
-  filmEvents = new AbortController();
-  let pageFocused = true;
-  let filmStarted = false;
-  let filmVisible = true;
-  let filmHovered = false;
-  const syncFilmPlayback = () => {
-    if (!filmTimeline || !filmStarted) return;
-    if (reducedMotion.matches || document.hidden || !pageFocused || !filmVisible || filmHovered) filmTimeline.pause();
-    else filmTimeline.resume();
-  };
-  filmVisibilityObserver = new IntersectionObserver(([entry]) => {
-    filmVisible = entry?.isIntersecting ?? true;
-    syncFilmPlayback();
-  }, { threshold: 0.15 });
-  filmVisibilityObserver.observe(preview);
-  preview.addEventListener("mouseenter", () => { filmHovered = true; syncFilmPlayback(); }, { signal: filmEvents.signal });
-  preview.addEventListener("mouseleave", () => { filmHovered = false; syncFilmPlayback(); }, { signal: filmEvents.signal });
-  window.addEventListener("blur", () => { pageFocused = false; syncFilmPlayback(); }, { signal: filmEvents.signal });
-  window.addEventListener("focus", () => { pageFocused = true; syncFilmPlayback(); }, { signal: filmEvents.signal });
-  document.addEventListener("visibilitychange", syncFilmPlayback, { signal: filmEvents.signal });
-  reducedMotion.addEventListener("change", () => {
-    if (reducedMotion.matches) filmTimeline?.seek(0).pause();
-    else syncFilmPlayback();
-  }, { signal: filmEvents.signal });
-  filmStartTimer = setTimeout(() => {
-    filmStarted = true;
-    if (!reducedMotion.matches && !document.hidden && pageFocused && filmVisible && !filmHovered) filmTimeline?.play();
-  }, 950);
+    .add(projects, { opacity: [0, 1], y: [14, 0], duration: 520 }, 180);
 });
 
-onBeforeUnmount(() => {
-  if (filmStartTimer) clearTimeout(filmStartTimer);
-  filmEvents?.abort();
-  filmVisibilityObserver?.disconnect();
-  filmTimeline?.revert();
-  entranceTimeline?.revert();
-});
+onBeforeUnmount(() => entranceTimeline?.revert());
 
 onMounted(() => {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -492,13 +361,8 @@ async function removeProject(project: Project) {
     padding: 24px clamp(20px, 4vw, 56px) 56px;
 
     .heroStage {
-      display: grid;
-      grid-template-columns: minmax(0, 1.16fr) minmax(300px, 0.84fr);
-      align-items: center;
-      gap: clamp(40px, 6vw, 92px);
-      width: min(1180px, 100%);
-      min-height: 480px;
-      margin: clamp(18px, 4vh, 42px) auto 76px;
+      width: min(780px, 100%);
+      margin: clamp(56px, 9vh, 104px) auto 92px;
     }
 
     .creationPanel {
@@ -626,306 +490,6 @@ async function removeProject(project: Project) {
           }
         }
       }
-    }
-
-    .filmPreview {
-      position: relative;
-      min-height: 398px;
-      padding: 16px;
-      overflow: hidden;
-      border: 1px solid color-mix(in srgb, var(--el-border-color) 65%, transparent);
-      border-radius: 26px;
-      background: color-mix(in srgb, var(--el-bg-color) 78%, transparent);
-      box-shadow: 0 38px 80px -52px color-mix(in srgb, var(--el-text-color-primary) 50%, transparent);
-      backdrop-filter: blur(20px);
-      transform: rotate(0.7deg);
-
-      &::before {
-        position: absolute;
-        inset: -16px 24px 16px -16px;
-        z-index: -1;
-        border: 1px solid color-mix(in srgb, var(--el-color-primary) 13%, transparent);
-        border-radius: 30px;
-        content: "";
-        transform: rotate(-1.6deg);
-      }
-
-      .filmHeader,
-      .filmFooter {
-        position: relative;
-        z-index: 4;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        color: var(--el-text-color-secondary);
-        font-size: 9px;
-        font-weight: 650;
-        letter-spacing: 0.16em;
-      }
-
-      .filmHeader {
-        height: 26px;
-        padding-inline: 4px;
-
-        .filmStatus {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-
-          i {
-            width: 5px;
-            height: 5px;
-            border-radius: 50%;
-            background: #c34f49;
-            box-shadow: 0 0 0 4px color-mix(in srgb, #c34f49 11%, transparent);
-          }
-
-          em { margin-left: 4px; font-style: normal; }
-        }
-      }
-
-      .filmViewport {
-        position: relative;
-        height: 316px;
-        overflow: hidden;
-        border: 1px solid color-mix(in srgb, var(--el-text-color-primary) 12%, transparent);
-        border-radius: 18px;
-        background: color-mix(in srgb, var(--el-text-color-primary) 92%, #18202d);
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-      }
-
-      .filmPerforation {
-        position: absolute;
-        right: 0;
-        left: 0;
-        z-index: 4;
-        height: 24px;
-        background: repeating-linear-gradient(90deg, transparent 0 12px, rgba(255, 255, 255, 0.34) 12px 24px, transparent 24px 34px);
-        mask: linear-gradient(#000 0 0) center / 100% 8px no-repeat;
-        opacity: 0.55;
-      }
-
-      .filmPerforationTop { top: 2px; }
-      .filmPerforationBottom { bottom: 2px; }
-
-      .filmRail { position: absolute; inset: 0; }
-
-      .filmShot {
-        position: absolute;
-        top: 34px;
-        left: 50%;
-        z-index: 1;
-        width: 58%;
-        height: 248px;
-        padding: 7px;
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 22px 42px rgba(0, 0, 0, 0.28);
-        opacity: 0.38;
-        will-change: transform, opacity;
-
-        &:nth-child(1) { z-index: 3; opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
-        &:nth-child(2) { transform: translate3d(58%, 0, 0) scale(0.86); }
-        &:nth-child(3) { opacity: 0; transform: translate3d(166%, 0, 0) scale(0.74); }
-        &:nth-child(4) { transform: translate3d(-158%, 0, 0) scale(0.86); }
-
-        .filmScene {
-          position: relative;
-          height: calc(100% - 27px);
-          overflow: hidden;
-          border-radius: 6px;
-
-          i { position: absolute; display: block; }
-        }
-
-        .filmShotMeta {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-          height: 27px;
-          padding-inline: 2px;
-          color: rgba(255, 255, 255, 0.72);
-          font-size: 8px;
-          font-weight: 650;
-          letter-spacing: 0.15em;
-
-          b { color: color-mix(in srgb, var(--el-color-primary) 70%, #fff); }
-        }
-      }
-
-      .filmShotSunset .filmScene {
-        background: linear-gradient(155deg, #f5dba8, #dd9177 62%, #775f72);
-
-        .filmSun {
-          top: 17%;
-          left: 18%;
-          width: 42px;
-          height: 42px;
-          border-radius: 50%;
-          background: #fff1c5;
-          box-shadow: 0 0 42px rgba(255, 237, 180, 0.7);
-        }
-
-        .filmDune {
-          right: -12%;
-          bottom: -22%;
-          width: 90%;
-          height: 62%;
-          border-radius: 50% 0 0 0;
-          background: #4d4259;
-          transform: rotate(-7deg);
-        }
-      }
-
-      .filmShotCity .filmScene {
-        background: linear-gradient(180deg, #253b59, #6a7183 60%, #d0a07c);
-
-        .filmMoon {
-          top: 16%;
-          right: 18%;
-          width: 30px;
-          height: 30px;
-          border-radius: 50%;
-          background: #f4e7c6;
-          box-shadow: 0 0 34px rgba(244, 231, 198, 0.48);
-        }
-
-        .filmSkyline {
-          right: -5%;
-          bottom: 0;
-          left: -5%;
-          height: 42%;
-          background: linear-gradient(90deg, #182333 0 12%, transparent 12% 15%, #182333 15% 34%, transparent 34% 38%, #182333 38% 55%, transparent 55% 59%, #182333 59% 78%, transparent 78% 82%, #182333 82%);
-          clip-path: polygon(0 34%, 12% 34%, 12% 8%, 22% 8%, 22% 46%, 34% 46%, 34% 23%, 45% 23%, 45% 0, 56% 0, 56% 54%, 68% 54%, 68% 17%, 80% 17%, 80% 40%, 100% 40%, 100% 100%, 0 100%);
-        }
-      }
-
-      .filmShotPortrait .filmScene {
-        background: linear-gradient(145deg, #91aaba, #2d4a62);
-
-        .filmSubject {
-          right: 25%;
-          bottom: -5%;
-          z-index: 1;
-          width: 31%;
-          height: 73%;
-          border-radius: 55% 55% 16% 16%;
-          background: #172433;
-        }
-
-        .filmLight {
-          top: -30%;
-          left: 5%;
-          width: 82%;
-          height: 114%;
-          background: linear-gradient(112deg, rgba(255, 240, 198, 0.7), transparent 56%);
-          clip-path: polygon(0 0, 34% 0, 100% 100%, 52% 100%);
-        }
-      }
-
-      .filmShotProduct .filmScene {
-        background: linear-gradient(135deg, #dad3df, #9683a4);
-
-        .filmProduct {
-          top: 18%;
-          left: 38%;
-          z-index: 1;
-          width: 25%;
-          height: 58%;
-          border: 1px solid rgba(255, 255, 255, 0.72);
-          border-radius: 6px 6px 13px 13px;
-          background: linear-gradient(145deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.25));
-        }
-
-        .filmShadow {
-          right: 15%;
-          bottom: 13%;
-          width: 58%;
-          height: 18%;
-          border-radius: 50%;
-          background: rgba(48, 31, 57, 0.25);
-          filter: blur(8px);
-        }
-      }
-
-      .filmFocus {
-        position: absolute;
-        top: 38px;
-        left: 50%;
-        z-index: 5;
-        width: calc(58% - 16px);
-        height: 204px;
-        border-radius: 5px;
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24), 0 0 0 999px rgba(9, 12, 18, 0.04);
-        transform: translateX(-50%);
-        pointer-events: none;
-
-        i {
-          position: absolute;
-          width: 14px;
-          height: 14px;
-          border-color: rgba(255, 255, 255, 0.82);
-          border-style: solid;
-        }
-
-        i:nth-child(1) { top: 8px; left: 8px; border-width: 1px 0 0 1px; }
-        i:nth-child(2) { top: 8px; right: 8px; border-width: 1px 1px 0 0; }
-        i:nth-child(3) { right: 8px; bottom: 8px; border-width: 0 1px 1px 0; }
-        i:nth-child(4) { bottom: 8px; left: 8px; border-width: 0 0 1px 1px; }
-      }
-
-      .filmPlay {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        z-index: 6;
-        display: grid;
-        width: 34px;
-        height: 34px;
-        border: 1px solid rgba(255, 255, 255, 0.42);
-        border-radius: 50%;
-        background: rgba(16, 19, 26, 0.38);
-        opacity: 0;
-        place-items: center;
-        transform: translate(-50%, -50%);
-        transition: opacity 180ms ease;
-
-        i {
-          width: 0;
-          height: 0;
-          margin-left: 2px;
-          border-top: 5px solid transparent;
-          border-bottom: 5px solid transparent;
-          border-left: 8px solid #fff;
-        }
-      }
-
-      .filmFooter {
-        height: 28px;
-        padding-inline: 4px;
-
-        .filmProgress {
-          position: relative;
-          flex: 1;
-          height: 2px;
-          overflow: hidden;
-          border-radius: 999px;
-          background: color-mix(in srgb, var(--el-text-color-primary) 8%, transparent);
-
-          i {
-            position: absolute;
-            inset: 0;
-            display: block;
-            border-radius: inherit;
-            background: var(--el-color-primary);
-            transform: scaleX(0);
-            transform-origin: left center;
-          }
-        }
-      }
-
     }
 
     .projectList {
@@ -1081,8 +645,6 @@ async function removeProject(project: Project) {
   }
 
   @media (hover: hover) and (pointer: fine) {
-    .filmPreview:hover .filmPlay { opacity: 1; }
-
     .projectCard:hover {
       border-color: color-mix(in srgb, var(--el-color-primary) 28%, var(--el-border-color));
       box-shadow: 0 18px 42px -32px color-mix(in srgb, var(--el-color-primary) 38%, transparent);
@@ -1093,19 +655,7 @@ async function removeProject(project: Project) {
   @media (max-width: 980px) {
     .pageContent {
       .heroStage {
-        grid-template-columns: 1fr;
-        gap: 42px;
         max-width: 760px;
-      }
-
-      .filmPreview {
-        width: min(560px, 86%);
-        min-height: 350px;
-        margin: 0 auto;
-
-        .filmViewport { height: 268px; }
-        .filmShot { height: 200px; }
-        .filmFocus { height: 156px; }
       }
     }
   }
@@ -1144,30 +694,16 @@ async function removeProject(project: Project) {
         }
       }
 
-      .filmPreview {
-        width: 94%;
-        min-height: 300px;
-        padding: 10px;
-
-        .filmHeader, .filmFooter { font-size: 8px; }
-        .filmViewport { height: 240px; }
-        .filmShot { top: 31px; width: 64%; height: 178px; }
-        .filmFocus { top: 35px; width: calc(64% - 16px); height: 134px; }
-      }
-
       .projectList .sectionHeader { align-items: flex-start; }
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .filmPreview,
     .projectCard,
     .promptCard,
     .sendButton { transition: none !important; }
 
     .projectCard:hover { transform: none; }
-    .filmProgress { visibility: hidden; }
-    .filmPlay { display: none; }
   }
 }
 
