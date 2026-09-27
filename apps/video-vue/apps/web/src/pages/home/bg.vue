@@ -1,43 +1,16 @@
 <template>
-  <div ref="background" class="creativeBackground" aria-hidden="true">
-    <div class="ambientLight" />
-    <div class="lightRibbon" />
-    <div class="dotGrid" />
-    <svg class="flowLines" viewBox="0 0 1440 900" fill="none" preserveAspectRatio="xMidYMin slice">
-      <g v-for="(path, index) in flowPaths" :key="path">
-        <path :d="path" />
-        <path class="flowPulse" :d="path" pathLength="100" :style="{ animationDelay: `${index * -2.3}s` }" />
-      </g>
-      <rect x="216" y="302" width="100" height="64" rx="12" />
-      <rect x="1124" y="226" width="100" height="64" rx="12" />
-      <rect x="968" y="728" width="100" height="64" rx="12" />
-      <path d="m252 322 20 12-20 12zM1144 270l18-18 13 12 14-20 15 26M988 750h60m-60 12h36" />
-      <g class="connectionDots">
-        <circle cx="216" cy="334" r="4" />
-        <circle cx="1224" cy="258" r="4" />
-        <circle cx="1068" cy="760" r="4" />
-        <circle cx="380" cy="640" r="4" />
-      </g>
-    </svg>
-    <div class="sparkleField">
-      <svg
-        v-for="([x, y, size], index) in sparkles"
-        :key="index"
-        class="sparkle"
-        viewBox="0 0 24 24"
-        :style="{
-          left: `${x}%`,
-          top: `${y}%`,
-          width: `${size}px`,
-          height: `${size}px`,
-          animationDelay: `${index * -0.73}s`,
-          animationDuration: `${3.6 + (index % 4) * 0.8}s`,
-        }">
-        <path :d="sparklePath" />
-        <circle cx="12" cy="12" r="1.2" />
-      </svg>
+  <div ref="background" class="cinemaBackground" aria-hidden="true">
+    <div class="ambientWash" />
+    <div ref="primaryGlow" class="filmGlow filmGlowPrimary" />
+    <div ref="secondaryGlow" class="filmGlow filmGlowSecondary" />
+    <div class="filmStrip">
+      <span v-for="index in 15" :key="index" />
     </div>
-    <div class="pointerLight" />
+    <div ref="viewfinder" class="viewfinder">
+      <i v-for="index in 4" :key="index" />
+    </div>
+    <div class="grain" />
+    <div ref="pointerLight" class="pointerLight" />
   </div>
 </template>
 
@@ -45,261 +18,212 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
 const background = ref<HTMLDivElement>();
-const sparklePath = "M12 0C13.8 8.2 15.8 10.2 24 12C15.8 13.8 13.8 15.8 12 24C10.2 15.8 8.2 13.8 0 12C8.2 10.2 10.2 8.2 12 0Z";
-const sparkles = [
-  [8, 16, 14],
-  [19, 10, 8],
-  [34, 13, 12],
-  [58, 9, 9],
-  [76, 15, 18],
-  [91, 11, 8],
-  [5, 39, 10],
-  [15, 48, 18],
-  [87, 38, 15],
-  [95, 55, 11],
-  [69, 23, 9],
-  [7, 72, 15],
-  [23, 84, 10],
-  [39, 70, 8],
-  [54, 89, 12],
-  [70, 80, 16],
-  [86, 90, 9],
-  [94, 76, 18],
-];
-const flowPaths = [
-  "M-40 170H94Q118 170 118 194V310Q118 334 142 334H216",
-  "M1224 258H1286Q1310 258 1310 282V448Q1310 472 1334 472H1480",
-  "M80 752H260Q284 752 284 728V664Q284 640 308 640H380",
-  "M1068 760H1130Q1154 760 1154 736V672Q1154 648 1178 648H1460",
-];
+const primaryGlow = ref<HTMLDivElement>();
+const secondaryGlow = ref<HTMLDivElement>();
+const viewfinder = ref<HTMLDivElement>();
+const pointerLight = ref<HTMLDivElement>();
 let events: AbortController | undefined;
+let pointerFrame = 0;
 
 onMounted(() => {
   const layer = background.value!;
-  const surface = layer.parentElement!;
+  const surface = layer?.parentElement;
+  if (!surface) return;
+
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   events = new AbortController();
   const options = { passive: true, signal: events.signal };
 
   function resetPointer() {
-    layer.style.setProperty("--pointerOpacity", "0");
-    layer.style.setProperty("--driftX", "0px");
-    layer.style.setProperty("--driftY", "0px");
+    cancelAnimationFrame(pointerFrame);
+    primaryGlow.value?.style.removeProperty("transform");
+    secondaryGlow.value?.style.removeProperty("transform");
+    viewfinder.value?.style.removeProperty("transform");
+    pointerLight.value?.style.setProperty("opacity", "0");
   }
 
-  function updateMotion() {
-    layer.style.setProperty("--motionState", document.hidden || !document.hasFocus() ? "paused" : "running");
+  function updateMotionState() {
+    layer.style.setProperty("--motion-state", document.hidden || !document.hasFocus() ? "paused" : "running");
     resetPointer();
   }
 
   surface.addEventListener(
     "pointermove",
-    (event) => {
+    event => {
       if (event.pointerType === "touch" || reducedMotion.matches) return;
-      const bounds = layer.getBoundingClientRect();
-      if (!bounds.width || !bounds.height) return;
-      const x = event.clientX - bounds.left;
-      const y = event.clientY - bounds.top;
-      layer.style.setProperty("--pointerX", `${x}px`);
-      layer.style.setProperty("--pointerY", `${y}px`);
-      layer.style.setProperty("--pointerOpacity", "1");
-      layer.style.setProperty("--driftX", `${(x / bounds.width - 0.5) * 24}px`);
-      layer.style.setProperty("--driftY", `${(y / bounds.height - 0.5) * 18}px`);
+      cancelAnimationFrame(pointerFrame);
+      pointerFrame = requestAnimationFrame(() => {
+        const bounds = layer.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) return;
+        const x = event.clientX - bounds.left;
+        const y = event.clientY - bounds.top;
+        const driftX = (x / bounds.width - 0.5) * 18;
+        const driftY = (y / bounds.height - 0.5) * 12;
+        primaryGlow.value?.style.setProperty("transform", `translate3d(${driftX}px, ${driftY}px, 0) rotate(-14deg)`);
+        secondaryGlow.value?.style.setProperty("transform", `translate3d(${-driftX * 0.7}px, ${-driftY * 0.7}px, 0) rotate(18deg)`);
+        viewfinder.value?.style.setProperty("transform", `translate3d(${-driftX * 0.45}px, ${-driftY * 0.45}px, 0)`);
+        pointerLight.value?.style.setProperty("--pointer-x", `${x}px`);
+        pointerLight.value?.style.setProperty("--pointer-y", `${y}px`);
+        pointerLight.value?.style.setProperty("opacity", "1");
+      });
     },
-    options
+    options,
   );
 
   surface.addEventListener("pointerleave", resetPointer, options);
-  window.addEventListener("blur", updateMotion, options);
-  window.addEventListener("focus", updateMotion, options);
-  document.addEventListener("visibilitychange", updateMotion, options);
+  window.addEventListener("blur", updateMotionState, options);
+  window.addEventListener("focus", updateMotionState, options);
+  document.addEventListener("visibilitychange", updateMotionState, options);
   reducedMotion.addEventListener("change", resetPointer, options);
-  updateMotion();
+  updateMotionState();
 });
 
 onBeforeUnmount(() => {
+  cancelAnimationFrame(pointerFrame);
   events?.abort();
 });
 </script>
 
 <style lang="scss" scoped>
-.creativeBackground {
-  --sparkleColor: color-mix(in srgb, var(--el-color-primary) 45%, #b58aff);
+.cinemaBackground {
   position: absolute;
   inset: 0;
   overflow: hidden;
   pointer-events: none;
-  background: var(--el-bg-color);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--el-bg-color) 90%, #f8f4ed) 0%, var(--el-bg-color) 58%, color-mix(in srgb, var(--el-bg-color) 92%, #f0ede5) 100%);
 
-  .ambientLight,
-  .lightRibbon,
-  .dotGrid,
-  .flowLines,
-  .sparkleField,
-  .pointerLight {
-    position: absolute;
-    inset: 0;
+  .ambientWash,
+  .filmGlow,
+  .filmStrip,
+  .viewfinder,
+  .grain,
+  .pointerLight { position: absolute; }
+
+  .ambientWash {
+    inset: -16%;
+    background:
+      radial-gradient(ellipse 42% 34% at 22% 18%, color-mix(in srgb, var(--el-color-primary) 16%, transparent), transparent 72%),
+      radial-gradient(ellipse 30% 30% at 82% 26%, color-mix(in srgb, #f5c96f 18%, transparent), transparent 74%),
+      radial-gradient(ellipse 36% 32% at 68% 84%, color-mix(in srgb, var(--el-color-primary) 10%, transparent), transparent 72%);
+    animation: washDrift 18s ease-in-out infinite alternate;
+    animation-play-state: var(--motion-state, running);
   }
 
-  .ambientLight {
-    inset: -10%;
-    background: radial-gradient(ellipse 45% 36% at 38% 12%, color-mix(in srgb, var(--el-color-primary) 22%, transparent), transparent),
-      radial-gradient(ellipse 38% 42% at 94% 60%, color-mix(in srgb, var(--el-color-primary) 14%, transparent), transparent),
-      radial-gradient(ellipse 32% 30% at 72% 8%, color-mix(in srgb, var(--sparkleColor) 18%, transparent), transparent),
-      radial-gradient(ellipse 35% 35% at 4% 84%, color-mix(in srgb, var(--sparkleColor) 14%, transparent), transparent);
-    animation: ambientDrift 16s ease-in-out infinite alternate;
-    animation-play-state: var(--motionState, running);
-  }
+  .filmGlow {
+    width: 56vw;
+    height: 18vw;
+    min-height: 160px;
+    border: 1px solid color-mix(in srgb, var(--el-color-primary) 14%, transparent);
+    border-radius: 999px;
+    opacity: 0.64;
+    filter: blur(0.2px);
+    transform: rotate(-14deg);
+    transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
 
-  .lightRibbon {
-    inset: -45% -20% 15%;
-    border-radius: 50%;
-    border-bottom: 1px solid color-mix(in srgb, var(--el-color-primary) 24%, transparent);
-    box-shadow: 0 24px 70px -36px color-mix(in srgb, var(--el-color-primary) 50%, transparent);
-    transform: rotate(-16deg);
-    mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
-  }
-
-  .dotGrid {
-    background-image: radial-gradient(var(--el-text-color-placeholder) 0.7px, transparent 0.7px);
-    background-size: 24px 24px;
-    opacity: 0.3;
-    mask-image: radial-gradient(ellipse at 50% 28%, transparent 18%, #000 80%);
-  }
-
-  .flowLines {
-    width: 100%;
-    height: 100%;
-    stroke: color-mix(in srgb, var(--el-color-primary) 24%, var(--el-border-color));
-    stroke-width: 1;
-    opacity: 0.65;
-    transform: translate(var(--driftX, 0px), var(--driftY, 0px));
-    transition: transform 700ms ease-out;
-
-    .flowPulse {
-      stroke: var(--el-color-primary);
-      stroke-width: 2;
-      stroke-linecap: round;
-      stroke-dasharray: 5 95;
-      filter: drop-shadow(0 0 4px var(--el-color-primary));
-      animation: flowTravel 9s linear infinite;
-      animation-play-state: var(--motionState, running);
-    }
-
-    .connectionDots {
-      fill: var(--el-bg-color);
-      stroke: var(--el-color-primary);
-      filter: drop-shadow(0 0 3px color-mix(in srgb, var(--el-color-primary) 50%, transparent));
-    }
-  }
-
-  .sparkleField {
-    transform: translate(calc(var(--driftX, 0px) * 1.4), calc(var(--driftY, 0px) * 1.4));
-    transition: transform 900ms ease-out;
-
-    .sparkle {
+    &::after {
       position: absolute;
-      overflow: visible;
-      color: var(--el-color-primary);
-      fill: currentColor;
-      filter: drop-shadow(0 0 5px currentColor);
-      animation: sparkleTwinkle ease-in-out infinite;
-      animation-play-state: var(--motionState, running);
-
-      &:nth-child(3n) {
-        color: var(--sparkleColor);
-      }
-
-      circle {
-        fill: #fff;
-      }
+      inset: 20% 7%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--el-color-primary) 13%, transparent), transparent);
+      content: "";
+      filter: blur(18px);
     }
+  }
+
+  .filmGlowPrimary { top: 4%; right: -18%; }
+
+  .filmGlowSecondary {
+    bottom: 8%;
+    left: -22%;
+    border-color: color-mix(in srgb, #d6a956 16%, transparent);
+    transform: rotate(18deg);
+  }
+
+  .filmStrip {
+    top: 42%;
+    right: -72px;
+    display: grid;
+    grid-template-columns: repeat(15, 42px);
+    gap: 10px;
+    padding: 8px 16px;
+    border-block: 1px solid color-mix(in srgb, var(--el-text-color-primary) 8%, transparent);
+    opacity: 0.34;
+    transform: rotate(-9deg) translateX(4%);
+    animation: filmDrift 22s ease-in-out infinite alternate;
+    animation-play-state: var(--motion-state, running);
+
+    span {
+      width: 42px;
+      height: 22px;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--el-text-color-primary) 5%, transparent);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--el-text-color-primary) 7%, transparent);
+    }
+  }
+
+  .viewfinder {
+    top: 118px;
+    left: clamp(24px, 5vw, 78px);
+    width: min(34vw, 460px);
+    aspect-ratio: 16 / 10;
+    opacity: 0.2;
+    transition: transform 1100ms cubic-bezier(0.16, 1, 0.3, 1);
+
+    i {
+      position: absolute;
+      width: 34px;
+      height: 34px;
+      border-color: var(--el-color-primary);
+      border-style: solid;
+
+      &:nth-child(1) { top: 0; left: 0; border-width: 1px 0 0 1px; }
+      &:nth-child(2) { top: 0; right: 0; border-width: 1px 1px 0 0; }
+      &:nth-child(3) { right: 0; bottom: 0; border-width: 0 1px 1px 0; }
+      &:nth-child(4) { bottom: 0; left: 0; border-width: 0 0 1px 1px; }
+    }
+  }
+
+  .grain {
+    inset: 0;
+    opacity: 0.16;
+    background-image:
+      radial-gradient(circle at 20% 30%, var(--el-text-color-primary) 0 0.45px, transparent 0.6px),
+      radial-gradient(circle at 70% 60%, var(--el-text-color-primary) 0 0.4px, transparent 0.55px);
+    background-size: 9px 9px, 13px 13px;
+    mask-image: linear-gradient(to bottom, #000, transparent 68%);
   }
 
   .pointerLight {
-    background: radial-gradient(circle, var(--el-color-primary) 1.4px, transparent 1.4px) 0 0 / 24px 24px,
-      radial-gradient(
-        280px circle at var(--pointerX, 50%) var(--pointerY, 25%),
-        color-mix(in srgb, var(--sparkleColor) 24%, transparent),
-        transparent
-      );
-    mask-image: radial-gradient(240px circle at var(--pointerX, 50%) var(--pointerY, 25%), #000, transparent);
-    opacity: calc(var(--pointerOpacity, 0) * 0.4);
-    transition: opacity 400ms ease;
+    inset: 0;
+    background: radial-gradient(260px circle at var(--pointer-x, 50%) var(--pointer-y, 20%), color-mix(in srgb, #f5c96f 14%, transparent), transparent 72%);
+    opacity: 0;
+    transition: opacity 300ms ease;
   }
 
-  @media (max-width: 700px) {
-    .flowLines {
-      opacity: 0.3;
-    }
-
-    .sparkleField .sparkle:nth-child(even) {
-      display: none;
-    }
+  @media (max-width: 820px) {
+    .filmStrip { top: 36%; opacity: 0.22; }
+    .viewfinder { width: 58vw; opacity: 0.14; }
+    .filmGlow { width: 82vw; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .ambientLight {
-      animation: none;
-    }
+    .ambientWash,
+    .filmStrip { animation: none; }
 
-    .flowLines {
-      transform: none;
-      transition: none;
+    .filmGlow,
+    .viewfinder { transform: none; transition: none; }
 
-      .flowPulse {
-        display: none;
-        animation: none;
-      }
-    }
-
-    .sparkleField {
-      transform: none;
-      transition: none;
-
-      .sparkle {
-        animation: none;
-        opacity: 0.4;
-      }
-    }
-
-    .pointerLight {
-      display: none;
-    }
+    .pointerLight { display: none; }
   }
 }
 
-@keyframes ambientDrift {
-  from {
-    transform: translate(-2%, -1%) scale(1);
-  }
-  to {
-    transform: translate(2%, 2%) scale(1.06);
-  }
+@keyframes washDrift {
+  from { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+  to { transform: translate3d(1.5%, 1.2%, 0) scale(1.04); }
 }
 
-@keyframes flowTravel {
-  from {
-    stroke-dashoffset: 100;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes sparkleTwinkle {
-  0%,
-  100% {
-    opacity: 0.15;
-    transform: scale(0.55) rotate(-12deg);
-  }
-  45% {
-    opacity: 0.95;
-    transform: scale(1.15) rotate(12deg);
-  }
-  70% {
-    opacity: 0.3;
-    transform: scale(0.75) rotate(0);
-  }
+@keyframes filmDrift {
+  from { transform: rotate(-9deg) translate3d(4%, 0, 0); }
+  to { transform: rotate(-9deg) translate3d(-3%, 8px, 0); }
 }
 </style>
