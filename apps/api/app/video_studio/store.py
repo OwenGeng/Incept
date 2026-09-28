@@ -504,6 +504,30 @@ _BUILTIN_SKILLS = [
         builtin=True,
         order=2,
     ),
+    SkillDefinition(
+        id="ctv-reference-research",
+        name="CTV reference research",
+        description="Build a small, traceable reference set before selecting a video direction.",
+        instructions="""Confirm the product, market, delivery surface and conversion goal. Search YouTube, Meta Ads Library or Instagram, and TikTok first; use other sources only for a documented gap. Start with five samples total, not five per platform. Save the result to research/video-sample-table.md with direct URL, access date, platform and format, observable hook, product proof, CTA, public signals, CTV-fit notes, and what may be abstracted without copying. A search title or snippet is discovery evidence only: never claim a first-two-second hook or frame-level observation unless the media or screenshots were actually attached and inspected. Do not combine unlike platform metrics into a cross-platform performance ranking. Stop at five when they support a clear decision; expand only for a documented decision gap or an explicit full-audit request.""",
+        builtin=True,
+        order=3,
+    ),
+    SkillDefinition(
+        id="brand-product-intake",
+        name="Brand and product intake",
+        description="Collect source-backed brand, product, claim and asset facts from an authorized public site.",
+        instructions="""Confirm the market, channel, conversion goal and the client's authorization scope. Read only public pages the user is authorized to use; never bypass login, paywalls, robots controls or download protection. Review brand, FAQ, support and policy pages, then create a three-to-five SKU candidate pool using an explicit rule. Do not rename review count as sales. For the chosen product, record every usable claim with its first-party URL, access date and status; label price, inventory, promotion and review counts as volatile. Record asset source and rights status separately from technical availability. Save the Brand/Product Asset Manifest to intake/brand-product-asset-manifest.md and supporting URLs to intake/source-log.md. State unresolved rights, claims and missing-media questions rather than inventing them.""",
+        builtin=True,
+        order=4,
+    ),
+    SkillDefinition(
+        id="ctv-creative-strategy",
+        name="CTV creative strategy",
+        description="Turn approved research and first-party product facts into a production-ready creative system.",
+        instructions="""Read research/video-sample-table.md and intake/brand-product-asset-manifest.md before proposing a direction. Convert observations into reusable mechanisms, never a competitor's wording, visual identity, shot sequence, music or unsupported claim. Save recurring hooks, proof patterns, format distribution, unresolved objections and evidence-backed recommendations to research/creative-synthesis.md. Recommend distinct jobs for a 16:9 CTV master, 6/15-second proof cutdowns and creator-native variants; use narrative only when a real human tension adds value. Before scripts, storyboards or generation nodes, write production/approved-brief.md with target, verified facts and URLs, tension, promise, visible proof, 0-2 second opening, structure, CTA, exclusions and variants. If the hook, authoritative claim sources, producible proof, large-screen readability, CTA, rights status or approval is missing, stop and ask for it instead of starting generation.""",
+        builtin=True,
+        order=5,
+    ),
 ]
 
 _BUILTIN_EXTENSIONS = [

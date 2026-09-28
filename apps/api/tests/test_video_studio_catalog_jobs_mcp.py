@@ -30,7 +30,14 @@ def test_document_catalog_and_export_jobs_are_user_scoped(tmp_path, monkeypatch)
         store.get_document(other, project.id)
 
     catalog = store.get_catalog(owner)
-    assert {item.id for item in catalog.skills} >= {"canvas", "storyboard", "continuity"}
+    assert {item.id for item in catalog.skills} >= {
+        "canvas",
+        "storyboard",
+        "continuity",
+        "ctv-reference-research",
+        "brand-product-intake",
+        "ctv-creative-strategy",
+    }
     updated = store.save_catalog(
         owner,
         CatalogImport(
