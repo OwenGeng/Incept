@@ -26,6 +26,7 @@ def _private_resolver(host: str, _port: object, **_kwargs: object) -> list[tuple
         "http://localhost/",
         "http://metadata.google.internal/computeMetadata/v1/",
         "https://user:password@example.com/",
+        "https://example.com:8443/",
         "file:///etc/passwd",
     ],
 )
@@ -87,6 +88,19 @@ def test_fetch_public_webpage_rejects_binary_content() -> None:
         with pytest.raises(research_tools.ResearchToolError, match="Unsupported webpage content type"):
             research_tools.fetch_public_webpage(
                 "https://example.test/file",
+                client=client,
+                resolver=_public_resolver,
+            )
+
+
+def test_fetch_public_webpage_reports_network_failure_as_tool_error() -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(fail)) as client:
+        with pytest.raises(research_tools.ResearchToolError, match="Webpage request failed"):
+            research_tools.fetch_public_webpage(
+                "https://example.test/article",
                 client=client,
                 resolver=_public_resolver,
             )

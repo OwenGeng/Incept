@@ -132,6 +132,12 @@ def _normalized_http_url(value: str) -> str:
         raise ResearchToolError("Only absolute HTTP(S) webpage URLs are supported")
     if parsed.username or parsed.password:
         raise ResearchToolError("Webpage URLs cannot contain a username or password")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ResearchToolError("Invalid webpage URL port") from error
+    if port not in {None, 80, 443}:
+        raise ResearchToolError("Only standard HTTP(S) webpage ports are supported")
     hostname = parsed.hostname.rstrip(".").lower()
     if hostname in _BLOCKED_HOSTS or hostname.endswith(".local") or hostname.endswith(".internal"):
         raise ResearchToolError("Private or local webpage URLs are not allowed")
@@ -262,6 +268,8 @@ def fetch_public_webpage(
                     "content": text[:max_chars],
                     "truncated": truncated,
                 }
+    except httpx.RequestError as error:
+        raise ResearchToolError(f"Webpage request failed: {error.__class__.__name__}") from error
     finally:
         if owned_client:
             active_client.close()
@@ -351,6 +359,8 @@ def search_public_web(
     )
     try:
         response = active_client.get(endpoint)
+    except httpx.RequestError as error:
+        raise ResearchToolError(f"Web search request failed: {error.__class__.__name__}") from error
     finally:
         if owned_client:
             active_client.close()
