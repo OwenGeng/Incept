@@ -73,7 +73,6 @@ COPY apps/api/app/ ./app/
 # One-time operational tools. They are not invoked by the API container, but
 # are available to the separately created Cloud Run migration Job.
 COPY apps/api/scripts/migrate_sqlite_to_postgres.py ./scripts/migrate_sqlite_to_postgres.py
-COPY apps/api/scripts/init_ai_video_schema.py ./scripts/init_ai_video_schema.py
 
 # SQL query files are loaded at runtime by supply_smb_live.py
 COPY sql/ ./sql/

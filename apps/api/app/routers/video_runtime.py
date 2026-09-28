@@ -16,14 +16,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.ai_video.core.contracts.image_generation import ImageGenerationInput
-from app.ai_video.core.contracts.provider import ProviderConfig
-from app.ai_video.core.contracts.video_generation import VideoGenerationInput
-from app.ai_video.core.integrations.vertex.images import VertexImageApiAdapter
-from app.ai_video.core.integrations.vertex.video import VertexVideoApiAdapter
 from app.core.config import settings as platform_settings
 from app.incept.config import get_settings
 from app.services.auth import require_internal_key
+from app.video_studio.vertex_media import (
+    ImageGenerationInput,
+    ProviderConfig,
+    VertexImageApiAdapter,
+    VertexVideoApiAdapter,
+    VideoGenerationInput,
+)
 
 
 router = APIRouter(

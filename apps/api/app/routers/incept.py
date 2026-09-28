@@ -1609,7 +1609,7 @@ def remediation_analyze_endpoint(
     return analyze_remediation_assets(request, user.id)
 
 
-'''Legacy AI Video workflow routes were removed in favour of VideoProduction.'''
+'''Legacy video workflow routes were removed in favour of VideoProduction.'''
 '''
 @router.post("/workflows/video-generation", response_model=GenerationJob)
 async def create_video_generation_job_endpoint(

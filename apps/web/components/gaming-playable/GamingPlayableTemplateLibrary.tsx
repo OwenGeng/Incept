@@ -2,7 +2,7 @@
 
 // `useTemplate` is a click handler retained for the deferred product surface,
 // not a React Hook. The current compact source shape confuses the hook-name
-// heuristic; this module is not part of the Image + AI Video release profile.
+// heuristic; this module is not part of the Image + Video release profile.
 /* eslint-disable react-hooks/rules-of-hooks */
 
 import { useEffect, useState } from "react";

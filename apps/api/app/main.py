@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.ai_video.main import app as ai_video_app, initialize_ai_video_module
 from app.video_studio.mcp import configured_video_studio_mcp_app
 from app.core.config import settings
 from app.routers import (
@@ -23,9 +22,6 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # AI Video shares this process and the same Cloud SQL configuration as the
-    # rest of Incept, so initialize its persistence during API startup.
-    await initialize_ai_video_module()
     yield
 
 
@@ -54,8 +50,6 @@ def create_app() -> FastAPI:
     app.include_router(video_studio.router)
     app.include_router(video_runtime.router)
     app.include_router(video_legacy.router)
-
-    app.mount("/ai-video", ai_video_app)
 
     video_mcp_app = configured_video_studio_mcp_app()
     if video_mcp_app is not None:
