@@ -557,6 +557,7 @@ def get_tools(email: str = Depends(current_user)) -> dict[str, Any]:
         "tool-media-generation": "mediaGeneration",
         "tool-web-fetch": "webFetch",
         "tool-web-search": "webSearch",
+        "tool-video-transcript": "videoTranscriptFetch",
         "tool-workspace": "workspace",
     }
     tools = [

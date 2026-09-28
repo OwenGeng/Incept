@@ -168,6 +168,24 @@ def test_agent_runs_research_tool_then_uses_result_in_final_response(tmp_path, m
     assert message.startswith("I found one source")
 
 
+def test_large_source_result_keeps_evidence_metadata_when_prompt_content_is_truncated() -> None:
+    entry = agent._tool_history_entry(
+        {"id": "fetch-1", "name": "web_fetch", "arguments": {"url": "https://example.test"}},
+        {
+            "url": "https://example.test/",
+            "retrieved_at": "2026-09-28T00:00:00+00:00",
+            "content_sha256": "a" * 64,
+            "content": "evidence " * 10_000,
+        },
+    )
+
+    assert entry["truncated"] is True
+    assert isinstance(entry["result"], dict)
+    assert entry["result"]["content_sha256"] == "a" * 64
+    assert entry["result"]["content_truncated_for_agent"] is True
+    assert len(json.dumps(entry["result"], ensure_ascii=False)) <= agent.MAX_TOOL_RESULT_CHARS
+
+
 def test_skill_selector_supports_ui_names_with_spaces() -> None:
     skills = store._BUILTIN_SKILLS
     prompt, selected, explicit = agent._select_skills(

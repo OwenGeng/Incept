@@ -74,6 +74,11 @@ def test_vue_settings_and_built_in_nodes_are_server_managed(tmp_path, monkeypatc
     }
     assert all(item["url"].startswith("/video-app/nodes/") for item in nodes)
 
+    tools = api.get("/video-legacy/api/tools/get", headers=headers()).json()["data"]["tools"]
+    transcript = next(item for item in tools if item["name"] == "videoTranscriptFetch")
+    assert transcript["enabled"] is True
+    assert transcript["author"] == "LinglongLab"
+
 
 def test_vue_agent_skill_menu_uses_enabled_fastapi_catalog(tmp_path, monkeypatch):
     api = client(tmp_path, monkeypatch)

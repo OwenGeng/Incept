@@ -508,7 +508,7 @@ _BUILTIN_SKILLS = [
         id="ctv-reference-research",
         name="CTV reference research",
         description="Build a small, traceable reference set before selecting a video direction.",
-        instructions="""Confirm the product, market, delivery surface and conversion goal. Search YouTube, Meta Ads Library or Instagram, and TikTok first; use other sources only for a documented gap. Start with five samples total, not five per platform. Save the result to research/video-sample-table.md with direct URL, access date, platform and format, observable hook, product proof, CTA, public signals, CTV-fit notes, and what may be abstracted without copying. A search title or snippet is discovery evidence only: never claim a first-two-second hook or frame-level observation unless the media or screenshots were actually attached and inspected. Do not combine unlike platform metrics into a cross-platform performance ranking. Stop at five when they support a clear decision; expand only for a documented decision gap or an explicit full-audit request.""",
+        instructions="""Confirm the product, market, delivery surface and conversion goal. Search YouTube, Meta Ads Library or Instagram, and TikTok first; use other sources only for a documented gap. Start with five samples total, not five per platform. Use video_transcript_fetch for public YouTube or Bilibili speech/captions when needed; a transcript supports spoken wording only and never proves frames or other visual content. For every factual finding, record an exact claim-level excerpt with record_claim_evidence before synthesis. Save the result to research/video-sample-table.md with direct URL, access date, platform and format, observable hook, product proof, CTA, public signals, CTV-fit notes, and what may be abstracted without copying. A search title or snippet is discovery evidence only: never claim a first-two-second hook or frame-level observation unless the media or screenshots were actually attached and inspected. Do not combine unlike platform metrics into a cross-platform performance ranking. Stop at five when they support a clear decision; expand only for a documented decision gap or an explicit full-audit request.""",
         builtin=True,
         order=3,
     ),
@@ -551,6 +551,7 @@ _BUILTIN_EXTENSIONS = [
             ("media-generation", "Media generation", "Use deployment-managed Vertex media generation."),
             ("web-fetch", "Web fetch", "Fetch an explicitly supplied reference URL."),
             ("web-search", "Web search", "Search external references when the host enables it."),
+            ("video-transcript", "Video transcript", "Fetch public YouTube or Bilibili subtitles without downloading video."),
             ("ask-user", "Ask user", "Request missing production constraints."),
         ]
     ],

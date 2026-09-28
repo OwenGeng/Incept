@@ -133,6 +133,51 @@ def test_search_public_web_parses_titles_snippets_and_direct_urls() -> None:
             "snippet": "A source-backed campaign summary.",
         }
     ]
+    assert result["provider"] == "duckduckgo"
+
+
+def test_search_falls_back_and_reports_process_health(monkeypatch) -> None:
+    research_tools._PROVIDER_HEALTH.clear()
+
+    def unavailable(_query: str, _max_results: int, _timeout_seconds: float) -> dict[str, object]:
+        raise research_tools.SearchProviderError("rate_limited", "quota exceeded", retryable=True)
+
+    def backup(query: str, _max_results: int, _timeout_seconds: float) -> dict[str, object]:
+        return {
+            "query": query,
+            "sources": [{"url": "https://example.test/source", "title": "Source", "snippet": "Evidence"}],
+            "truncated": False,
+        }
+
+    providers = [
+        research_tools.SearchProvider("primary", unavailable),
+        research_tools.SearchProvider("backup", backup),
+    ]
+    result = research_tools.search_public_web("ecommerce CTV", providers=providers)
+
+    assert result["provider"] == "backup"
+    assert result["attempts"] == [
+        {"provider": "primary", "status": "failed", "error_code": "rate_limited", "retryable": True},
+        {"provider": "backup", "status": "success"},
+    ]
+    health = research_tools.search_provider_doctor(providers=providers)
+    assert health["scope"] == "process"
+    by_name = {item["provider"]: item for item in health["providers"]}
+    assert by_name["primary"]["status"] == "degraded"
+    assert by_name["primary"]["last_error_code"] == "rate_limited"
+    assert by_name["backup"]["status"] == "healthy"
+
+
+def test_search_provider_error_classifies_http_and_timeout() -> None:
+    rate_limited = research_tools._classify_search_error(httpx.HTTPStatusError(
+        "rate limited",
+        request=httpx.Request("GET", "https://search.example.test"),
+        response=httpx.Response(429),
+    ))
+    timed_out = research_tools._classify_search_error(httpx.ReadTimeout("late"))
+
+    assert (rate_limited.code, rate_limited.retryable) == ("rate_limited", True)
+    assert (timed_out.code, timed_out.retryable) == ("timeout", True)
 
 
 def test_research_artifact_writes_are_scoped_and_versioned(tmp_path, monkeypatch) -> None:
@@ -188,6 +233,155 @@ def test_research_artifact_writes_are_scoped_and_versioned(tmp_path, monkeypatch
     assert updated["sha256"] != read["sha256"]
 
 
+def test_web_fetch_snapshot_can_record_verified_claim(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
+    email = "research@example.com"
+    project = store.create_project(email, ProjectCreate(name="Research"))
+    fetched = {
+        "url": "https://brand.example.test/product",
+        "status_code": 200,
+        "content_type": "text/plain",
+        "content": "The battery lasts up to 12 hours under the documented test protocol.",
+        "truncated": False,
+    }
+    monkeypatch.setattr(research_tools, "fetch_public_webpage", lambda *_args, **_kwargs: fetched)
+
+    source = research_tools.execute_research_tool(
+        "web_fetch",
+        {"url": fetched["url"]},
+        email=email,
+        project_id=project.id,
+        enabled_extensions={"tool-web-fetch", "tool-workspace"},
+        extension_configs={},
+    )
+    evidence = research_tools.execute_research_tool(
+        "record_claim_evidence",
+        {
+            "claim": "The product has up to 12 hours of battery life.",
+            "source_url": fetched["url"],
+            "content_sha256": source["content_sha256"],
+            "excerpt": "The battery lasts up to 12 hours",
+            "confidence_status": "supported",
+        },
+        email=email,
+        project_id=project.id,
+        enabled_extensions={"tool-workspace"},
+        extension_configs={},
+    )
+
+    assert evidence["source_url"] == fetched["url"]
+    assert evidence["retrieved_at"] == source["retrieved_at"]
+    assert evidence["content_sha256"] == source["content_sha256"]
+    ledger = research_tools.list_claim_evidence(email, project.id)
+    assert ledger["evidence"] == [evidence]
+
+
+def test_claim_evidence_rejects_excerpt_not_in_server_snapshot(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
+    email = "research@example.com"
+    project = store.create_project(email, ProjectCreate(name="Research"))
+    source = research_tools._persist_source_snapshot(
+        email,
+        project.id,
+        {
+            "url": "https://brand.example.test/product",
+            "content": "Documented product fact.",
+        },
+        source_type="webpage",
+        provider="direct",
+    )
+
+    with pytest.raises(research_tools.ResearchToolError, match="exact excerpt"):
+        research_tools.record_claim_evidence(
+            email,
+            project.id,
+            claim="An invented fact",
+            source_url=str(source["url"]),
+            content_sha256=str(source["content_sha256"]),
+            excerpt="Text absent from the source",
+            confidence_status="supported",
+        )
+
+
+def test_video_transcript_fetch_parses_youtube_vtt_and_persists_source(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
+    email = "research@example.com"
+    project = store.create_project(email, ProjectCreate(name="Research"))
+
+    def extractor(_url: str, _options: dict[str, object]) -> dict[str, object]:
+        return {
+            "id": "abc123",
+            "webpage_url": "https://www.youtube.com/watch?v=abc123",
+            "title": "Product demo",
+            "channel": "Brand",
+            "subtitles": {
+                "en": [{"ext": "vtt", "url": "https://captions.example.test/demo.vtt"}],
+            },
+            "automatic_captions": {},
+        }
+
+    vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nMeet the new camera.\n\n00:00:02.000 --> 00:00:04.000\nShoot all day.\n"
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, request=request, text=vtt))
+    with httpx.Client(transport=transport) as client:
+        transcript = research_tools.fetch_video_transcript(
+            "https://youtu.be/abc123",
+            languages=["en"],
+            extractor=extractor,
+            client=client,
+            resolver=_public_resolver,
+        )
+    saved = research_tools._persist_source_snapshot(
+        email,
+        project.id,
+        transcript,
+        source_type="video_transcript",
+        provider="yt-dlp",
+    )
+
+    assert transcript["platform"] == "youtube"
+    assert transcript["language"] == "en"
+    assert transcript["is_auto_generated"] is False
+    assert transcript["content"] == "Meet the new camera.\nShoot all day."
+    assert saved["content_sha256"] == research_tools._sha256_text(str(transcript["content"]))
+
+
+def test_video_transcript_fetch_rejects_non_allowlisted_platform() -> None:
+    with pytest.raises(research_tools.ResearchToolError, match="YouTube and Bilibili"):
+        research_tools.fetch_video_transcript(
+            "https://example.test/video",
+            extractor=lambda *_args: {},
+            resolver=_public_resolver,
+        )
+
+
+def test_video_transcript_fetch_parses_bilibili_json() -> None:
+    def extractor(_url: str, _options: dict[str, object]) -> dict[str, object]:
+        return {
+            "id": "BV1TEST",
+            "webpage_url": "https://www.bilibili.com/video/BV1TEST",
+            "title": "产品介绍",
+            "uploader": "品牌",
+            "subtitles": {
+                "zh-Hans": [{"ext": "json", "url": "https://captions.example.test/bilibili.json"}],
+            },
+        }
+
+    payload = '{"body":[{"content":"第一句。"},{"content":"第二句。"}]}'
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, request=request, text=payload))
+    with httpx.Client(transport=transport) as client:
+        transcript = research_tools.fetch_video_transcript(
+            "https://www.bilibili.com/video/BV1TEST",
+            languages=["zh-Hans"],
+            extractor=extractor,
+            client=client,
+            resolver=_public_resolver,
+        )
+
+    assert transcript["platform"] == "bilibili"
+    assert transcript["channel"] == "品牌"
+    assert transcript["content"] == "第一句。\n第二句。"
+
+
 def test_tool_execution_requires_its_enabled_extension(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
     email = "research@example.com"
@@ -212,3 +406,18 @@ def test_tool_execution_requires_its_enabled_extension(tmp_path, monkeypatch) ->
         extension_configs={},
     )
     assert len(result["artifacts"]) == len(research_tools.ALLOWED_RESEARCH_ARTIFACTS)
+
+    names = {
+        item["name"]
+        for item in research_tools.available_research_tools(
+            {"tool-web-search", "tool-web-fetch", "tool-video-transcript", "tool-workspace"}
+        )
+    }
+    assert {
+        "web_search",
+        "web_fetch",
+        "search_provider_doctor",
+        "video_transcript_fetch",
+        "record_claim_evidence",
+        "list_claim_evidence",
+    } <= names
