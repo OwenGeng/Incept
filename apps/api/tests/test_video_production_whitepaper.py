@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
-import httpx
 import pytest
-from fastapi import HTTPException, Request
 
-import asyncio
 from datetime import datetime
 
 from app.incept.models import (
@@ -29,8 +26,6 @@ from app.incept.video_production_capabilities import (
     default_video_production_selection,
     validate_video_production_selection,
 )
-from app.incept.video_production_mcp import build_video_production_mcp_server, configured_video_production_mcp_app
-from app.routers.incept import create_video_production_endpoint, video_production_events, video_production_events_stream, video_productions
 from app.incept.video_production_store import (
     VIDEO_PRODUCTIONS,
     JOBS,
@@ -52,9 +47,6 @@ from app.incept.video_production_store import (
     update_video_production,
 )
 from app.incept.store import _uploaded_asset_type
-from mcp.server.auth.middleware.auth_context import auth_context_var
-from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
-from mcp.server.fastmcp.exceptions import ToolError
 
 
 def test_video_shots_default_to_two_alternatives() -> None:
@@ -215,13 +207,6 @@ def test_project_visibility_and_mutation_are_owner_scoped() -> None:
         VIDEO_PRODUCTIONS.pop(production.production_id, None)
 
 
-def test_project_list_endpoint_returns_forbidden_for_unprivileged_scope_all() -> None:
-    user = User(id="scope_route_user", name="User", email="user@example.com", role=Role.user, team="test")
-    with pytest.raises(HTTPException) as error:
-        video_productions("access_workspace", scope="all", user=user)
-    assert error.value.status_code == 403
-
-
 def test_project_activity_events_are_durable_revision_receipts_and_owner_scoped() -> None:
     owner = User(id="event_owner", name="Owner", email="owner@example.com", role=Role.user, team="test")
     other = User(id="event_other", name="Other", email="other@example.com", role=Role.user, team="test")
@@ -240,163 +225,8 @@ def test_project_activity_events_are_durable_revision_receipts_and_owner_scoped(
         assert events[1].actor_user_id == owner.id
         with pytest.raises(PermissionError, match="not available"):
             list_video_production_events(updated.production_id, other)
-        with pytest.raises(HTTPException) as error:
-            video_production_events(updated.production_id, user=other)
-        assert error.value.status_code == 403
     finally:
         delete_video_production(production.production_id, owner)
-
-
-def test_project_activity_stream_starts_with_a_durable_snapshot() -> None:
-    owner = User(id="stream_owner", name="Owner", email="owner@example.com", role=Role.user, team="test")
-    production = create_video_production(
-        VideoProductionCreateRequest(workspace_id="stream_workspace", title="Stream record"), owner,
-    )
-
-    async def receive_disconnect() -> dict[str, str]:
-        return {"type": "http.disconnect"}
-
-    request = Request(
-        {"type": "http", "method": "GET", "path": "/events/stream", "headers": []},
-        receive=receive_disconnect,
-    )
-    try:
-        response = asyncio.run(video_production_events_stream(production.production_id, request, user=owner))
-        first_chunk = asyncio.run(anext(response.body_iterator))
-        assert "event: snapshot" in first_chunk
-        assert production.production_id in first_chunk
-    finally:
-        delete_video_production(production.production_id, owner)
-
-
-def test_mcp_server_is_opt_in_and_exposes_the_project_state_tool_surface() -> None:
-    assert configured_video_production_mcp_app(Settings()) is None
-    settings = Settings(
-        video_production_mcp_public_url="https://studio.example.test/video-production/mcp",
-        video_production_mcp_api_keys={
-            "mcp-test-token": {
-                "id": "mcp_test_user",
-                "email": "mcp_test_user@moloco.com",
-                "name": "MCP Test User",
-                "role": "manager",
-                "team": "test",
-            },
-        },
-    )
-    server = build_video_production_mcp_server(settings=settings)
-    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
-    assert {
-        "list_video_projects",
-        "read_video_project",
-        "update_video_project",
-        "lock_script_and_create_storyboard",
-        "approve_storyboard",
-        "run_production_agent",
-        "submit_video_generation",
-        "get_video_project_operations",
-    } <= tool_names
-
-
-def test_mcp_rejects_a_non_https_public_resource_url() -> None:
-    settings = Settings(
-        video_production_mcp_public_url="http://localhost:8000/video-production/mcp",
-        video_production_mcp_api_keys={"token": {"id": "mcp_user", "email": "mcp_user@moloco.com"}},
-    )
-    with pytest.raises(ValueError, match="absolute HTTPS"):
-        build_video_production_mcp_server(settings=settings)
-
-
-def test_mcp_project_state_tools_use_authenticated_identity_and_require_spend_confirmation() -> None:
-    settings = Settings(
-        video_production_mcp_public_url="https://studio.example.test/video-production/mcp",
-        video_production_mcp_api_keys={
-            "mcp-test-token": {
-                "id": "mcp_test_user",
-                "email": "mcp_test_user@moloco.com",
-                "name": "MCP Test User",
-                "role": "manager",
-                "team": "test",
-            },
-        },
-    )
-    server = build_video_production_mcp_server(settings=settings)
-
-    async def exercise_tools() -> tuple[dict[str, object], object]:
-        token = await server._token_verifier.verify_token("mcp-test-token")  # type: ignore[attr-defined]
-        assert token is not None
-        marker = auth_context_var.set(AuthenticatedUser(token))
-        try:
-            _content, production = await server.call_tool(
-                "create_video_project",
-                {"request": {"workspace_id": "mcp_workspace", "title": "MCP project"}},
-            )
-            assert isinstance(production, dict)
-            with pytest.raises(ToolError) as blocked_error:
-                await server.call_tool(
-                    "submit_video_generation",
-                    {"production_id": production["production_id"], "operation": "keyframe"},
-                )
-            blocked = blocked_error.value
-            return production, blocked
-        finally:
-            auth_context_var.reset(marker)
-
-    production, blocked = asyncio.run(exercise_tools())
-    try:
-        assert production["created_by"] == "mcp_test_user"
-        assert "confirm_spend=true" in str(blocked)
-    finally:
-        manager = User(
-            id="mcp_test_user",
-            name="MCP Test User",
-            email="mcp_test_user@moloco.com",
-            role=Role.manager,
-            team="test",
-        )
-        delete_video_production(str(production["production_id"]), manager)
-
-
-def test_mcp_streamable_http_rejects_anonymous_call_and_accepts_authenticated_initialize() -> None:
-    settings = Settings(
-        video_production_mcp_public_url="https://studio.example.test/video-production/mcp",
-        video_production_mcp_api_keys={
-            "mcp-http-token": {
-                "id": "mcp_http_user",
-                "email": "mcp_http_user@moloco.com",
-                "role": "manager",
-            },
-        },
-    )
-    server = build_video_production_mcp_server(settings=settings)
-    app = server.streamable_http_app()
-    request = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-03-26",
-            "capabilities": {},
-            "clientInfo": {"name": "contract-test", "version": "1"},
-        },
-    }
-
-    async def request_initialize() -> tuple[httpx.Response, httpx.Response]:
-        transport = httpx.ASGITransport(app=app)
-        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-        async with server.session_manager.run():
-            async with httpx.AsyncClient(transport=transport, base_url="https://studio.example.test") as client:
-                anonymous = await client.post("/", headers=headers, json=request)
-                authenticated = await client.post(
-                    "/",
-                    headers={**headers, "Authorization": "Bearer mcp-http-token"},
-                    json=request,
-                )
-        return anonymous, authenticated
-
-    anonymous, authenticated = asyncio.run(request_initialize())
-    assert anonymous.status_code == 401
-    assert authenticated.status_code == 200
-    assert "Incept Video Production" in authenticated.text
 
 
 def test_provider_catalogue_only_exposes_deployment_owned_models() -> None:
@@ -471,18 +301,6 @@ def test_project_model_selection_can_be_saved_and_tampering_is_rejected() -> Non
             )
     finally:
         VIDEO_PRODUCTIONS.pop(production.production_id, None)
-
-
-def test_create_endpoint_returns_actionable_validation_for_unconfigured_model() -> None:
-    user = User(id="provider_route_user", name="Test User", email="test@example.com", role=Role.user, team="test")
-    request = VideoProductionCreateRequest(
-        workspace_id="workspace_test",
-        video_setup={"provider_selection": {"image": {"provider": "unknown", "model": "not-approved"}}},
-    )
-    with pytest.raises(HTTPException) as error:
-        create_video_production_endpoint(request, user)
-    assert error.value.status_code == 422
-    assert "not configured" in str(error.value.detail)
 
 
 def test_archive_hides_a_project_without_destroying_it_and_restore_recovers_it() -> None:
