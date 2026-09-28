@@ -179,6 +179,10 @@ def test_skill_selector_supports_ui_names_with_spaces() -> None:
     assert [skill.id for skill in selected] == ["ctv-reference-research"]
     assert explicit is True
 
+    _, defaults, explicit = agent._select_skills("Build a simple canvas", skills)
+    assert not ({skill.id for skill in defaults} & agent.MANUAL_RESEARCH_SKILLS)
+    assert explicit is False
+
 
 def test_research_skill_blocks_generation_before_production_gate(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))

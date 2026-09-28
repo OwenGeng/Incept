@@ -40,6 +40,7 @@ MAX_TOOL_ROUNDS = 6
 MAX_TOOL_CALLS = 12
 MAX_TOOL_RESULT_CHARS = 20_000
 RESEARCH_ONLY_SKILLS = {"ctv-reference-research", "brand-product-intake"}
+MANUAL_RESEARCH_SKILLS = RESEARCH_ONLY_SKILLS | {"ctv-creative-strategy"}
 
 
 def _call_model(prompt: str, parts: list[genai_types.Part]) -> str:
@@ -104,7 +105,7 @@ def _select_skills(
 ) -> tuple[str, list[SkillDefinition], bool]:
     stripped = user_prompt.strip()
     if not stripped.casefold().startswith("/skill:"):
-        return stripped, skills, False
+        return stripped, [skill for skill in skills if skill.id not in MANUAL_RESEARCH_SKILLS], False
     requested = stripped[len("/skill:") :].lstrip()
     for skill in sorted(skills, key=lambda item: max(len(item.name), len(item.id)), reverse=True):
         for selector in (skill.name, skill.id):
@@ -118,7 +119,7 @@ def _select_skills(
             if requested.casefold().startswith(prefix.casefold()):
                 remainder = requested[len(prefix) :].strip()
                 return remainder or "Apply the selected skill to the current project.", [skill], True
-    return stripped, skills, False
+    return stripped, [skill for skill in skills if skill.id not in MANUAL_RESEARCH_SKILLS], False
 
 
 def _parse_tool_calls(value: Any) -> list[dict[str, Any]]:
@@ -168,9 +169,7 @@ def _research_generation_gate(
     email: str,
     project_id: str,
 ) -> tuple[Any, bool]:
-    if not isinstance(operations, list) or not active_skill_ids.intersection(
-        RESEARCH_ONLY_SKILLS | {"ctv-creative-strategy"}
-    ):
+    if not isinstance(operations, list) or not active_skill_ids.intersection(MANUAL_RESEARCH_SKILLS):
         return operations, False
     block_generation = bool(active_skill_ids.intersection(RESEARCH_ONLY_SKILLS))
     if "ctv-creative-strategy" in active_skill_ids:
