@@ -3,21 +3,35 @@
 .github/
 .claude/
 .codegraph/
+.code-review-graph/
 docs/
 appscript/
 sensortower-mcp/
-# sql/ is NOT excluded -- the API container needs it at runtime
+ArcReel/
+screenshot-to-code/
+tasks/
+sql/
 
 # Never bake local secrets into image
 .env
 .env.*
 .env.deploy
 *.log
+*.db
 
 # Already-compiled artifacts — Docker builds fresh
 node_modules/
 apps/web/node_modules/
 apps/web/.next/
 apps/api/__pycache__/
+**/__pycache__/
+**/*.pyc
 apps/api/.venv/
 apps/api/venv/
+apps/api/data/
+apps/api/static/generated/
+apps/api/static/uploads/
+apps/api/static/ai-video-files/
+apps/data/
+apps/video-vue/build/
+apps/web/public/video-app/

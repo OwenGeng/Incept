@@ -1,6 +1,6 @@
-# Phaser 用于 Incept GamingPlayable 的调研
+# Phaser 用于 LinglongLab GamingPlayable 的调研
 
-> 调研日期：2026-09-02。本文只引用 Phaser 官方 GitHub 仓库及官方文档；涉及 Moloco 的单文件、5 MB、禁止外网 / XHR / `mraid.js` 约束，均视为 Incept 的交付约束，而非 Phaser 的承诺。
+> 调研日期：2026-09-02。本文只引用 Phaser 官方 GitHub 仓库及官方文档；涉及 Moloco 的单文件、5 MB、禁止外网 / XHR / `mraid.js` 约束，均视为 LinglongLab 的交付约束，而非 Phaser 的承诺。
 
 ## 结论
 
@@ -12,7 +12,7 @@
 
 ```text
 客户图片 / 视频 / brief
-  → Incept：识别玩法、生成资产需求与试玩脚本
+  → LinglongLab：识别玩法、生成资产需求与试玩脚本
   → GamingPlayable：配置 Phaser 模板、关卡、数值、引导和 CTA 时机
   → Phaser：渲染、输入、物理、动画和游戏状态
   → CR Agent：广告壳、预览、规范校验、打包和发布
@@ -35,7 +35,7 @@
 - Phaser 把鼠标和触摸收敛为同一套 Pointer API。对对象调用 `setInteractive()` 后，桌面点击和手机手指都可由同一个 `pointerdown` 等事件处理；官方还提供拖拽和多点触控能力。 [Input 概念文档](https://docs.phaser.io/phaser/concepts/input)
 - Scale Manager 提供 `FIT`、`EXPAND`、`RESIZE` 等缩放模式，并可设置居中和监听 resize。竖屏试玩应以固定设计分辨率加 `FIT` 为默认，随后在实际广告容器内验证安全区、刘海区和 CTA 覆盖关系。 [Scale Manager](https://docs.phaser.io/phaser/concepts/scale-manager)
 
-这意味着客户没有 playable 团队时，Incept 可以给他们交付一套一致的「拖、点、滑」操作体验，而无需为每一款广告重新兼容鼠标和触控。
+这意味着客户没有 playable 团队时，LinglongLab 可以给他们交付一套一致的「拖、点、滑」操作体验，而无需为每一款广告重新兼容鼠标和触控。
 
 ## 单文件 Moloco 导出的关键边界
 
@@ -68,7 +68,7 @@ Phaser 3.80 的官方发布说明专门加入了 Base64/Data URI Loader，并明
 - 视频仅作为「可选且先测体积」的素材槽。官方 Video Loader 的常规示例仍是外部 URL，不能据此承诺其 Data URI 视频在目标广告 WebView 中稳定可用。 [Video Loader API](https://docs.phaser.io/api-documentation/class/loader-loaderplugin#video)
 - 模板按需选择最小构建：没有物理就不引入 Matter；需要轻量碰撞时评估 Arcade 构建；不需要音频时排除相应功能。每次导出以实际字节数作为通过条件。
 
-## 对 Incept 的实施建议
+## 对 LinglongLab 的实施建议
 
 先做一个严格的 `phaser-standalone` exporter POC，而不是马上扩展多个玩法：
 

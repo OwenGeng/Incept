@@ -1533,7 +1533,7 @@ Note: `Apple Search Ads` appears in `top_apps` / `top_apps_search` but not in `c
 
 ---
 
-## BQ Pipeline Architecture (Incept)
+## BQ Pipeline Architecture (LinglongLab)
 
 Proposed pipeline for loading ST data into BQ for prospect scoring:
 

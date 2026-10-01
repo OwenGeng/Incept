@@ -1,15 +1,23 @@
 {
-  "name": "incept",
+  "name": "linglonglab",
   "private": true,
   "packageManager": "pnpm@10.18.1",
+  "pnpm": {
+    "overrides": {
+      "postcss": "8.5.28",
+      "sharp": "0.35.4"
+    }
+  },
   "scripts": {
     "build:video-vue": "pnpm --dir apps/video-vue build",
     "sync:video-vue": "pnpm --dir apps/video-vue sync",
-    "prepare:video-vue": "pnpm --dir apps/video-vue prepare:incept",
-    "dev:web": "pnpm prepare:video-vue && pnpm --filter @incept/web dev",
-    "build:web": "pnpm prepare:video-vue && pnpm --filter @incept/web build",
-    "lint:web": "pnpm --filter @incept/web lint",
-    "typecheck:web": "pnpm --filter @incept/web exec tsc --noEmit",
+    "prepare:video-vue": "pnpm --dir apps/video-vue prepare:linglonglab",
+    "dev:web": "pnpm prepare:video-vue && pnpm --filter @linglonglab/web dev",
+    "build:web": "pnpm prepare:video-vue && pnpm --filter @linglonglab/web build",
+    "lint:web": "pnpm --filter @linglonglab/web lint",
+    "typecheck:web": "pnpm --filter @linglonglab/web exec tsc --noEmit",
+    "preflight": "node scripts/preflight.mjs",
+    "preflight:deploy": "node scripts/preflight.mjs --deploy",
     "release:validate": "node scripts/release-manifest.mjs validate"
   }
 }

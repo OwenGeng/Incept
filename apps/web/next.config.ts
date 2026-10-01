@@ -10,7 +10,8 @@ const extraDevOrigins = (
   .filter(Boolean);
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@incept/shared"],
+  poweredByHeader: false,
+  transpilePackages: ["@linglonglab/shared"],
   // typedRoutes enforces RouteImpl<string> everywhere — incompatible with plain-string
   // helpers like buildUrl(). Disabled to unblock Cloud Run builds; re-enable once all
   // router.push / Link href calls are migrated to typed routes.
@@ -25,11 +26,19 @@ const nextConfig: NextConfig = {
   //   .next/standalone/apps/web/server.js  (not .next/standalone/server.js)
   // which is why Dockerfile.web uses CMD ["node", "apps/web/server.js"].
   outputFileTracingRoot: path.join(__dirname, "../../"),
-  // Skip TS type-checking during `next build` — tsc runs separately in CI.
-  // Suppresses build-time errors from next-auth v5 `unknown` token fields
-  // and typedRoutes strictness until a full migration is done.
-  typescript: {
-    ignoreBuildErrors: true,
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+        ],
+      },
+    ];
   },
 };
 

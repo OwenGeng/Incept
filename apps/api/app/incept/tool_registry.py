@@ -45,7 +45,7 @@ TOOLS = [
         status="mock",
         provider="bigquery",
         owner="IM GM",
-        description="Mock adapter for joining Incept asset lineage with BigQuery performance data.",
+        description="Mock adapter for joining LinglongLab asset lineage with BigQuery performance data.",
     ),
 ]
 

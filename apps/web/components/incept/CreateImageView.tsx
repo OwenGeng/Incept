@@ -27,22 +27,27 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { AssetRole, AssetSummary, CreativeThreadSummary, InceptUser, JobSummary, RemediationAnalysisResult, ThemeCreatePresetSummary } from "@incept/shared";
+import type { AssetRole, AssetSummary, CreativeThreadSummary, LinglongLabUser, JobSummary, RemediationAnalysisResult, ThemeCreatePresetSummary } from "@linglonglab/shared";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { addTextToImage, analyzeRemediationAssets, cancelJob, createImageGenerationJob, createKakaoBizboardJob, createThemeCreatePreset, createThemeCreateReport, deleteAssets, deleteThread, downloadAssetFile, downloadAssetsZip, draftThemeCreateReport, generateGifFromAsset, getAssetFileExtension, listAssets, listThemeCreatePresets, listThreads, outpaintImage, removeBackground, renameThread, uploadAsset, type ContentScope } from "@/lib/incept-api";
 import {
-  buildKakaoDisclosure,
   composeKakaoBizboard,
+  KAKAO_BIZBOARD_SIZE,
+  KAKAO_DEFAULT_APP_COPY,
   KAKAO_DEFAULT_MAIN_COPY,
-  KAKAO_DEFAULT_SUBTITLE,
-  KAKAO_DEFAULT_DISCLOSURE,
-  KAKAO_GACHA_DISCLOSURE,
-  loadSpoqaFonts,
+  KAKAO_DEFAULT_TEMPLATE,
+  KAKAO_GACHA_INFO,
+  KAKAO_TEMPLATES,
+  kakaoTemplate,
+  loadKakaoFonts,
   validateKakaoBizboardInputs,
+  type KakaoCompositeParams,
+  type KakaoTemplateId,
 } from "@/lib/kakao-compositor";
 import { DocsButton, FeedbackButton } from "@/components/incept/FeedbackButton";
 import { KakaoFlow } from "@/components/incept/KakaoFlow";
+import { useKakaoObjectImages } from "@/components/incept/useKakaoObjectImages";
 import { WorkbenchShell } from "@/components/incept/WorkbenchShell";
 import { WorkbenchFooterActions } from "@/components/incept/WorkbenchFooterActions";
 
@@ -111,7 +116,7 @@ const MAX_REMEDIATION_SOURCE_IMAGES = 10;
 const CREATE_FLOW_TABS: Array<{ id: CreateFlow; label: string; blurb: string }> = [
   { id: "resize",       label: "Resize",       blurb: "Adapt one image to multiple ad sizes. Background and style stay identical." },
   { id: "theme_create", label: "Theme Create", blurb: "Run one of two Gemini image workflows, then turn strong outputs into reusable style presets." },
-  { id: "kakao",        label: "Kakao",        blurb: "Batch-generate Kakao Bizboard banners (1029x258) from your ad creatives." },
+  { id: "kakao",        label: "Kakao",        blurb: "Batch-generate Kakao Bizboard banners (960x300) from your ad creatives." },
   { id: "remediation",  label: "Remediation",  blurb: "Upload risky creatives and generate safer variants without losing the core campaign idea." },
 ];
 
@@ -159,7 +164,7 @@ export interface CreateImageViewProps {
   setLiveJobs: Dispatch<SetStateAction<JobSummary[]>>;
   liveThreads: CreativeThreadSummary[];
   setLiveThreads: Dispatch<SetStateAction<CreativeThreadSummary[]>>;
-  currentUser: InceptUser;
+  currentUser: LinglongLabUser;
   contentScope: ContentScope;
   activeWorkspaceId: string;
   activeThreadId?: string | null;
@@ -639,49 +644,74 @@ type KakaoBuilderAsset = {
 export function KakaoBatchModal({
   assets,
   submitting,
+  template,
   appIconUrl,
+  appCopy,
   mainCopy,
-  appDownloadCopy,
+  subCopy,
+  additionalInfo,
   gacha,
   previewUrl,
   validationErrors,
   mainCopyWidthPx,
   onClose,
   onSubmit,
+  onTemplateChange,
   onAppIconChange,
   setGacha,
-  onSubtitleChange,
+  onAppCopyChange,
   onMainCopyChange,
+  onSubCopyChange,
+  onAdditionalInfoChange,
   onApplyChanges,
   previewBusy,
   previewAssetIndex,
   onPreviewAssetChange,
+  objectUrl,
+  objectBusy,
+  objectError,
+  onRemoveBackgrounds,
+  onUploadObject,
 }: {
   assets: KakaoBuilderAsset[];
   submitting: boolean;
+  template: KakaoTemplateId;
   appIconUrl: string | null;
+  appCopy: string;
   mainCopy: string;
-  appDownloadCopy: string;
+  subCopy: string;
+  additionalInfo: string;
   gacha: boolean;
   previewUrl: string | null;
   validationErrors: string[];
   mainCopyWidthPx: number;
   onClose: () => void;
   onSubmit: () => void;
+  onTemplateChange: (value: KakaoTemplateId) => void;
   onAppIconChange: (file: File | null) => void;
   setGacha: Dispatch<SetStateAction<boolean>>;
-  onSubtitleChange: (value: string) => void;
+  onAppCopyChange: (value: string) => void;
   onMainCopyChange: (value: string) => void;
+  onSubCopyChange: (value: string) => void;
+  onAdditionalInfoChange: (value: string) => void;
   onApplyChanges: () => void;
   previewBusy: boolean;
   previewAssetIndex: number;
   onPreviewAssetChange: (assetIndex: number) => void;
+  /** Object image used for the previewed source (Object template only). */
+  objectUrl: string | null;
+  objectBusy: boolean;
+  objectError: string | null;
+  onRemoveBackgrounds: () => void;
+  onUploadObject: (file: File) => void;
 }) {
   const firstAsset = assets[0] ?? null;
   const currentPreviewAsset = assets[previewAssetIndex] ?? firstAsset ?? null;
   const [showGuideline, setShowGuideline] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
-  const canCreate = !submitting && validationErrors.length === 0 && !!appIconUrl && !!firstAsset;
+  const templateSpec = kakaoTemplate(template);
+  const inputsReady = !!firstAsset && (!templateSpec.appCopy || !!appIconUrl);
+  const canCreate = !submitting && !objectBusy && validationErrors.length === 0 && inputsReady;
 
   return (
     <div
@@ -738,7 +768,7 @@ export function KakaoBatchModal({
                 <p className="text-xs text-muted-foreground">{assets.length} / 10 selected</p>
               </div>
               <p className="text-xs text-muted-foreground">
-                One subtitle and main copy setting will be applied across all selected cleaned images.
+                One template and copy setting will be applied across all selected cleaned images.
                 Click a thumbnail to preview that source in the Bizboard frame.
               </p>
               <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
@@ -785,7 +815,7 @@ export function KakaoBatchModal({
 
             {showGuideline && (
               <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900">
-                Kakao title and subtitle must stay inside the fixed left copy safe area. The blue/red guide box mirrors the company preview.
+                Kakao 960x300 spec: copy must stay between the red and blue guides (max 526px); the thumbnail sits at the right (320x222). Kakao adds the AD mark automatically, so no disclaimer is needed.
               </div>
             )}
 
@@ -803,23 +833,24 @@ export function KakaoBatchModal({
                   />
                 )}
                 {previewBusy ? (
-                  <div className="grid aspect-[1029/258] place-items-center border border-dashed border-border bg-background">
+                  <div className="grid aspect-[960/300] place-items-center border border-dashed border-border bg-background">
                     <Loader2 className="size-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : previewUrl ? (
-                  <img src={previewUrl} alt="Kakao Bizboard preview" className="relative block w-full" />
+                  <img src={previewUrl} alt="Kakao Bizboard preview" className="relative block w-full bg-[#f3f3f3]" />
                 ) : currentPreviewAsset ? (
-                  <div className="grid aspect-[1029/258] place-items-center border border-dashed border-border bg-background text-sm text-muted-foreground">
+                  <div className="grid aspect-[960/300] place-items-center border border-dashed border-border bg-background text-sm text-muted-foreground">
                     Apply changes to generate the Kakao preview.
                   </div>
                 ) : (
-                  <div className="grid aspect-[1029/258] place-items-center border border-dashed border-border bg-background text-sm text-muted-foreground">
+                  <div className="grid aspect-[960/300] place-items-center border border-dashed border-border bg-background text-sm text-muted-foreground">
                     Select cleaned assets first.
                   </div>
                 )}
                 {showGuideline && (
+                  // Copy area x=43..569 of 960 (Kakao 960x300 layout).
                   <div className="pointer-events-none absolute inset-0">
-                    <div className="ml-[32.8%] h-full w-[28.7%] border-l border-dashed border-red-500 border-r border-dashed border-blue-500" />
+                    <div className="ml-[4.48%] h-full w-[54.79%] border-l border-dashed border-red-500 border-r border-dashed border-blue-500" />
                   </div>
                 )}
               </div>
@@ -833,7 +864,64 @@ export function KakaoBatchModal({
           </div>
 
           <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 pr-3">
-            <div className="grid gap-4">
+            <label className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Template</span>
+              <select
+                value={template}
+                onChange={(e) => onTemplateChange(e.target.value as KakaoTemplateId)}
+                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-foreground/20"
+              >
+                {KAKAO_TEMPLATES.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+
+            {templateSpec.object && (
+              <div className="grid gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Object Image</span>
+                <div
+                  className="grid aspect-[314/300] place-items-center overflow-hidden rounded-md border border-border"
+                  style={{ backgroundImage: "repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%)", backgroundSize: "16px 16px" }}
+                >
+                  {objectUrl ? (
+                    <img src={objectUrl} alt="Object image" className="max-h-full max-w-full object-contain" />
+                  ) : (
+                    <ImageIcon className="size-5 text-muted-foreground/50" />
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={onRemoveBackgrounds}
+                    disabled={objectBusy || !firstAsset}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {objectBusy && <Loader2 className="size-3.5 animate-spin" />}
+                    {objectBusy ? "Removing…" : `Remove background (${assets.length})`}
+                  </button>
+                  <label className="cursor-pointer rounded-md border border-border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted">
+                    Upload transparent PNG
+                    <input
+                      type="file"
+                      accept="image/png"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) onUploadObject(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  Background-free object, no text. Scaled to 314px wide; taller than 300px is cropped top and bottom. Upload applies to the source being previewed.
+                </span>
+                {objectError && <span className="text-[11px] text-red-600">{objectError}</span>}
+              </div>
+            )}
+
+            {templateSpec.appCopy && <div className="grid gap-4">
               <label className="grid gap-2">
                 <span className="text-xs font-medium text-muted-foreground">App Icon</span>
                 <div className="flex items-center gap-3 rounded-md border border-border bg-background px-2 py-2">
@@ -855,7 +943,7 @@ export function KakaoBatchModal({
                   </label>
                 </div>
               </label>
-            </div>
+            </div>}
 
             <div className="grid gap-2">
               <span className="text-xs font-medium text-muted-foreground">Current Preview Source</span>
@@ -890,15 +978,18 @@ export function KakaoBatchModal({
               )}
             </div>
 
-            <label className="grid gap-2">
-              <span className="text-xs font-medium text-muted-foreground">Subtitle</span>
-              <input
-                value={appDownloadCopy}
-                onChange={(e) => onSubtitleChange(e.target.value)}
-                placeholder={KAKAO_DEFAULT_SUBTITLE}
-                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/20"
-              />
-            </label>
+            {templateSpec.appCopy && (
+              <label className="grid gap-2">
+                <span className="text-xs font-medium text-muted-foreground">App Download Copy</span>
+                <input
+                  value={appCopy}
+                  onChange={(e) => onAppCopyChange(e.target.value)}
+                  placeholder={KAKAO_DEFAULT_APP_COPY}
+                  className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/20"
+                />
+                <span className="text-[11px] text-muted-foreground">Must include &quot;앱&quot; or &quot;App&quot;.</span>
+              </label>
+            )}
 
             <label className="grid gap-2">
               <span className="text-xs font-medium text-muted-foreground">Main Copy</span>
@@ -908,7 +999,29 @@ export function KakaoBatchModal({
                 placeholder={KAKAO_DEFAULT_MAIN_COPY}
                 className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/20"
               />
-              <span className="text-[11px] text-muted-foreground">Width: {Math.round(mainCopyWidthPx)}px</span>
+              <span className="text-[11px] text-muted-foreground">Width: {Math.round(mainCopyWidthPx)}px (240–526px)</span>
+            </label>
+
+            {templateSpec.subCopy && (
+              <label className="grid gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Sub Copy</span>
+                <input
+                  value={subCopy}
+                  onChange={(e) => onSubCopyChange(e.target.value)}
+                  className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/20"
+                />
+                <span className="text-[11px] text-muted-foreground">Must differ from the main copy.</span>
+              </label>
+            )}
+
+            <label className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Additional Info (optional)</span>
+              <input
+                value={additionalInfo}
+                onChange={(e) => onAdditionalInfoChange(e.target.value)}
+                placeholder="Legal notice, review approval, image source…"
+                className="rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/20"
+              />
             </label>
 
             <label className="flex items-center gap-3 text-sm text-foreground">
@@ -918,7 +1031,7 @@ export function KakaoBatchModal({
                 onChange={(e) => setGacha(e.target.checked)}
                 className="size-4 rounded border-border bg-transparent"
               />
-              Show includes gacha contents
+              Includes gacha contents (adds &quot;{KAKAO_GACHA_INFO}&quot;)
             </label>
 
             {validationErrors.length > 0 && (
@@ -938,10 +1051,10 @@ export function KakaoBatchModal({
               <button
                 type="button"
                 onClick={onApplyChanges}
-                disabled={previewBusy || !appIconUrl || !firstAsset}
+                disabled={previewBusy || !inputsReady}
                 className={cn(
                   "w-full rounded-xl px-4 py-2 text-sm font-semibold transition-all",
-                  previewBusy || !appIconUrl || !firstAsset
+                  previewBusy || !inputsReady
                     ? "cursor-not-allowed bg-muted text-muted-foreground"
                     : "border border-border bg-background text-foreground hover:bg-muted"
                 )}
@@ -1362,8 +1475,10 @@ export function CreateImageView({
   const [kakaoBatchSubmitting, setKakaoBatchSubmitting] = useState(false);
   const [kakaoBatchAppIconUrl, setKakaoBatchAppIconUrl] = useState<string | null>(null);
   const [kakaoBatchMainCopy, setKakaoBatchMainCopy] = useState(KAKAO_DEFAULT_MAIN_COPY);
-  const [kakaoBatchAppDownloadCopy, setKakaoBatchAppDownloadCopy] = useState(KAKAO_DEFAULT_SUBTITLE);
-  const [kakaoBatchDspName, setKakaoBatchDspName] = useState(KAKAO_DEFAULT_DISCLOSURE);
+  const [kakaoBatchTemplate, setKakaoBatchTemplate] = useState<KakaoTemplateId>(KAKAO_DEFAULT_TEMPLATE);
+  const [kakaoBatchAppDownloadCopy, setKakaoBatchAppDownloadCopy] = useState(KAKAO_DEFAULT_APP_COPY);
+  const [kakaoBatchSubCopy, setKakaoBatchSubCopy] = useState("");
+  const [kakaoBatchAdditionalInfo, setKakaoBatchAdditionalInfo] = useState("");
   const [kakaoBatchGacha, setKakaoBatchGacha] = useState(false);
   const [kakaoBatchPreviewUrl, setKakaoBatchPreviewUrl] = useState<string | null>(null);
   const [kakaoBatchValidationErrors, setKakaoBatchValidationErrors] = useState<string[]>([]);
@@ -1640,9 +1755,18 @@ export function CreateImageView({
     setActiveChip(null);
   }
 
-  useEffect(() => {
-    setKakaoBatchDspName(buildKakaoDisclosure(kakaoBatchGacha));
-  }, [kakaoBatchGacha]);
+  function kakaoBatchParams(asset: { id: string; url: string }): KakaoCompositeParams {
+    return {
+      template: kakaoBatchTemplate,
+      thumbnailUrl: kakaoTemplate(kakaoBatchTemplate).object ? kakaoObjects.objectUrlFor(asset) : asset.url,
+      appIconUrl: kakaoBatchAppIconUrl,
+      appCopy: kakaoBatchAppDownloadCopy,
+      mainCopy: kakaoBatchMainCopy,
+      subCopy: kakaoBatchSubCopy,
+      additionalInfo: kakaoBatchAdditionalInfo,
+      gacha: kakaoBatchGacha,
+    };
+  }
 
   useEffect(() => {
     if (createFlow !== "theme_create") return;
@@ -1692,14 +1816,8 @@ export function CreateImageView({
 
     setKakaoBatchPreviewBusy(true);
     try {
-      await loadSpoqaFonts().catch(() => {});
-      const validation = await validateKakaoBizboardInputs({
-        thumbnailUrl: previewAsset.url,
-        appIconUrl: kakaoBatchAppIconUrl,
-        subtitle: kakaoBatchAppDownloadCopy,
-        mainCopy: kakaoBatchMainCopy,
-        gacha: kakaoBatchGacha,
-      });
+      await loadKakaoFonts();
+      const validation = await validateKakaoBizboardInputs(kakaoBatchParams(previewAsset));
       setKakaoBatchValidationErrors(validation.errors);
       setKakaoBatchMainCopyWidthPx(validation.mainCopyWidthPx);
 
@@ -1711,13 +1829,7 @@ export function CreateImageView({
         return;
       }
 
-      const blob = await composeKakaoBizboard({
-        thumbnailUrl: previewAsset.url,
-        appIconUrl: kakaoBatchAppIconUrl,
-        subtitle: kakaoBatchAppDownloadCopy,
-        mainCopy: kakaoBatchMainCopy,
-        gacha: kakaoBatchGacha,
-      });
+      const blob = await composeKakaoBizboard(kakaoBatchParams(previewAsset));
       const nextPreviewUrl = URL.createObjectURL(blob);
       setKakaoBatchPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -1887,6 +1999,7 @@ export function CreateImageView({
   const currentThreadIdForWrites = startingNewSession
     ? undefined
     : selectedThreadId ?? currentThreads[0]?.id ?? undefined;
+  const kakaoObjects = useKakaoObjectImages(activeWorkspaceId, currentThreadIdForWrites);
 
   const allSelected =
     downloadableAssets.length > 0 &&
@@ -1996,7 +2109,7 @@ export function CreateImageView({
     if (nextAssets.length === 0) return;
     setKakaoBatchAssets(nextAssets);
     setKakaoBatchPreviewAssetIndex(0);
-    setKakaoBatchAppDownloadCopy((prev) => prev.trim() || KAKAO_DEFAULT_SUBTITLE);
+    setKakaoBatchAppDownloadCopy((prev) => prev.trim() || KAKAO_DEFAULT_APP_COPY);
     setKakaoBatchMainCopy((prev) => prev.trim() || KAKAO_DEFAULT_MAIN_COPY);
     setKakaoBatchOpen(true);
   }
@@ -2009,20 +2122,15 @@ export function CreateImageView({
 
     let nextThreadId = currentThreadIdForWrites;
     const queuedJobs: JobSummary[] = [];
+    const template = kakaoTemplate(kakaoBatchTemplate);
 
     try {
       for (const asset of kakaoBatchAssets) {
-        const blob = await composeKakaoBizboard({
-          thumbnailUrl: asset.url,
-          appIconUrl: kakaoBatchAppIconUrl,
-          subtitle: kakaoBatchAppDownloadCopy,
-          mainCopy: kakaoBatchMainCopy,
-          gacha: kakaoBatchGacha,
-        });
+        const blob = await composeKakaoBizboard(kakaoBatchParams(asset));
         const safeName = (asset.title || "kakao_asset")
           .replace(/\.[^.]+$/, "")
           .replace(/[^a-zA-Z0-9_-]+/g, "_");
-        const file = new File([blob], `${safeName}_kakao_bizboard_1029x258.png`, {
+        const file = new File([blob], `${safeName}_kakao_bizboard_${KAKAO_BIZBOARD_SIZE}.png`, {
           type: "image/png",
         });
         const uploaded = await uploadAsset(file, activeWorkspaceId, "upload", nextThreadId ?? currentThreadIdForWrites);
@@ -2034,9 +2142,11 @@ export function CreateImageView({
           workspaceId: activeWorkspaceId,
           cleanedAssetId: asset.id,
           composedAssetId: uploaded.id,
+          template: kakaoBatchTemplate,
           mainCopy: kakaoBatchMainCopy,
-          appDownloadCopy: kakaoBatchAppDownloadCopy,
-          dspName: kakaoBatchDspName,
+          subCopy: template.subCopy ? kakaoBatchSubCopy : "",
+          appDownloadCopy: template.appCopy ? kakaoBatchAppDownloadCopy : "",
+          additionalInfo: kakaoBatchAdditionalInfo,
           gacha: kakaoBatchGacha,
           threadId: nextThreadId ?? currentThreadIdForWrites,
         });
@@ -2417,6 +2527,7 @@ export function CreateImageView({
     themeCreateStyleName,
     themeCreateStyleDetails,
     prompt,
+    onThreadSelect,
   ]);
 
   // Close chip panel on outside click
@@ -4527,9 +4638,12 @@ export function CreateImageView({
       <KakaoBatchModal
         assets={kakaoBatchAssets}
         submitting={kakaoBatchSubmitting}
+        template={kakaoBatchTemplate}
         appIconUrl={kakaoBatchAppIconUrl}
+        appCopy={kakaoBatchAppDownloadCopy}
         mainCopy={kakaoBatchMainCopy}
-        appDownloadCopy={kakaoBatchAppDownloadCopy}
+        subCopy={kakaoBatchSubCopy}
+        additionalInfo={kakaoBatchAdditionalInfo}
         gacha={kakaoBatchGacha}
         previewUrl={kakaoBatchPreviewUrl}
         validationErrors={kakaoBatchValidationErrors}
@@ -4538,19 +4652,32 @@ export function CreateImageView({
           if (!kakaoBatchSubmitting) {
             setKakaoBatchOpen(false);
             setKakaoBatchAssets([]);
+            kakaoObjects.reset();
           }
         }}
         onSubmit={handleGenerateKakaoSelected}
+        onTemplateChange={setKakaoBatchTemplate}
         onAppIconChange={handleKakaoBatchIconChange}
         setGacha={setKakaoBatchGacha}
-        onSubtitleChange={setKakaoBatchAppDownloadCopy}
-        onMainCopyChange={(value) => {
-          setKakaoBatchMainCopy(value);
-        }}
+        onAppCopyChange={setKakaoBatchAppDownloadCopy}
+        onMainCopyChange={setKakaoBatchMainCopy}
+        onSubCopyChange={setKakaoBatchSubCopy}
+        onAdditionalInfoChange={setKakaoBatchAdditionalInfo}
         onApplyChanges={rebuildKakaoBatchPreview}
         previewBusy={kakaoBatchPreviewBusy}
         previewAssetIndex={kakaoBatchPreviewAssetIndex}
         onPreviewAssetChange={setKakaoBatchPreviewAssetIndex}
+        objectUrl={(() => {
+          const asset = kakaoBatchAssets[kakaoBatchPreviewAssetIndex] ?? kakaoBatchAssets[0];
+          return asset ? kakaoObjects.objectUrlFor(asset) : null;
+        })()}
+        objectBusy={kakaoObjects.removing}
+        objectError={kakaoObjects.error}
+        onRemoveBackgrounds={() => void kakaoObjects.removeBackgrounds(kakaoBatchAssets)}
+        onUploadObject={(file) => {
+          const asset = kakaoBatchAssets[kakaoBatchPreviewAssetIndex] ?? kakaoBatchAssets[0];
+          if (asset) kakaoObjects.uploadObject(asset.id, file);
+        }}
       />
     )}
 

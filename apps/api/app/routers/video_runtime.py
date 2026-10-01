@@ -16,7 +16,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.core.config import settings as platform_settings
 from app.incept.config import get_settings
 from app.services.auth import require_internal_key
 from app.video_studio.vertex_media import (
@@ -25,6 +24,7 @@ from app.video_studio.vertex_media import (
     VertexImageApiAdapter,
     VertexVideoApiAdapter,
     VideoGenerationInput,
+    _adc_access_token,
 )
 
 
@@ -36,17 +36,24 @@ router = APIRouter(
 
 
 class ManagedMediaRequest(BaseModel):
-    media_type: Literal["image", "video"]
+    media_type: Literal["image", "video", "audio"]
+    provider_id: str
+    model_id: str
     prompt: str = Field(min_length=1, max_length=12_000)
     ratio: str | None = None
     size: str | None = None
     duration: int | None = Field(default=None, ge=1, le=60)
     first_frame: str | None = None
     last_frame: str | None = None
+    resolution: str | None = None
+    generate_audio: bool | None = None
+    voice: str | None = None
+    speed: float | None = Field(default=None, gt=0, le=4)
+    format: str | None = None
 
 
 class ManagedMediaResponse(BaseModel):
-    media_type: Literal["image", "video"]
+    media_type: Literal["image", "video", "audio"]
     mime_type: str
     data: str
 
@@ -147,11 +154,12 @@ def _openai_delta(part: Any, *, call_index: int) -> tuple[dict[str, Any] | None,
     return delta, call_index + 1
 
 
-def _chat_stream(body: dict[str, Any]) -> Iterator[str]:
+def _chat_stream(body: dict[str, Any], *, model_id: str | None = None) -> Iterator[str]:
     from google import genai
     from google.genai import types as genai_types
 
-    project_id = platform_settings.google_cloud_project or get_settings().gcp_project_id
+    settings = get_settings()
+    project_id = settings.gcp_project_id
     if not project_id:
         raise HTTPException(status_code=503, detail="GCP project is not configured")
     system, contents = _gemini_contents(body.get("messages") or [], genai_types)
@@ -163,17 +171,15 @@ def _chat_stream(body: dict[str, Any]) -> Iterator[str]:
     tools = _gemini_tools(body.get("tools"), genai_types)
     if tools:
         config["tools"] = tools
-    if isinstance(body.get("temperature"), (int, float)):
-        config["temperature"] = body["temperature"]
     if isinstance(body.get("max_tokens"), int):
         config["max_output_tokens"] = body["max_tokens"]
     client = genai.Client(
-        enterprise=platform_settings.google_genai_use_enterprise,
+        enterprise=True,
         project=project_id,
-        location=platform_settings.google_cloud_location,
+        location=settings.gcp_location,
     )
     stream = client.models.generate_content_stream(
-        model=platform_settings.gemini_model,
+        model=model_id or settings.vertex_gemini_model,
         contents=contents,
         config=genai_types.GenerateContentConfig(**config),
     )
@@ -225,6 +231,124 @@ def _data_url_payload(value: str, expected_prefix: str) -> tuple[str, str]:
     return mime_type, data
 
 
+def configured_text_models() -> list[dict[str, Any]]:
+    settings = get_settings()
+    models: list[dict[str, Any]] = []
+    if settings.gcp_project_id:
+        models.extend([
+        {"providerId": "google-vertex-ai", "providerLabel": "Google Vertex AI", "modelId": settings.vertex_playable_flash_model, "label": settings.vertex_playable_flash_model, "protocol": "openai-completions", "isDefault": True},
+        {"providerId": "google-vertex-ai", "providerLabel": "Google Vertex AI", "modelId": settings.vertex_playable_pro_model, "label": settings.vertex_playable_pro_model, "protocol": "openai-completions", "isDefault": False},
+        ])
+    if settings.openai_api_key:
+        models.append({"providerId": "openai", "providerLabel": "OpenAI", "modelId": settings.openai_text_model, "label": settings.openai_text_model, "protocol": "openai-responses", "isDefault": False})
+    if settings.anthropic_api_key and settings.anthropic_model:
+        models.append({"providerId": "anthropic", "providerLabel": "Anthropic", "modelId": settings.anthropic_model, "label": settings.anthropic_model, "protocol": "anthropic-messages", "isDefault": False})
+    return [model for model in models if model["modelId"]]
+
+
+def configured_media_models() -> list[dict[str, Any]]:
+    settings = get_settings()
+    models: list[dict[str, Any]] = []
+    if settings.gcp_project_id:
+        models.extend([
+            {"providerId": "google-vertex-ai", "modelId": settings.vertex_gemini_image_model, "type": "image", "isDefault": True},
+            {"providerId": "google-vertex-ai", "modelId": settings.vertex_veo_fast_model, "type": "video", "isDefault": True},
+            {"providerId": "google-cloud-tts", "modelId": settings.google_tts_model, "type": "audio", "isDefault": True},
+        ])
+    if settings.openai_api_key:
+        models.extend([
+            {"providerId": "openai", "modelId": settings.openai_image_model, "type": "image", "isDefault": False},
+            {"providerId": "openai", "modelId": settings.openai_tts_model, "type": "audio", "isDefault": False},
+        ])
+    return [model for model in models if model["modelId"]]
+
+
+def validate_media_model(media_type: str, provider_id: str, model_id: str) -> None:
+    if not any(
+        item["type"] == media_type and item["providerId"] == provider_id and item["modelId"] == model_id
+        for item in configured_media_models()
+    ):
+        raise ValueError("The selected media provider/model is not enabled by this deployment")
+
+
+async def _openai_image(body: ManagedMediaRequest) -> ManagedMediaResponse:
+    from openai import AsyncOpenAI
+
+    settings = get_settings()
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured")
+    size = body.size or "1024x1024"
+    response = await AsyncOpenAI(api_key=settings.openai_api_key).images.generate(
+        model=body.model_id,
+        prompt=body.prompt,
+        n=1,
+        size=size,
+    )
+    encoded = response.data[0].b64_json if response.data else None
+    if not encoded:
+        raise HTTPException(status_code=502, detail="OpenAI image generation returned no bytes")
+    return ManagedMediaResponse(media_type="image", mime_type="image/png", data=encoded)
+
+
+async def _openai_tts(body: ManagedMediaRequest) -> ManagedMediaResponse:
+    from openai import AsyncOpenAI
+
+    settings = get_settings()
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured")
+    audio_format = (body.format or "mp3").lower()
+    if audio_format not in {"mp3", "wav", "opus", "aac", "flac", "pcm"}:
+        raise HTTPException(status_code=400, detail="Unsupported OpenAI TTS output format")
+    response = await AsyncOpenAI(api_key=settings.openai_api_key).audio.speech.create(
+        model=body.model_id,
+        voice=body.voice or "alloy",
+        input=body.prompt,
+        response_format=audio_format,
+        speed=body.speed or 1.0,
+    )
+    payload = bytes(response.content)
+    if not payload:
+        raise HTTPException(status_code=502, detail="OpenAI TTS returned no audio bytes")
+    mime_type = {"mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/opus", "aac": "audio/aac", "flac": "audio/flac", "pcm": "audio/pcm"}[audio_format]
+    return ManagedMediaResponse(media_type="audio", mime_type=mime_type, data=base64.b64encode(payload).decode("ascii"))
+
+
+async def _google_tts(body: ManagedMediaRequest) -> ManagedMediaResponse:
+    import httpx
+
+    import asyncio
+
+    settings = get_settings()
+    if not settings.gcp_project_id:
+        raise HTTPException(status_code=503, detail="GCP project is not configured")
+    token = await asyncio.to_thread(_adc_access_token)
+    audio_format = (body.format or "mp3").lower()
+    encoding = {"mp3": "MP3", "wav": "LINEAR16", "ogg": "OGG_OPUS"}.get(audio_format)
+    if not encoding:
+        raise HTTPException(status_code=400, detail="Google TTS supports mp3, wav, or ogg in this workspace")
+    payload = {
+        "input": {"text": body.prompt},
+        "voice": {"languageCode": "en-US", "name": body.voice or "Kore", "modelName": body.model_id},
+        "audioConfig": {"audioEncoding": encoding, "speakingRate": body.speed or 1.0},
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(
+            "https://texttospeech.googleapis.com/v1/text:synthesize",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "x-goog-user-project": settings.gcp_project_id,
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+    encoded = str(response.json().get("audioContent") or "")
+    if not encoded:
+        raise HTTPException(status_code=502, detail="Google TTS returned no audio bytes")
+    mime_type = {"mp3": "audio/mpeg", "wav": "audio/wav", "ogg": "audio/ogg"}[audio_format]
+    return ManagedMediaResponse(media_type="audio", mime_type=mime_type, data=encoded)
+
+
 @router.post("/chat/completions")
 async def chat_completions(body: dict[str, Any]):
     """OpenAI-compatible streaming facade over the deployment-owned text model."""
@@ -240,12 +364,18 @@ async def chat_completions(body: dict[str, Any]):
 @router.post("/media/generate", response_model=ManagedMediaResponse)
 async def generate_media(body: ManagedMediaRequest) -> ManagedMediaResponse:
     settings = get_settings()
+    try:
+        validate_media_model(body.media_type, body.provider_id, body.model_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     if body.media_type == "image":
+        if body.provider_id == "openai":
+            return await _openai_image(body)
         result = await VertexImageApiAdapter().generate(
             cfg=_vertex_config(location=settings.gcp_location),
             inp=ImageGenerationInput(
                 prompt=body.prompt,
-                model=settings.vertex_gemini_image_model,
+                model=body.model_id,
                 target_ratio=body.ratio,
                 size=body.size,
                 response_format="b64_json",
@@ -257,9 +387,10 @@ async def generate_media(body: ManagedMediaRequest) -> ManagedMediaResponse:
             raise HTTPException(status_code=502, detail="Vertex image generation returned no bytes")
         return ManagedMediaResponse(media_type="image", mime_type="image/png", data=image.b64_json)
 
-    video_model = settings.vertex_veo_model or settings.vertex_veo_fast_model
-    if not video_model:
-        raise HTTPException(status_code=503, detail="Vertex video model is not configured")
+    if body.media_type == "audio":
+        return await (_openai_tts(body) if body.provider_id == "openai" else _google_tts(body))
+
+    video_model = body.model_id
     result = await VertexVideoApiAdapter().generate(
         cfg=_vertex_config(location=settings.vertex_veo_location),
         inp=VideoGenerationInput(
@@ -269,6 +400,7 @@ async def generate_media(body: ManagedMediaRequest) -> ManagedMediaResponse:
             model=video_model,
             ratio=body.ratio or "16:9",
             seconds=body.duration,
+            provider_params={"resolution": body.resolution} if body.resolution else {},
         ),
         poll_interval_s=2.0,
         timeout_s=30 * 60.0,

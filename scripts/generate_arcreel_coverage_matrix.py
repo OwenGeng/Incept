@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate a complete, non-derivative ArcReel source-coverage ledger.
 
-The ledger intentionally stores paths and Incept-owned audit metadata only. It
+The ledger intentionally stores paths and LinglongLab-owned audit metadata only. It
 does not extract or reproduce source code from the reference repository.
 """
 
@@ -404,7 +404,7 @@ def main() -> int:
                 row["disposition"] = "excluded"
                 row["audit_status"] = "auto_classified"
                 row["responsibility"] = "Local reference tooling outside the independently rebuilt product runtime."
-                row["incept_requirement"] = "No Incept product feature; retain only as an explicit inventory exclusion."
+                row["incept_requirement"] = "No LinglongLab product feature; retain only as an explicit inventory exclusion."
                 row["notes"] = "Automatically classified by repository boundary; not used to infer product equivalence."
             elif row["audit_status"] == "pending":
                 row["audit_status"] = "auto_classified"

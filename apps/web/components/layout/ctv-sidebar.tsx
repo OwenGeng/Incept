@@ -9,7 +9,7 @@ import type { UserRole } from "@/types/next-auth";
 
 const ALL_MOLOCO: UserRole[] = [
   "admin", "moloco_nbs", "moloco_ctv", "moloco_growth",
-  "moloco_gtm", "moloco_supply", "user",
+  "moloco_gtm", "user",
 ];
 
 const ROLE_DISPLAY: Record<string, string> = {
@@ -18,7 +18,6 @@ const ROLE_DISPLAY: Record<string, string> = {
   moloco_ctv:    "Moloco CTV",
   moloco_growth: "Moloco Growth",
   moloco_gtm:    "Moloco GTM",
-  moloco_supply: "Moloco Supply",
   user:          "Moloco NBS",
 };
 

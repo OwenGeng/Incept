@@ -1,6 +1,6 @@
-# Incept Brand & UI Guidelines
+# LinglongLab Brand & UI Guidelines
 
-> Internal design system reference for Scout and Studio — the two products of the Incept platform.
+> Internal design system reference for Scout and Studio — the two products of the LinglongLab platform.
 > Living doc: update when tokens or components change.
 
 ---
@@ -56,7 +56,7 @@
 
 - Always use **semantic tokens** (`bg-accent`, `text-muted-foreground`, etc.) in component code.
 - Hardcode raw hex values **only** for fixed-palette items like tier badges and chart bars.
-- Keep all badge hex values in `components/supply-smb/supply-badges.tsx` — single source of truth.
+- Keep fixed badge hex values in their owning component — one source of truth per feature.
 
 ---
 
@@ -66,7 +66,7 @@
 
 | Role | Classes | Example |
 |---|---|---|
-| Display / Hero | `text-[42px] font-bold tracking-tight` | "Supply SMB Cross-Sell" |
+| Display / Hero | `text-[42px] font-bold tracking-tight` | "Creative Studio" |
 | Page Title | `text-[28px] font-semibold tracking-tight` | "Top Companies" |
 | Product Name (sidebar) | `text-2xl font-semibold tracking-tight` | "Scout" |
 | Card Title | `text-xl font-bold` | "Prospect Funnel" |
@@ -120,21 +120,6 @@ Shape: `rounded-full border px-2.5 py-0.5 text-[11px] font-semibold`
 - Shadow: `shadow-sm` (light elevation)
 - Padding: `p-6` standard, `p-7` for data cards
 
-### Filter Toolbar (`TableToolbar`)
-
-Compact single-row toolbar pattern used in all Scout data pages:
-
-```
-[Search input (350ms debounce)] [Filter button w/ badge count] [CSV] [Sheets]
-```
-
-- Search: inline, 350px wide, real-time `router.push`
-- Filter popover: 300px floating panel with per-field Clear + Reset/Apply buttons
-- Active filter count shown as badge on Filter button
-- CSV: browser-side Blob download with BOM for Excel
-- Sheets: POST to `/api/export/sheets`, opens returned URL
-- File: `components/supply-smb/table-toolbar.tsx`
-
 ### Data Table
 
 ```
@@ -157,41 +142,6 @@ Shared component: `components/ui/app-sidebar.tsx`
 Props: `productName`, `logo`, `storageKey`, `items`, `isActive`, `user`, `onSignOut`
 
 ---
-
-## 4. Priority Tiers & Data Chips
-
-### Prospect Tier Badges (P1–P4)
-
-| Tier | bg | text | bar | Description |
-|---|---|---|---|---|
-| P1 Prime | `#EFF6FF` | `#2563eb` | `#3a86ff` | Direct NBS outreach — highest media cost + scale |
-| P2 Strong | `#F3EEFB` | `#8338ec` | `#8338ec` | NBS + agency coordination queue |
-| P3 Visible | `#FFF0F6` | `#db0058` | `#ff006e` | Agency batch — Moloco-visible but lower spend |
-| P4 Cold | `#F1F5F9` | `#475569` | `#94a3b8` | Monitor — longer-horizon pipeline |
-
-Badge shape: `rounded-full border px-2.5 py-0.5 text-[11px] font-semibold`
-Source: `TierBadge` component + `tierBadgeCls()` in `components/supply-smb/supply-badges.tsx`
-
-### Monetization Chips
-
-| Label | bg | text | border | Usage |
-|---|---|---|---|---|
-| IAP | `#ECFDF5` | `#065f46` | `#A7F3D0` | In-app purchase — green (revenue signal) |
-| IAA | `#EFF6FF` | `#1d4ed8` | `#BFDBFE` | In-app ads — blue (exchange opportunity) |
-| Hybrid-IAP | `#F3EEFB` | `#8338ec` | `#DDD6F5` | Mixed: primary IAP — purple |
-| Hybrid-IAA | `#FFFBEB` | `#92400e` | `#FDE68A` | Mixed: primary IAA — amber |
-| Hybrid | `#F3EEFB` | `#8338ec` | `#DDD6F5` | Generic hybrid — purple |
-
-Source: `MonetizationChips` component in `components/supply-smb/supply-badges.tsx`
-
-### Supply Visible Badge
-
-```
-Visible:  bg-[#ECFDF5] text-[#065f46] border-[#A7F3D0]  rounded-full
-Hidden:   bg-muted text-muted-foreground border-border     rounded-full
-```
-
-Component: `<SupplyVisibleBadge visible={boolean} />` from `supply-badges.tsx`
 
 ---
 
@@ -249,17 +199,17 @@ export default function Page() {
 }
 ```
 
-Used in: `app/ai-insights/page.tsx`, `app/settings/users/page.tsx`, `app/supply-smb/**/top-lists/page.tsx`
+Used in data-heavy server-rendered pages.
 
 ---
 
 ## 6. Design Principles
 
 ### ◎ Token-first, hex-last
-Use semantic tokens everywhere. Only the badge/chart palette in `supply-badges.tsx` uses raw hex — making global theme changes a one-file edit.
+Use semantic tokens everywhere. Fixed badge/chart palettes may use raw hex in their owning component.
 
 ### ⊞ One shared component, two products
-`AppSidebar`, `AppHeader`, `TableToolbar`, and `supply-badges` are shared across Scout and Studio. Each product wraps shared components — never duplicates.
+`AppSidebar` and `AppHeader` are shared across product surfaces. Each product wraps shared components — never duplicates.
 
 ### ⬡ Readable contrast everywhere
 P4 uses `#475569` on `#F1F5F9` (not muted-foreground). Every badge meets AA contrast. Avoid light-on-light.
@@ -281,8 +231,6 @@ Color values that appear in more than one place must live in a component or util
 | `components/ui/app-header.tsx` | Shared page/section header |
 | `components/layout/sidebar.tsx` | Scout sidebar — nav items, active state, signOut |
 | `components/incept/Sidebar.tsx` | Studio sidebar — state-based nav, useSession |
-| `components/supply-smb/supply-badges.tsx` | All tier/mono/supply badge colors + components |
-| `components/supply-smb/table-toolbar.tsx` | Compact filter toolbar with CSV/Sheets export |
 | `lib/csv-export.ts` | `downloadCsv()` — browser-side Blob download |
 | `app/api/export/sheets/route.ts` | Google Sheets export API route |
 | `app/brand/page.tsx` | Live interactive brand page at `/brand` |

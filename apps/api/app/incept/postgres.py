@@ -100,7 +100,7 @@ _PRIMARY_KEYS = {
 
 
 def _translate_sql(sql: str) -> str:
-    """Translate the small SQLite SQL dialect surface used by Incept.
+    """Translate the small SQLite SQL dialect surface used by LinglongLab.
 
     This is deliberately limited to the existing persistence statements. New
     SQL should use PostgreSQL syntax directly instead of extending this shim.
@@ -127,7 +127,7 @@ def _translate_sql(sql: str) -> str:
         rewritten = re.sub(r"INSERT\s+OR\s+IGNORE", "INSERT", normalized, count=1, flags=re.IGNORECASE)
         return f"{rewritten} ON CONFLICT ({primary_key}) DO NOTHING".replace("?", "%s")
 
-    # Incept's current SQL has no PostgreSQL JSON operators, so qmark-style
+    # LinglongLab's current SQL has no PostgreSQL JSON operators, so qmark-style
     # placeholders can be converted without ambiguity during this transition.
     return normalized.replace("?", "%s")
 

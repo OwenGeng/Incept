@@ -68,7 +68,7 @@ def _require_allowed_domain(email: str) -> None:
     if not email.lower().endswith(f"@{settings.allowed_email_domain}"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Only @{settings.allowed_email_domain} accounts can access Incept",
+            detail=f"Only @{settings.allowed_email_domain} accounts can access LinglongLab",
         )
 
 

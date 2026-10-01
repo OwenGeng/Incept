@@ -1,16 +1,16 @@
 # Linglong Lab · Studio — Progress Tracker
 
-> Weekly-update file. Add new dated entries to the **Progress Log** (newest on top, don't delete history). Update the **Feature Status** table in place when something ships or changes state. Sources this file is grounded in: `apps/web/app/docs/studio/page.tsx` (in-app docs, code-derived), `docs/incept-current-state.md` (deeper implementation notes), `apps/api/app/incept/*`, `apps/web/components/incept/*`.
+> Weekly-update file. Add new dated entries to the **Progress Log** (newest on top, don't delete history). Update the **Feature Status** table in place when something ships or changes state. Sources this file is grounded in: `apps/web/app/docs/studio/page.tsx` (in-app docs, code-derived), `docs/linglonglab-current-state.md` (deeper implementation notes), `apps/api/app/incept/*`, `apps/web/components/incept/*`.
 
 ## What it is
 
-Studio is Incept's creative-generation workspace inside the Linglong platform: image generation, video generation, and the Kakao Bizboard compositor. Users upload source material, pick a flow, and get generated ad creative saved into a shared asset Library.
+Studio is LinglongLab's creative-generation workspace inside the Linglong platform: image generation, video generation, and the Kakao Bizboard compositor. Users upload source material, pick a flow, and get generated ad creative saved into a shared asset Library.
 
 ## Architecture
 
 - **Frontend:** Next.js (`apps/web`), main surfaces under `apps/web/app/incept/` and `apps/web/components/incept/` (`CreateImageView.tsx`, `Workspace.tsx`, `KakaoFlow.tsx`).
-- **Backend:** FastAPI (`apps/api`), Incept-specific logic under `apps/api/app/incept/` (`store.py`, `prompt_builder.py`, `composite.py`, `gif_generator.py`, `models.py`), exposed via `apps/api/app/routers/incept.py`.
-- **Shared types:** `packages/incept-shared/src/index.ts`.
+- **Backend:** FastAPI (`apps/api`), LinglongLab-specific logic under `apps/api/app/incept/` (`store.py`, `prompt_builder.py`, `composite.py`, `gif_generator.py`, `models.py`), exposed via `apps/api/app/routers/incept.py`.
+- **Shared types:** `packages/linglonglab-shared/src/index.ts`.
 - **Models in use:** Gemini 3.1 Flash / GPT Image 2 (image), Veo 3.1 Fast (video).
 - **Jobs:** generation runs as background jobs, polled by the frontend every 2.5s; each generation belongs to a resumable thread.
 
@@ -45,7 +45,7 @@ Studio is Incept's creative-generation workspace inside the Linglong platform: i
 ## Known Caveats / Open Questions
 
 - `728x90` yielding two outputs per request is non-standard — some downstream UX may still assume 1 requested size = 1 output.
-- Full end-to-end browser QA of all 3 Theme Create modes, Kakao clean+compose, and GIF output has not been recently re-verified (per `docs/incept-current-state.md`); Python syntax/targeted checks were done, not full TS compilation.
+- Full end-to-end browser QA of all 3 Theme Create modes, Kakao clean+compose, and GIF output has not been recently re-verified (per `docs/linglonglab-current-state.md`); Python syntax/targeted checks were done, not full TS compilation.
 - Whether Theme Create should keep the small helper fields for a future "Asset & Text Replace"-style mode, or stay compressed to 2 modes, is still an open decision.
 - Whether GIF should stay GIF-first or start exposing animated WebP/MP4 is still an open decision.
 
@@ -54,5 +54,5 @@ Studio is Incept's creative-generation workspace inside the Linglong platform: i
 _(newest first — add new entries above the previous one, don't rewrite history)_
 
 ### 2026-07-24 — baseline snapshot
-- No Studio code changes made in this session; this entry establishes a baseline snapshot of Studio's current state (Create Image w/ Resize/Theme Create/Kakao/Remediation, Create Video, Kakao Bizboard compositor, GIF generation, Asset Library) as documented in `apps/web/app/docs/studio/page.tsx` and `docs/incept-current-state.md`.
-- Note: `docs/incept-current-state.md` predates the Create Video and Remediation flows — those two are documented here for the first time based on current in-app docs and should be treated as the more current source going forward.
+- No Studio code changes made in this session; this entry establishes a baseline snapshot of Studio's current state (Create Image w/ Resize/Theme Create/Kakao/Remediation, Create Video, Kakao Bizboard compositor, GIF generation, Asset Library) as documented in `apps/web/app/docs/studio/page.tsx` and `docs/linglonglab-current-state.md`.
+- Note: `docs/linglonglab-current-state.md` predates the Create Video and Remediation flows — those two are documented here for the first time based on current in-app docs and should be treated as the more current source going forward.

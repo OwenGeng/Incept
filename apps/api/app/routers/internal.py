@@ -34,7 +34,7 @@ def check_access(email: str = Query(...)) -> dict:
     if record and record.get("role"):
         return record
 
-    # All @moloco.com accounts auto-granted admin access
+    # Moloco accounts are trusted internal users and default to admin.
     if email.endswith(f"@{MOLOCO_DOMAIN}"):
         return {"role": "admin", "allowed_projects": None}
 

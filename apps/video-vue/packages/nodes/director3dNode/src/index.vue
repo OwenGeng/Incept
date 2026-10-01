@@ -25,7 +25,7 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useVueFlow } from "@vue-flow/core";
 import { IconCube3dSphere } from "@tabler/icons-vue";
 import { ElLoading, ElMessage } from "element-plus";
-import { nodeSkeleton, useNode, useNodeFiles, useNodeReferences, z, type NodeHandle, type NodeData, type NodeAiModel } from "@linglonglab/video-nodes-scaffold/runtime";
+import { defaultNodeModel, nodeSkeleton, useNode, useNodeFiles, useNodeReferences, z, type NodeHandle, type NodeData, type NodeAiModel } from "@linglonglab/video-nodes-scaffold/runtime";
 import promptInput from "@linglonglab/video-nodes-scaffold/promptInput";
 import referenceItem from "@linglonglab/video-nodes-scaffold/referenceItem";
 import sceneEditor from "./sceneEditor.vue";
@@ -288,7 +288,7 @@ async function loadModels() {
     const available = await ai.getModels();
     if (disposed) return;
     models.value = available;
-    const first = models.value[0];
+    const first = defaultNodeModel(models.value);
     // ACT: 只给空配置选默认模型，保留暂时不可用的旧选择。
     if (!model.value) model.value = first ? JSON.stringify([first.providerId, first.modelId]) : "";
   } catch (error) {

@@ -83,7 +83,7 @@
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from "vue";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElMessage, ElLoading, ElImageViewer } from "element-plus";
 import { IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer } from "@tabler/icons-vue";
-import { groupNodeModels, nodeSkeleton, nodeTools, useNode, useNodeGeneration, useNodeReferences, z, type NodeMediaModel, type NodeHandle } from "@linglonglab/video-nodes-scaffold/runtime";
+import { defaultNodeModel, groupNodeModels, nodeSkeleton, nodeTools, useNode, useNodeGeneration, useNodeReferences, z, type NodeMediaModel, type NodeHandle } from "@linglonglab/video-nodes-scaffold/runtime";
 import promptInput from "@linglonglab/video-nodes-scaffold/promptInput";
 import referenceItem from "@linglonglab/video-nodes-scaffold/referenceItem";
 import generationSettings from "./components/generationSettings.vue";
@@ -189,7 +189,7 @@ function loadModels() {
     models.value = items.filter((item) => item.type === "image");
     // ACT: 只给空配置选默认模型，保留暂时不可用的旧选择及其参数。
     if (!data.value.model) {
-      const first = models.value[0];
+      const first = defaultNodeModel(models.value);
       data.value.model = first ? JSON.stringify([first.providerId, first.modelId]) : "";
     }
   }).finally(() => {

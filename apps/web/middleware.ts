@@ -8,13 +8,9 @@ import type { UserRole } from "@/types/next-auth";
 // "user" is the legacy alias for moloco_nbs.
 
 // All internal Moloco roles (every team except agency)
-const ALL_MOLOCO: UserRole[] = ["admin", "moloco_nbs", "moloco_ctv", "moloco_growth", "moloco_gtm", "moloco_supply", "user"];
-// Roles that can access Supply SMB (all Moloco teams + agency)
-const SUPPLY_ROLES: UserRole[] = [...ALL_MOLOCO, "agency"];
-
+const ALL_MOLOCO: UserRole[] = ["admin", "moloco_nbs", "moloco_ctv", "moloco_growth", "moloco_gtm", "user"];
 const ROUTE_ACCESS: Array<{ prefix: string; roles: UserRole[] }> = [
-  { prefix: "/supply-smb",  roles: SUPPLY_ROLES },
-  // CTV: all Moloco teams (NBS/Growth/GTM/Supply can also view CTV), but NOT agency
+  // CTV is available to internal Moloco roles, but not external agency roles.
   { prefix: "/ctv",         roles: ALL_MOLOCO },
   { prefix: "/ai-insights", roles: ALL_MOLOCO },
   { prefix: "/settings",    roles: ["admin"] },
@@ -29,13 +25,6 @@ function getAllowedRoles(pathname: string): UserRole[] | null {
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
-
-  // Video Studio is an internal, intentionally sign-in-free surface. Its
-  // browser requests still pass through the server-side API proxy and the
-  // deployment-owned internal API key; no cloud credential is exposed.
-  if (pathname === "/video" || pathname.startsWith("/video/")) {
-    return NextResponse.next();
-  }
 
   if (
     !isDeferredProductSurfaceEnabled("gamingPlayable") &&

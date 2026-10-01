@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * AppHeader — unified page/section header for all Incept products.
+ * AppHeader — unified page/section header for all LinglongLab products.
  *
  * variant="header"  — sticky bar at the top of a flex-col section (Studio style)
  *                     left: mobile-menu button + title
@@ -26,7 +26,7 @@ export interface AppHeaderProps {
   subtitle?: string;
 
   /**
-   * "header" — renders as a <header> bar with border-b (Incept sticky header)
+   * "header" — renders as a <header> bar with border-b (LinglongLab sticky header)
    * "page"   — renders as a <div> embedded in scrollable content (Scout Topbar)
    * @default "header"
    */
@@ -69,7 +69,7 @@ export function AppHeader({
   activeDatasetHref,
 }: AppHeaderProps) {
   if (variant === "header") {
-    // ── Incept-style: single horizontal row ───────────────────────────────────
+    // ── LinglongLab-style: single horizontal row ───────────────────────────────────
     return (
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-7 py-4 max-[860px]:px-4">
         <div className="flex items-center gap-3">

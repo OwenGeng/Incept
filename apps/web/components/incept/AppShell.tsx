@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import type { AppView } from "./Sidebar";
 import { Workspace } from "./Workspace";
-import type { AssetSummary, CreativeThreadSummary, InceptUser, JobSummary } from "@incept/shared";
+import type { AssetSummary, CreativeThreadSummary, LinglongLabUser, JobSummary } from "@linglonglab/shared";
 import { getCurrentUser, getJob, listAssets, listJobs, listThreads, type ContentScope } from "@/lib/incept-api";
 
-const ANONYMOUS_USER: InceptUser = { id: "anon", name: "User", email: "", role: "user", team: "nbs" };
+const ANONYMOUS_USER: LinglongLabUser = { id: "anon", name: "User", email: "", role: "user", team: "nbs" };
 const DEFAULT_WORKSPACE_ID = "wsp_q2";
 
 export function AppShell() {
@@ -18,7 +18,7 @@ export function AppShell() {
   const [liveThreads, setLiveThreads] = useState<CreativeThreadSummary[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(DEFAULT_WORKSPACE_ID);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [currentUser, setCurrentUser] = useState<InceptUser>(ANONYMOUS_USER);
+  const [currentUser, setCurrentUser] = useState<LinglongLabUser>(ANONYMOUS_USER);
   const [contentScope, setContentScope] = useState<ContentScope>("mine");
 
   // Track which job IDs need polling

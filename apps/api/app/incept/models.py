@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.incept.datetime_utils import utcnow_naive
+
 
 class Role(str, Enum):
     user = "user"
@@ -154,7 +156,7 @@ class VideoProductionScript(BaseModel):
     # tied together.  Locking rejects a manually edited reading copy until the
     # Screenwriter has explicitly restructured it into the durable plan.
     structured_raw_script_hash: str = ""
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionCreativeDirection(BaseModel):
@@ -189,7 +191,7 @@ class VideoProductionCreativeDirection(BaseModel):
     visual_inventory: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     output_language: str = ""
     analyzed_asset_ids: list[str] = Field(default_factory=list)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionDesignSheet(BaseModel):
@@ -255,7 +257,7 @@ class VideoProductionDesignBible(BaseModel):
     motion_blueprints: list[str] = Field(default_factory=list)
     transition_rules: list[str] = Field(default_factory=list)
     keyframe_prompts: list[str] = Field(default_factory=list)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionShot(BaseModel):
@@ -370,7 +372,7 @@ class VideoProductionAudioPlan(BaseModel):
     cue_sheet: list[VideoProductionAudioCue] = Field(default_factory=list)
     music_asset_ids: list[str] = Field(default_factory=list)
     job_id: str | None = None
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionEditOverlay(BaseModel):
@@ -419,7 +421,7 @@ class VideoProductionConversationMessage(BaseModel):
     # Attachments belong to the turn as well as the project gallery, so the
     # Copilot can distinguish "these images" from all historical assets.
     asset_ids: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionConfirmation(BaseModel):
@@ -431,7 +433,7 @@ class VideoProductionConfirmation(BaseModel):
     proposed_action: str = ""
     stage: str = "direction"
     choices: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionCanvasState(BaseModel):
@@ -451,7 +453,7 @@ class VideoProductionRevision(BaseModel):
     revision: int
     label: str = ""
     summary: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionScriptRevision(BaseModel):
@@ -466,7 +468,7 @@ class VideoProductionScriptRevision(BaseModel):
     scene_count: int = Field(ge=0)
     beat_count: int = Field(ge=0)
     script: VideoProductionScript | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionEvent(BaseModel):
@@ -486,7 +488,7 @@ class VideoProductionEvent(BaseModel):
     state_revision: int = Field(ge=1)
     actor_user_id: str = "system"
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoProductionModelSelection(BaseModel):
@@ -573,8 +575,8 @@ class VideoProduction(BaseModel):
     conversation: list[VideoProductionConversationMessage] = Field(default_factory=list)
     final_asset_id: str | None = None
     render_job_id: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
     @field_validator("stage", mode="before")
     @classmethod
@@ -754,7 +756,7 @@ class ThreadMessage(BaseModel):
     text: str
     asset_ids: list[str] = Field(default_factory=list)
     job_id: str | None = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utcnow_naive)
 
 
 class CreativeThread(BaseModel):
@@ -767,8 +769,8 @@ class CreativeThread(BaseModel):
     cover_asset_id: str | None = None
     latest_asset_id: str | None = None
     latest_job_id: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
     reference_asset_ids: list[str] = Field(default_factory=list)
     messages: list[ThreadMessage] = Field(default_factory=list)
     preview_url: str | None = None
@@ -929,7 +931,7 @@ class VideoGenerationRequest(BaseModel):
 class VideoPlanConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
     text: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class VideoGenerationPlan(BaseModel):
@@ -953,8 +955,8 @@ class VideoGenerationPlan(BaseModel):
     interaction_concept: dict[str, Any] = Field(default_factory=dict)
     execution_intent: Literal["chat", "generate"] = "chat"
     conversation: list[VideoPlanConversationMessage] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
     @field_validator("conversation", mode="before")
     @classmethod
@@ -1040,8 +1042,8 @@ class ThemeCreateStyleReport(BaseModel):
     tags: list[str] = Field(default_factory=list)
     taxonomy: dict[str, list[str]] = Field(default_factory=dict)
     created_by: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class ThemeCreateStyleReportCreateRequest(BaseModel):
@@ -1093,8 +1095,8 @@ class ThemeCreatePreset(BaseModel):
     source_job_id: str | None = None
     source_asset_id: str | None = None
     created_by: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
     usage_count: int = 0
     is_official: bool = False
 
@@ -1131,7 +1133,7 @@ class SessionMessage(BaseModel):
     text: str
     asset_ids: list[str] = Field(default_factory=list)
     job_id: str | None = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utcnow_naive)
 
 
 class Session(BaseModel):
@@ -1139,8 +1141,8 @@ class Session(BaseModel):
     workspace_id: str
     reference_asset_ids: list[str] = Field(default_factory=list)
     messages: list[SessionMessage] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 # ── Inpainting / image-edit ───────────────────────────────────────────────────
@@ -1171,9 +1173,11 @@ class KakaoBizboardComposeRequest(BaseModel):
     workspace_id: str
     cleaned_asset_id: str
     composed_asset_id: str
+    template: str = "APP_DOWNLOAD_ONE_LINE_COPY_THUMBNAIL"
     main_copy: str
-    app_download_copy: str
-    dsp_name: str
+    sub_copy: str = ""
+    app_download_copy: str = ""
+    additional_info: str = ""
     gacha: bool = False
     created_by: str = "usr_jane"
     thread_id: str | None = None
@@ -1191,8 +1195,8 @@ class GenerationJob(BaseModel):
     output_asset_ids: list[str] = Field(default_factory=list)
     thread_id: str | None = None
     source_asset_id: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 # ── Outpainting ───────────────────────────────────────────────────────────────
@@ -1272,7 +1276,7 @@ class UsageEvent(BaseModel):
     actual_cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 # ── GamingPlayable templates ─────────────────────────────────────────────────

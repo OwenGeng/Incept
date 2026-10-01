@@ -1,5 +1,5 @@
 # =============================================================================
-# NBSpark Unified API (InterSight + Incept) -- Cloud Run Dockerfile
+# LinglongLab unified API -- Cloud Run Dockerfile
 # Build context: repo root  (docker build -f Dockerfile.nbs-api .)
 # =============================================================================
 FROM python:3.12-slim
@@ -11,7 +11,7 @@ WORKDIR /app
 #   libgl1       — OpenCV dependency used by rembg
 #   libglib2.0-0 — GLib dependency used by rembg / OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc libgl1 libglib2.0-0 \
+        ffmpeg gcc libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -22,19 +22,22 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Copy application source
 COPY apps/api/app/ ./app/
 
-# SQL query files loaded at runtime by supply_smb_live.py
-COPY sql/ ./sql/
+# Fonts used by both Kakao composition paths. The unified image does not copy
+# apps/web, so these must be included explicitly.
+COPY apps/web/public/Pretendard/ ./fonts/kakao/
+COPY apps/web/public/SpoqaHanSansNeo_all/SpoqaHanSansNeo_TTF_original/ ./fonts/kakao/
 
 # Persistent data dir for SQLite (apps/api/data/incept.db)
 RUN mkdir -p /app/data
 
-# Static file dirs for Incept (generated images & uploads)
+# Static file dirs for LinglongLab (generated images & uploads)
 RUN mkdir -p /app/static/generated /app/static/uploads
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
-# Tells _project_root() in supply_smb_live.py where to look
 ENV INCEPT_PROJECT_ROOT=/app
+ENV KAKAO_FONT_DIR=/app/fonts/kakao
+ENV PLAYABLE_CAPTURE_FFMPEG_PATH=/usr/bin/ffmpeg
 
 EXPOSE 8080
 

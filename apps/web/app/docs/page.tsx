@@ -19,7 +19,7 @@ export default function DocsIndexPage() {
       <div className="mb-10">
         <h1 className="text-4xl font-semibold tracking-tight text-foreground">Overview</h1>
         <p className="mt-4 text-sm leading-7 text-muted-foreground max-w-2xl">
-          Incept is Moloco&apos;s creative-generation and supply-intelligence platform. Documentation is organized
+          LinglongLab is Moloco&apos;s creative-generation workspace. Documentation is organized
           by module — pick one below to get started.
         </p>
       </div>

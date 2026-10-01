@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { isAuthDevSkipped } from "@/lib/auth-mode";
+import { cloudRunAuthorizationHeaders } from "@/lib/cloud-run-auth";
 
 const API_BASE = (
   process.env.API_BASE_URL ?? "http://localhost:8000"
@@ -21,9 +22,14 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   let upstream: Response;
   try {
+    const authorizationHeaders = await cloudRunAuthorizationHeaders(API_BASE);
     upstream = await fetch(`${API_BASE}/api/v1/feedback`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-internal-api-key": INTERNAL_KEY },
+      headers: {
+        "content-type": "application/json",
+        "x-internal-api-key": INTERNAL_KEY,
+        ...authorizationHeaders,
+      },
       body: JSON.stringify({ content: content.trim(), user_email: session?.user?.email ?? "" }),
     });
   } catch (err) {

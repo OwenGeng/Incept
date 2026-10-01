@@ -58,23 +58,26 @@ const CREATE_VIDEO = {
 
 const KAKAO = {
   purpose:
-    "Produces a Kakao Bizboard ad banner (fixed 1029×258px) from a source image, with app icon and Korean copy overlays composited server-side.",
+    "Produces a Kakao Bizboard ad banner (960×300px, Kakao specification effective Oct 2026) from a source image, with app icon and Korean copy composited server-side.",
   steps: [
     { step: "1. Upload & Clean", detail: "Upload up to 10 images. Each is auto-cleaned (background/element removal) with per-image pending/done/error status." },
     { step: "2. Confirm", detail: "Review cleaned results; toggle accept/reject per image. Only accepted images proceed." },
-    { step: "3. Builder", detail: "For each accepted image: set app icon (optional), Subtitle, Main Copy, and the gacha-disclosure checkbox. Live preview updates on \"Apply Changes.\"" },
+    { step: "3. Builder", detail: "Choose a template (App Promo main copy, App Promo main + sub copy, Sales/Traffic main + sub copy, or App Promo main copy with an Object image). For Object, remove the background of every source in one click or upload a transparent PNG per source. Then set the app icon, copy, optional additional info and the gacha checkbox. Preview updates on \"Apply Changes.\"" },
     { step: "4. Create", detail: "Batch-composes final PNGs and creates a Kakao job per asset; results land in the asset library." },
   ],
   validation: [
-    "Subtitle: must contain an app-related term (\"앱\"/\"app\"/\"App\"/\"APP\"), no emoji, and must fit the text-safe width boundary",
-    "Main Copy: text width must fall within a fixed min/max boundary at 48pt",
-    "App icon is optional, rendered at 38×38px",
-    "Max 10 source images per batch",
+    "Main / sub copy: max 526px; main or sub copy must be at least 240px; main and sub copy cannot be identical",
+    "App download copy (App Promo templates): must contain \"앱\"/\"app\"/\"App\"/\"APP\" and fit before the arrow; app icon is required",
+    "No emoji or disallowed special characters (^^, :D, ☞, ☑, ♨ …)",
+    "Gacha titles automatically add \"확률형 아이템 포함\" to the additional info line",
+    "Output must be 300KB or smaller; max 10 source images per batch",
   ],
   composition: [
-    "Canvas 1029×258px, thumbnail masked to template shape",
-    "Font: Spoqa Han Sans Neo (falls back to system font if load fails)",
-    "Fixed layout positions for icon, subtitle, main copy, and disclosure text",
+    "Transparent 960×300px canvas; Kakao draws the box and adds the AD mark, so no \"Moloco 광고입니다\" disclaimer",
+    "Thumbnail 320×222px at the right with 18px rounded corners",
+    "Object: transparent-background image, trimmed and scaled to 314px wide at x=603; centred vertically, or centre-cropped when taller than 300px; at least 219px wide after trimming",
+    "Font: Pretendard — main copy Bold 46pt #191919, sub copy 38pt #696969, app copy 29pt #696969, additional info 22pt #949494",
+    "Layout positions match the Moloco Ads Portal Bizboard generator (kakao_bizboard_v2); without additional info the copy is vertically re-centred per Kakao's official PSD",
   ],
 };
 

@@ -1,4 +1,4 @@
-"""Typed, cross-stage contracts for Incept's AI-video production pipeline."""
+"""Typed, cross-stage contracts for LinglongLab's AI-video production pipeline."""
 from __future__ import annotations
 
 from typing import Literal

@@ -8,7 +8,7 @@
     </div>
     <el-divider />
     <el-descriptions :column="1" border>
-      <el-descriptions-item label="项目与设置">Incept FastAPI</el-descriptions-item>
+      <el-descriptions-item label="项目与设置">LinglongLab FastAPI</el-descriptions-item>
       <el-descriptions-item label="AI 模型">Google Vertex AI（部署托管）</el-descriptions-item>
       <el-descriptions-item label="身份方式">内部无登录视频入口</el-descriptions-item>
       <el-descriptions-item label="前端">Vue 3 + Element Plus + Vue Flow</el-descriptions-item>

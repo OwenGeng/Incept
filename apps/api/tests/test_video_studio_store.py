@@ -124,7 +124,12 @@ def test_media_job_writes_generated_asset_without_browser_round_trip(tmp_path, m
         job = media_jobs.create_media_job(
             "creator@example.com",
             project.id,
-            MediaJobCreate(media_type="image", prompt="A clean product frame"),
+            MediaJobCreate(
+                media_type="image",
+                provider_id="google-vertex-ai",
+                model_id="gemini-3.1-flash-image",
+                prompt="A clean product frame",
+            ),
         )
         for _ in range(100):
             await asyncio.sleep(0.01)

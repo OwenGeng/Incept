@@ -365,7 +365,7 @@ export function KakaoFlow({
                   Next Step
                 </p>
                 <p className="mt-1 text-sm text-foreground">
-                  Continue to the Kakao Bizboard builder to enter subtitle, main copy, and preview the final `1029x258` asset.
+                  Continue to the Kakao Bizboard builder to choose a template, enter copy, and preview the final `960x300` asset.
                 </p>
               </div>
             )}

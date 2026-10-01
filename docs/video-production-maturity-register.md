@@ -5,7 +5,7 @@
 
 ## Source of truth
 
-- Desired workflow and data contract: [Incept Video Production Workspace](incept-video-production-workspace.md).
+- Desired workflow and data contract: [LinglongLab Video Production Workspace](linglonglab-video-production-workspace.md).
 - Current navigation and product boundary: [Video Production product design](video-production-product-design.md).
 - Active project route: `apps/web/app/video-production/projects/[productionId]/page.tsx`.
 

@@ -2,7 +2,7 @@
 
 This module is intentionally small: it contains only the image/video contracts
 and Google Cloud adapters used by ``/api/video-runtime``. Model IDs, locations,
-project IDs and the asset bucket always come from the existing Incept settings.
+project IDs and the asset bucket always come from the existing LinglongLab settings.
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def _parse_owned_gcs_uri(uri: str) -> tuple[str, str]:
     if parsed.scheme != "gs" or not bucket or not object_key:
         raise RuntimeError("Vertex returned an invalid GCS output URI")
     if bucket != _asset_bucket():
-        raise RuntimeError("Vertex returned output outside the configured Incept asset bucket")
+        raise RuntimeError("Vertex returned output outside the configured LinglongLab asset bucket")
     return bucket, object_key
 
 
@@ -157,7 +157,7 @@ class VertexImageApiAdapter:
         if not cfg.project_id or not cfg.location:
             raise RuntimeError("Vertex image generation requires configured project and location values")
         if not inp.model:
-            raise RuntimeError("Vertex image generation requires the configured Incept image model")
+            raise RuntimeError("Vertex image generation requires the configured LinglongLab image model")
         try:
             from google import genai
             from google.genai import types as genai_types
@@ -203,7 +203,7 @@ class VertexVideoApiAdapter:
         if not cfg.project_id or not cfg.location:
             raise RuntimeError("Vertex video generation requires configured project and location values")
         if not inp.model:
-            raise RuntimeError("Vertex video generation requires the configured Incept video model")
+            raise RuntimeError("Vertex video generation requires the configured LinglongLab video model")
         if inp.model == "gemini-omni-1.1-flash-preview":
             return await VertexOmniVideoApiAdapter().generate(cfg=cfg, inp=inp, timeout_s=timeout_s)
         try:

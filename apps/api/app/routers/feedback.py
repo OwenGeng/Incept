@@ -21,7 +21,7 @@ def _get_bq() -> BigQueryService:
     global _bq
     if _bq is None:
         _bq = BigQueryService()
-        _bq.ensure_intersight_tables()
+        _bq.ensure_app_tables()
     return _bq
 
 

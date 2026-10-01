@@ -1,5 +1,6 @@
-import http from "node:http";
 import { type NextRequest, NextResponse } from "next/server";
+import { isAuthDevSkipped } from "@/lib/auth-mode";
+import { getCloudRunIdentityToken } from "@/lib/cloud-run-auth";
 
 const API_BASE = (
   process.env.INCEPT_API_BASE_URL ??
@@ -20,38 +21,26 @@ const ALLOWED_ROOTS = new Set([
 
 type Context = { params: Promise<{ path: string[] }> };
 
-async function cloudRunIdentityToken(audience: string): Promise<string | null> {
-  if (!process.env.K_SERVICE) return null;
-  return new Promise((resolve) => {
-    const url =
-      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity" +
-      `?audience=${encodeURIComponent(audience)}`;
-    const request = http.get(url, { headers: { "Metadata-Flavor": "Google" } }, (response) => {
-      if (response.statusCode !== 200) return resolve(null);
-      let body = "";
-      response.on("data", (chunk: unknown) => { body += String(chunk); });
-      response.on("end", () => resolve(body.trim() || null));
-    });
-    request.on("error", () => resolve(null));
-    request.setTimeout(2000, () => {
-      request.destroy();
-      resolve(null);
-    });
-  });
-}
-
 async function proxy(request: NextRequest, context: Context): Promise<Response> {
   const { path } = await context.params;
   if (!path.length || !ALLOWED_ROOTS.has(path[0]!)) {
     return NextResponse.json({ code: 404, message: "Video API route not found" }, { status: 404 });
   }
 
+  const devAuthSkipped = isAuthDevSkipped();
+  const session = devAuthSkipped
+    ? null
+    : await import("@/auth").then((module) => module.auth());
+  if (!devAuthSkipped && !session?.user?.email) {
+    return NextResponse.json({ code: 401, message: "Unauthorized" }, { status: 401 });
+  }
+
   const target = `${API_BASE}/video-legacy/api/${path.map(encodeURIComponent).join("/")}${request.nextUrl.search}`;
-  const identityToken = await cloudRunIdentityToken(API_BASE);
+  const identityToken = await getCloudRunIdentityToken(API_BASE);
   const headers = new Headers({
     "x-internal-api-key": INTERNAL_KEY,
-    "x-user-email": "local@linglonglab.internal",
-    "x-user-role": "user",
+    "x-user-email": session?.user?.email ?? "local@linglonglab.internal",
+    "x-user-role": session?.user?.role ?? "user",
   });
   const contentType = request.headers.get("content-type");
   const range = request.headers.get("range");

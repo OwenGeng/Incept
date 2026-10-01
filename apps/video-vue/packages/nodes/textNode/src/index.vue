@@ -44,7 +44,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { ElButton, ElCard, ElInput, ElSelect, ElDialog, ElOption, ElOptionGroup, ElMessage } from "element-plus";
 import { IconEdit, IconFileText, IconSparkles, IconArrowUp } from "@tabler/icons-vue";
-import { groupNodeModels, nodeSkeleton, nodeTools, useNode, useNodeReferences, z, type NodeAiModel, type NodeHandle } from "@linglonglab/video-nodes-scaffold/runtime";
+import { defaultNodeModel, groupNodeModels, nodeSkeleton, nodeTools, useNode, useNodeReferences, z, type NodeAiModel, type NodeHandle } from "@linglonglab/video-nodes-scaffold/runtime";
 import referenceItem from "@linglonglab/video-nodes-scaffold/referenceItem";
 import promptInput from "@linglonglab/video-nodes-scaffold/promptInput";
 
@@ -149,7 +149,7 @@ async function loadModels() {
   try {
     models.value = await ai.getModels();
     if (!model.value) {
-      const first = models.value[0];
+      const first = defaultNodeModel(models.value);
       model.value = first ? JSON.stringify([first.providerId, first.modelId]) : "";
     }
   } catch (error) {

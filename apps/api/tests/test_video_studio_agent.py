@@ -12,7 +12,7 @@ def test_agent_updates_canvas_and_persists_conversation(tmp_path, monkeypatch):
     monkeypatch.setattr(
         agent,
         "_call_model",
-        lambda _prompt, _parts: json.dumps(
+        lambda _prompt, _parts, **_kwargs: json.dumps(
             {
                 "message": "已创建脚本和图片生成节点。",
                 "operations": [
@@ -46,8 +46,39 @@ def test_agent_updates_canvas_and_persists_conversation(tmp_path, monkeypatch):
     assert message == "已创建脚本和图片生成节点。"
     assert [node.type for node in canvas.nodes] == ["text", "imageGeneration"]
     assert len(conversation.messages) == 2
+    assert conversation.provider_id == "google-vertex-ai"
+    assert conversation.model_id == "gemini-3.8-flash"
     assert store.get_project("agent@example.com", project.id).node_count == 2
     assert store.list_conversations("agent@example.com", project.id)[0].id == conversation.id
+
+
+def test_agent_uses_and_persists_the_selected_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
+    project = store.create_project("agent@example.com", ProjectCreate(name="Model selection"))
+    models = [
+        {"providerId": "google-vertex-ai", "modelId": "gemini-3.8-flash", "isDefault": True},
+        {"providerId": "openai", "modelId": "gpt-6-sol", "isDefault": False},
+    ]
+    captured: dict[str, str] = {}
+
+    def fake_model(_prompt, _parts, **kwargs):
+        captured.update(kwargs)
+        return '{"message":"selected model used","operations":[]}'
+
+    monkeypatch.setattr(agent, "configured_text_models", lambda: models)
+    monkeypatch.setattr(agent, "_call_model", fake_model)
+    conversation, _, _ = agent.run_agent(
+        email="agent@example.com",
+        project_id=project.id,
+        prompt="Use my selected model",
+        conversation_id=None,
+        provider_id="openai",
+        model_id="gpt-6-sol",
+    )
+
+    assert captured == {"provider_id": "openai", "model_id": "gpt-6-sol"}
+    assert conversation.provider_id == "openai"
+    assert conversation.model_id == "gpt-6-sol"
 
 
 def test_agent_rejects_unknown_node_types(tmp_path, monkeypatch):
@@ -56,7 +87,7 @@ def test_agent_rejects_unknown_node_types(tmp_path, monkeypatch):
     monkeypatch.setattr(
         agent,
         "_call_model",
-        lambda _prompt, _parts: '{"message":"ignored","operations":[{"action":"add_node","type":"shell"}]}',
+        lambda _prompt, _parts, **_kwargs: '{"message":"ignored","operations":[{"action":"add_node","type":"shell"}]}',
     )
 
     _, canvas, _ = agent.run_agent(
@@ -76,7 +107,7 @@ def test_agent_attaches_project_asset_bytes_to_multimodal_request(tmp_path, monk
     asset.write_text("The product must stay cobalt blue.", encoding="utf-8")
     captured = {}
 
-    def fake_model(prompt, parts):
+    def fake_model(prompt, parts, **_kwargs):
         captured["prompt"] = prompt
         captured["parts"] = parts
         return '{"message":"understood","operations":[]}'
@@ -130,7 +161,7 @@ def test_agent_runs_research_tool_then_uses_result_in_final_response(tmp_path, m
         ]
     )
 
-    def fake_model(prompt, _parts):
+    def fake_model(prompt, _parts, **_kwargs):
         prompts.append(prompt)
         return next(responses)
 
@@ -208,7 +239,7 @@ def test_research_skill_blocks_generation_before_production_gate(tmp_path, monke
     monkeypatch.setattr(
         agent,
         "_call_model",
-        lambda _prompt, _parts: json.dumps(
+        lambda _prompt, _parts, **_kwargs: json.dumps(
             {
                 "message": "I prepared a generation request.",
                 "tool_calls": [],

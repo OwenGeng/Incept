@@ -20,6 +20,24 @@ from app.routers import (
 )
 
 
+_RETIRED_RELEASE_ROUTE_PREFIXES = (
+    "/video-productions",
+    "/video-production-capabilities",
+)
+
+
+def _remove_retired_release_routes(app: FastAPI) -> None:
+    """Keep legacy implementation code importable without publishing it."""
+    app.router.routes = [
+        route
+        for route in app.router.routes
+        if not any(
+            str(getattr(route, "path", "")).startswith(prefix)
+            for prefix in _RETIRED_RELEASE_ROUTE_PREFIXES
+        )
+    ]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
@@ -27,9 +45,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="InterSight API",
+        title="LinglongLab API",
         version="0.1.0",
-        description="Supply SMB and future CTV backend for the InterSight operating system.",
+        description="Image and video production backend for LinglongLab.",
         lifespan=lifespan,
     )
 
@@ -50,12 +68,13 @@ def create_app() -> FastAPI:
     app.include_router(video_studio.router)
     app.include_router(video_runtime.router)
     app.include_router(video_legacy.router)
+    _remove_retired_release_routes(app)
 
     video_mcp_app = configured_video_studio_mcp_app()
     if video_mcp_app is not None:
         app.mount("/video-studio-mcp", video_mcp_app)
 
-    # Serve Incept static files (generated images & uploads)
+    # Serve LinglongLab static files (generated images & uploads)
     _static_root = Path(__file__).parent.parent / "static"
     _static_root.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_static_root)), name="static")

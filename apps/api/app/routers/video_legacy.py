@@ -15,14 +15,20 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.core.config import settings as platform_settings
 from app.incept.config import get_settings as get_deployment_settings
-from app.incept.video_production_capabilities import configured_video_production_capabilities
-from app.routers.video_runtime import ManagedMediaRequest, _chat_stream, generate_media
+from app.routers.video_runtime import (
+    ManagedMediaRequest,
+    _chat_stream,
+    configured_media_models,
+    configured_text_models,
+    generate_media,
+    validate_media_model,
+)
 from app.services.auth import require_internal_key
 from app.video_studio import store
 from app.video_studio.agent import run_agent
-from app.video_studio.models import AgentConversation, CanvasDocument, Position, ProjectCreate, ProjectUpdate, VideoEdge, VideoNode
+from app.video_studio.media_jobs import cancel_media_job, create_media_job, ensure_media_job_running
+from app.video_studio.models import AgentConversation, CanvasDocument, MediaJobCreate, Position, ProjectCreate, ProjectUpdate, VideoEdge, VideoNode
 
 
 router = APIRouter(
@@ -33,7 +39,10 @@ router = APIRouter(
 
 
 def current_user(x_user_email: str = Header(default="")) -> str:
-    return x_user_email.strip().lower() or "local@linglonglab.internal"
+    email = x_user_email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail={"message": "Authenticated LinglongLab user required"})
+    return email
 
 
 def success(data: Any = None, message: str = "") -> dict[str, Any]:
@@ -479,19 +488,24 @@ def remove_asset_library(body: WorkspaceMutation, email: str = Depends(current_u
 
 
 def _default_legacy_settings() -> dict[str, Any]:
-    model = platform_settings.gemini_model
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for model in configured_text_models():
+        key = (model["providerId"], model["providerLabel"], model["protocol"])
+        grouped.setdefault(key, []).append({
+            "id": model["modelId"],
+            "label": model["label"],
+            "contextWindow": model.get("contextWindow", 262144),
+            "maxOutputTokens": model.get("maxOutputTokens", 32768),
+            "isDefault": model.get("isDefault", False),
+        })
     return {
         "ui": {"theme": "light", "primaryColor": "#6750A4", "fontScale": 100, "radius": 8, "startupAnimation": True, "language": "en"},
         "general": {"canvasCompositingEnabled": False, "canvasEdgeAnimationEnabled": True},
         "privacy": {"dataCollectionEnabled": False},
-        "customProviders": [{
-            "id": "linglonglab-vertex",
-            "label": "LinglongLab Vertex AI",
-            "apiUrl": "managed://vertex-ai",
-            "apiKey": "",
-            "protocol": "openai-completions",
-            "models": [{"id": model, "label": model, "contextWindow": 262144, "maxOutputTokens": 32768}],
-        }],
+        "customProviders": [
+            {"id": provider_id, "label": label, "apiUrl": "managed://linglonglab", "apiKey": "", "protocol": protocol, "models": models}
+            for (provider_id, label, protocol), models in grouped.items()
+        ],
         "mediaProviderConfigs": {},
         "stores": {},
     }
@@ -588,50 +602,57 @@ def tool_renderers() -> dict[str, Any]:
 
 @router.get("/ai/models")
 def language_models() -> dict[str, Any]:
-    model = platform_settings.gemini_model
-    return success([{
-        "providerId": "linglonglab-vertex",
-        "providerLabel": "LinglongLab Vertex AI",
-        "modelId": model,
-        "label": model,
-        "protocol": "openai-completions",
-        "contextWindow": 262144,
-        "maxOutputTokens": 32768,
-    }])
+    return success([
+        {**model, "contextWindow": 262144, "maxOutputTokens": 32768}
+        for model in configured_text_models()
+    ])
 
 
 @router.get("/ai/media/models")
 def media_models() -> dict[str, Any]:
-    capabilities = configured_video_production_capabilities()
-    deployment = get_deployment_settings()
-    image_model = deployment.vertex_gemini_image_model
-    video_model = deployment.vertex_veo_model or deployment.vertex_veo_fast_model
     values: list[dict[str, Any]] = []
-    for option in capabilities.image:
-        if option.model != image_model:
-            continue
-        values.append({
-            "providerId": option.provider,
-            "providerLabel": "LinglongLab Vertex AI",
-            "modelId": option.model,
-            "label": option.label,
-            "type": "image",
-            "imageSizes": ["1K", "2K"],
-            "imageRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
-        })
-    for option in capabilities.video:
-        if option.model != video_model:
-            continue
-        values.append({
-            "providerId": option.provider,
-            "providerLabel": "LinglongLab Vertex AI",
-            "modelId": option.model,
-            "label": option.label,
-            "type": "video",
-            "mode": ["text", "singleImage", "endFrameOptional"],
-            "durationResolutionMap": [{"duration": [5, 8], "resolution": ["720p", "1080p"]}],
-            "audio": "optional",
-        })
+    for option in configured_media_models():
+        provider = option["providerId"]
+        model = option["modelId"]
+        media_type = option["type"]
+        provider_label = {
+            "google-vertex-ai": "Google Vertex AI",
+            "google-cloud-tts": "Google Cloud Text-to-Speech",
+            "openai": "OpenAI",
+        }[provider]
+        if media_type == "image":
+            values.append({
+                "providerId": provider,
+                "providerLabel": provider_label,
+                "modelId": model,
+                "label": model,
+                "type": "image",
+                "isDefault": option.get("isDefault", False),
+                "imageSizes": ["1024x1024", "1536x1024", "1024x1536"] if provider == "openai" else ["1K", "2K"],
+                "imageRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+            })
+        elif media_type == "video":
+            values.append({
+                "providerId": provider,
+                "providerLabel": provider_label,
+                "modelId": model,
+                "label": model,
+                "type": "video",
+                "isDefault": option.get("isDefault", False),
+                "mode": ["text"],
+                "durationResolutionMap": [{"duration": list(range(3, 11)), "resolution": ["360p", "720p", "1080p", "4k"]}],
+                "audio": False,
+            })
+        else:
+            values.append({
+                "providerId": provider,
+                "providerLabel": provider_label,
+                "modelId": model,
+                "label": model,
+                "type": "audio",
+                "isDefault": option.get("isDefault", False),
+                "voices": ([{"title": "Alloy", "voice": "alloy"}] if provider == "openai" else [{"title": "Kore", "voice": "Kore"}, {"title": "Puck", "voice": "Puck"}]),
+            })
     return success(values)
 
 
@@ -684,48 +705,185 @@ def _openai_context(context: dict[str, Any]) -> tuple[list[dict[str, Any]], list
     return messages, tools
 
 
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    return "".join(
+        str(item.get("text") or item.get("content") or "")
+        for item in content if isinstance(content, list) and isinstance(item, dict) and item.get("type") in {"text", "input_text"}
+    )
+
+
+def _responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        if role in {"user", "assistant"}:
+            text = _content_text(message.get("content"))
+            if text:
+                values.append({"role": role, "content": text})
+            for call in message.get("tool_calls") or []:
+                function = call.get("function") if isinstance(call, dict) else None
+                if isinstance(function, dict):
+                    values.append({
+                        "type": "function_call",
+                        "call_id": str(call.get("id") or f"call_{uuid.uuid4().hex}"),
+                        "name": str(function.get("name") or "tool"),
+                        "arguments": str(function.get("arguments") or "{}"),
+                    })
+        elif role == "tool":
+            values.append({
+                "type": "function_call_output",
+                "call_id": str(message.get("tool_call_id") or ""),
+                "output": _content_text(message.get("content")),
+            })
+    return values
+
+
+def _anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "tool":
+            values.append({"role": "user", "content": [{
+                "type": "tool_result",
+                "tool_use_id": str(message.get("tool_call_id") or ""),
+                "content": _content_text(message.get("content")),
+            }]})
+            continue
+        if role not in {"user", "assistant"}:
+            continue
+        content: list[dict[str, Any]] = []
+        text = _content_text(message.get("content"))
+        if text:
+            content.append({"type": "text", "text": text})
+        for call in message.get("tool_calls") or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            if not isinstance(function, dict):
+                continue
+            try:
+                arguments = json.loads(function.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+            content.append({
+                "type": "tool_use",
+                "id": str(call.get("id") or f"call_{uuid.uuid4().hex}"),
+                "name": str(function.get("name") or "tool"),
+                "input": arguments,
+            })
+        if content:
+            values.append({"role": role, "content": content})
+    return values
+
+
 @router.post("/ai/generate")
 def generate_text(body: dict[str, Any]) -> StreamingResponse:
-    model = platform_settings.gemini_model
-    if body.get("providerId") != "linglonglab-vertex" or body.get("modelId") != model:
+    provider = str(body.get("providerId") or "")
+    model = str(body.get("modelId") or "")
+    configured = next(
+        (item for item in configured_text_models() if item["providerId"] == provider and item["modelId"] == model),
+        None,
+    )
+    if not configured:
         raise HTTPException(status_code=400, detail={"message": "所选文本模型未由当前部署启用"})
     context = body.get("context") if isinstance(body.get("context"), dict) else {}
     messages, tools = _openai_context(context)
 
     def events():
         text_parts: list[str] = []
-        tool_calls: dict[int, dict[str, Any]] = {}
+        completed_calls: list[dict[str, Any]] = []
         stop_reason = "stop"
         try:
-            for raw in _chat_stream({"messages": messages, "tools": tools, "stream": True}):
-                if raw.strip() == "data: [DONE]":
-                    break
-                payload = raw.removeprefix("data: ").strip()
-                if not payload:
-                    continue
-                chunk = json.loads(payload)
-                choice = (chunk.get("choices") or [{}])[0]
-                delta = choice.get("delta") or {}
-                if isinstance(delta.get("content"), str) and delta["content"]:
-                    text_parts.append(delta["content"])
-                    yield f"data: {json.dumps({'type': 'text', 'delta': delta['content']}, ensure_ascii=False)}\n\n"
-                for call in delta.get("tool_calls") or []:
-                    index = int(call.get("index") or 0)
-                    function = call.get("function") or {}
-                    tool_calls[index] = {
+            if provider == "google-vertex-ai":
+                tool_calls: dict[int, dict[str, Any]] = {}
+                for raw in _chat_stream({"messages": messages, "tools": tools, "stream": True}, model_id=model):
+                    if raw.strip() == "data: [DONE]":
+                        break
+                    payload = raw.removeprefix("data: ").strip()
+                    if not payload:
+                        continue
+                    chunk = json.loads(payload)
+                    choice = (chunk.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    if isinstance(delta.get("content"), str) and delta["content"]:
+                        text_parts.append(delta["content"])
+                        yield f"data: {json.dumps({'type': 'text', 'delta': delta['content']}, ensure_ascii=False)}\n\n"
+                    for call in delta.get("tool_calls") or []:
+                        index = int(call.get("index") or 0)
+                        function = call.get("function") or {}
+                        tool_calls[index] = {
+                            "type": "toolCall",
+                            "id": str(call.get("id") or f"call_{uuid.uuid4().hex}"),
+                            "name": str(function.get("name") or "tool"),
+                            "arguments": json.loads(function.get("arguments") or "{}"),
+                        }
+                    if choice.get("finish_reason") == "tool_calls":
+                        stop_reason = "toolUse"
+                completed_calls = [tool_calls[index] for index in sorted(tool_calls)]
+            elif provider == "openai":
+                deployment = get_deployment_settings()
+                if not deployment.openai_api_key:
+                    raise RuntimeError("OPENAI_API_KEY is not configured")
+                from openai import OpenAI
+
+                system = "\n\n".join(str(item["content"]) for item in messages if item.get("role") == "system")
+                response = OpenAI(api_key=deployment.openai_api_key).responses.create(
+                    model=model,
+                    input=_responses_input(messages),
+                    instructions=system or None,
+                    tools=[{
+                        "type": "function",
+                        "name": tool["function"]["name"],
+                        "description": tool["function"].get("description", ""),
+                        "parameters": tool["function"].get("parameters", {"type": "object", "properties": {}}),
+                    } for tool in tools] or None,
+                    store=False,
+                )
+                if response.output_text:
+                    text_parts.append(response.output_text)
+                    yield f"data: {json.dumps({'type': 'text', 'delta': response.output_text}, ensure_ascii=False)}\n\n"
+                for item in response.output:
+                    if getattr(item, "type", "") != "function_call":
+                        continue
+                    completed_calls.append({
                         "type": "toolCall",
-                        "id": str(call.get("id") or f"call_{uuid.uuid4().hex}"),
-                        "name": str(function.get("name") or "tool"),
-                        "arguments": json.loads(function.get("arguments") or "{}"),
-                    }
-                if choice.get("finish_reason") == "tool_calls":
-                    stop_reason = "toolUse"
-            content = ([{"type": "text", "text": "".join(text_parts)}] if text_parts else []) + [tool_calls[index] for index in sorted(tool_calls)]
+                        "id": str(getattr(item, "call_id", "") or f"call_{uuid.uuid4().hex}"),
+                        "name": str(getattr(item, "name", "") or "tool"),
+                        "arguments": json.loads(getattr(item, "arguments", "{}") or "{}"),
+                    })
+                stop_reason = "toolUse" if completed_calls else "stop"
+            elif provider == "anthropic":
+                deployment = get_deployment_settings()
+                if not deployment.anthropic_api_key:
+                    raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+                from anthropic import Anthropic
+
+                system = "\n\n".join(str(item["content"]) for item in messages if item.get("role") == "system")
+                response = Anthropic(api_key=deployment.anthropic_api_key).messages.create(
+                    model=model,
+                    max_tokens=32768,
+                    system=system,
+                    messages=_anthropic_messages(messages),
+                    tools=[{
+                        "name": tool["function"]["name"],
+                        "description": tool["function"].get("description", ""),
+                        "input_schema": tool["function"].get("parameters", {"type": "object", "properties": {}}),
+                    } for tool in tools],
+                )
+                for block in response.content:
+                    if getattr(block, "type", "") == "text":
+                        value = str(getattr(block, "text", ""))
+                        text_parts.append(value)
+                        yield f"data: {json.dumps({'type': 'text', 'delta': value}, ensure_ascii=False)}\n\n"
+                    elif getattr(block, "type", "") == "tool_use":
+                        completed_calls.append({"type": "toolCall", "id": block.id, "name": block.name, "arguments": block.input})
+                stop_reason = "toolUse" if completed_calls else "stop"
+            content = ([{"type": "text", "text": "".join(text_parts)}] if text_parts else []) + completed_calls
             message = {
                 "role": "assistant",
                 "content": content,
-                "api": "openai-completions",
-                "provider": "linglonglab-vertex",
+                "api": configured["protocol"],
+                "provider": provider,
                 "model": model,
                 "usage": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0}},
                 "stopReason": stop_reason,
@@ -742,11 +900,11 @@ def generate_text(body: dict[str, Any]) -> StreamingResponse:
 async def generate_managed_media(body: dict[str, Any], email: str = Depends(current_user)) -> dict[str, Any]:
     project_id = _project_id(str(body.get("directory") or ""))
     media_type = str(body.get("mediaType") or "")
-    if media_type not in {"image", "video"}:
+    if media_type not in {"image", "audio"}:
         raise HTTPException(status_code=400, detail={"message": "不支持的媒体类型"})
-    deployment = get_deployment_settings()
-    expected_model = deployment.vertex_gemini_image_model if media_type == "image" else (deployment.vertex_veo_model or deployment.vertex_veo_fast_model)
-    if body.get("providerId") != "google-vertex-ai" or body.get("modelId") != expected_model:
+    try:
+        validate_media_model(media_type, str(body.get("providerId") or ""), str(body.get("modelId") or ""))
+    except ValueError as error:
         raise HTTPException(status_code=400, detail={"message": "所选媒体模型未由当前部署启用"})
 
     root = store.assets_root(email, project_id)
@@ -764,19 +922,76 @@ async def generate_managed_media(body: dict[str, Any], email: str = Depends(curr
     last_path = body.get("lastFrame")
     result = await generate_media(ManagedMediaRequest(
         media_type=media_type,
+        provider_id=str(body.get("providerId") or ""),
+        model_id=str(body.get("modelId") or ""),
         prompt=str(body.get("prompt") or ""),
         ratio=body.get("ratio"),
         size=body.get("size"),
         duration=body.get("duration"),
         first_frame=frame(first_path),
         last_frame=frame(last_path),
+        voice=body.get("voice"),
+        speed=body.get("speed"),
+        format=body.get("format"),
     ))
-    extension = {"image/png": ".png", "image/jpeg": ".jpg", "video/mp4": ".mp4"}.get(result.mime_type) or mimetypes.guess_extension(result.mime_type) or ".bin"
+    extension = {"image/png": ".png", "image/jpeg": ".jpg", "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/ogg": ".ogg"}.get(result.mime_type) or mimetypes.guess_extension(result.mime_type) or ".bin"
     output_directory = str(body.get("outputDirectory") or "generated")
     relative = f"{output_directory.strip('/')}/{media_type}-{uuid.uuid4().hex}{extension}"
     target = store.safe_asset_path(root, relative)
     _write_bytes(target, base64.b64decode(result.data, validate=True))
     return success([{"path": relative, "mimeType": result.mime_type, "mediaType": media_type}])
+
+
+def _media_job_request(body: dict[str, Any]) -> tuple[str, MediaJobCreate]:
+    project_id = _project_id(str(body.get("directory") or ""))
+    first = body.get("firstFrame")
+    last = body.get("lastFrame")
+    images = body.get("images") if isinstance(body.get("images"), list) else []
+    first_path = first.get("path") if isinstance(first, dict) else None
+    if not first_path and images and isinstance(images[0], dict):
+        first_path = images[0].get("path")
+    last_path = last.get("path") if isinstance(last, dict) else None
+    return project_id, MediaJobCreate(
+        idempotency_key=str(body.get("idempotencyKey") or "") or None,
+        media_type="video",
+        provider_id=str(body.get("providerId") or ""),
+        model_id=str(body.get("modelId") or ""),
+        prompt=str(body.get("prompt") or ""),
+        ratio=body.get("ratio"),
+        duration=body.get("duration"),
+        first_frame_path=first_path,
+        last_frame_path=last_path,
+        output_directory=str(body.get("outputDirectory") or "generated"),
+        resolution=body.get("resolution"),
+        generate_audio=body.get("generateAudio"),
+    )
+
+
+@router.post("/ai/media/jobs", status_code=202)
+async def submit_legacy_media_job(body: dict[str, Any], email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        project_id, request = _media_job_request(body)
+        return success(create_media_job(email, project_id, request).model_dump(mode="json"))
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
+
+
+@router.get("/ai/media/jobs/{job_id}")
+async def legacy_media_job(job_id: str, directory: str = Query(), email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        job = ensure_media_job_running(email, _project_id(directory), job_id)
+        return success(job.model_dump(mode="json"))
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
+
+
+@router.delete("/ai/media/jobs/{job_id}")
+async def cancel_legacy_media_job(job_id: str, directory: str = Query(), email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        job = cancel_media_job(email, _project_id(directory), job_id)
+        return success(job.model_dump(mode="json"))
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
 
 
 def _conversation_file(value: AgentConversation) -> str:
@@ -791,6 +1006,12 @@ def _conversation_id(session_file: str | None) -> str | None:
 
 
 def _legacy_conversation(value: AgentConversation) -> dict[str, Any]:
+    models = configured_text_models()
+    default_model = next((model for model in models if model.get("isDefault")), models[0])
+    selected_model = next(
+        (model for model in models if model["providerId"] == value.provider_id and model["modelId"] == value.model_id),
+        default_model,
+    )
     return {
         "file": _conversation_file(value),
         "name": value.name,
@@ -804,8 +1025,8 @@ def _legacy_conversation(value: AgentConversation) -> dict[str, Any]:
             }
             for message in value.messages
         ],
-        "providerId": "linglonglab-vertex",
-        "modelId": platform_settings.gemini_model,
+        "providerId": selected_model["providerId"],
+        "modelId": selected_model["modelId"],
         "subAgents": [],
         "running": False,
     }
@@ -921,6 +1142,8 @@ async def legacy_agent(body: dict[str, Any], email: str = Depends(current_user))
                 prompt=prompt,
                 conversation_id=conversation_id,
                 asset_paths=asset_paths,
+                provider_id=str(body.get("providerId") or "") or None,
+                model_id=str(body.get("modelId") or "") or None,
             )
             yield json.dumps({"type": "session", "file": _conversation_file(conversation)}, ensure_ascii=False) + "\n"
             yield json.dumps({"type": "canvasCall", "callId": uuid.uuid4().hex, "name": "replaceCanvas", "args": _vue_canvas_snapshot(canvas)}, ensure_ascii=False) + "\n"

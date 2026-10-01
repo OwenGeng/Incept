@@ -1,14 +1,14 @@
 # Video Production Agent Prompt Specification
 
 This document is the source brief for generating replacement system prompts.
-It describes the actual Incept workflow and the JSON fields that the existing
+It describes the actual LinglongLab workflow and the JSON fields that the existing
 application consumes. It is not itself a system prompt.
 
 ## Paste this request into Gemini
 
 ```text
 You are a principal prompt architect. Create six separate, concise Markdown
-system prompts for the Incept AI Video Production workflow described below.
+system prompts for the LinglongLab AI Video Production workflow described below.
 
 Return six files in this exact order:
 1. reference_video_analyst.md
@@ -32,7 +32,7 @@ Use the full specification below as ground truth:
 
 ## Product scope
 
-Incept creates short, original, AI-generated commercial videos. A customer can
+LinglongLab creates short, original, AI-generated commercial videos. A customer can
 upload a reference video plus their own brand images, video, product material,
 logo, and brief. The reference is used to learn transferable advertising
 principles; it is never a source to copy.

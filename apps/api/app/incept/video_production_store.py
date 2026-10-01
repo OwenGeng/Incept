@@ -30,6 +30,7 @@ from google.auth import default as google_auth_default
 from google.auth.transport.requests import Request as GoogleAuthRequest
 
 from app.incept.config import get_settings
+from app.incept.datetime_utils import utcnow_naive
 from app.incept.video_production_capabilities import (
     default_video_production_selection,
     validate_video_production_selection,
@@ -207,7 +208,7 @@ def recover_interrupted_video_production_jobs() -> list[str]:
             "Interrupted by an API restart. Review the retained project inputs "
             "and retry this exact operation from the workspace. No output was selected or replaced."
         )
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         recovered.append(job.job_id)
     if recovered:
@@ -568,7 +569,7 @@ def _save(
             summary=_revision_summary(production),
         ),
     ]
-    production.updated_at = datetime.utcnow()
+    production.updated_at = utcnow_naive()
     VIDEO_PRODUCTIONS[production.production_id] = production
     upsert_video_production(production)
     upsert_video_production_event(
@@ -640,7 +641,7 @@ def restore_video_production_script_revision(
     restored = checkpoint.script.model_copy(deep=True)
     restored.revision = max(production.script.revision, checkpoint.revision) + 1
     restored.status = "draft"
-    restored.updated_at = datetime.utcnow()
+    restored.updated_at = utcnow_naive()
     production.script = restored
     production.stage = VideoProductionStage.script
     _refresh_director_prompts_from_script(production)
@@ -1178,7 +1179,7 @@ def run_production_copilot(
             f"Copilot messages are limited to {settings.studio_copilot_max_message_chars:,} characters. "
             "Please shorten the request or attach the asset instead."
         )
-    now = datetime.utcnow()
+    now = utcnow_naive()
     minute_ago = now.timestamp() - 60
     recent_requests = [
         event for event in USAGE_EVENTS.values()
@@ -1245,7 +1246,7 @@ def archive_video_production(production_id: str, user: User) -> VideoProduction:
     _assert_owner(production, user)
     if production.archived_at is not None:
         return production
-    production.archived_at = datetime.utcnow()
+    production.archived_at = utcnow_naive()
     production.archived_by = user.id
     production.conversation.append(VideoProductionConversationMessage(
         role="assistant",
@@ -2155,7 +2156,7 @@ def _visual_inventory(payload: dict[str, object]) -> dict[str, list[dict[str, ob
                 "asset_name": name or f"{_VISUAL_INVENTORY_CATEGORIES[category].title()} asset {index}",
                 "visual_brief": brief or "Lock this reusable visual state for the original production.",
                 "reference_frame_index": frame_index,
-                # Incept generates AI video. A casting or on-set description is
+                # LinglongLab generates AI video. A casting or on-set description is
                 # an input to an AI consistency sheet, never a reason to omit
                 # the person or prop from the reusable visual-asset contract.
                 "handoff_scope": "design_asset",
@@ -2451,7 +2452,7 @@ def _reference_frame_plan_from_analysis(
 
 
 def _normalize_ai_handoff_scopes(production: VideoProduction) -> None:
-    """Migrate legacy filmed-production handoffs into Incept's AI workflow."""
+    """Migrate legacy filmed-production handoffs into LinglongLab's AI workflow."""
     for item in production.creative_direction.design_handoff:
         if isinstance(item, dict):
             item["handoff_scope"] = "design_asset"
@@ -3235,7 +3236,7 @@ def lock_script_and_create_storyboard(production_id: str, user: User) -> VideoPr
         raise ValueError("Script cannot be locked: " + " ".join(errors))
     production.script.status = "locked"
     production.script.revision += 1
-    production.script.updated_at = datetime.utcnow()
+    production.script.updated_at = utcnow_naive()
     _record_script_revision(
         production,
         reason="Locked production baseline",
@@ -3260,7 +3261,7 @@ def approve_storyboard(production_id: str, user: User) -> VideoProduction:
     incomplete = [shot.order for shot in production.shots if not shot.title.strip() or not shot.visual.strip() or not shot.action.strip()]
     if incomplete:
         raise ValueError("Complete title, visual and action for every storyboard frame before approval: " + ", ".join(f"S{order:02d}" for order in incomplete))
-    production.storyboard_approved_at = datetime.utcnow()
+    production.storyboard_approved_at = utcnow_naive()
     # `_save` increments the revision, so record the revision that will persist.
     production.storyboard_approved_revision = production.state_revision + 1
     production.stage = VideoProductionStage.generate
@@ -3566,7 +3567,7 @@ def extract_video_production_bridge_frame(
             raise RuntimeError(f"Could not extract the bridge frame. {detail}")
         image_content = output_path.read_bytes()
 
-    created_at = datetime.utcnow()
+    created_at = utcnow_naive()
     asset_id = f"asset_bridge_{uuid4().hex[:12]}"
     preview_url = _save_image_file(asset_id, base64.b64encode(image_content).decode("ascii"))
     width, height = _guess_video_dimensions(production.aspect_ratio, production.resolution)
@@ -3684,7 +3685,7 @@ def reorder_video_production_shots(
 
 
 def _production_job(*, production: VideoProduction, shot: VideoProductionShot, kind: str) -> GenerationJob:
-    now = datetime.utcnow()
+    now = utcnow_naive()
     job = GenerationJob(
         job_id=f"job_{uuid4().hex[:12]}",
         workspace_id=production.workspace_id,
@@ -4271,7 +4272,7 @@ def create_design_sheet_job(production_id: str, sheet_id: str, user: User) -> Ge
         ),
         user,
     )
-    now = datetime.utcnow()
+    now = utcnow_naive()
     job = GenerationJob(
         job_id=f"job_{uuid4().hex[:12]}",
         workspace_id=production.workspace_id,
@@ -4315,7 +4316,7 @@ def cancel_design_sheet_generation(
         job.status = JobStatus.failed
         job.progress = 0
         job.message = "Cancelled by user"
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
     sheet.status = "failed"
     sheet.failure_reason = "Generation stopped by user. You can adjust the sources or prompt and generate again."
@@ -4483,12 +4484,12 @@ async def run_design_sheet_background(production_id: str, sheet_id: str, job_id:
             user,
             image_model,
             "",
-            datetime.utcnow(),
+            utcnow_naive(),
         )
         job.status = JobStatus.completed
         job.progress = 100
         job.message = f"{'Custom image' if _is_user_authored_sheet(sheet) else 'Controlled 2x2 consistency sheet'} ready: {sheet.title}."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         sheet.panel_asset_ids = [asset.id for asset in panel_assets]
         sheet.grid_asset_id = grid_asset.id
@@ -4514,7 +4515,7 @@ async def run_design_sheet_background(production_id: str, sheet_id: str, job_id:
         job.status = JobStatus.failed
         job.progress = 0
         job.message = f"Design asset sheet generation failed: {exc}"[:500]
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         sheet.status = "failed"
         sheet.failure_reason = job.message
@@ -4538,7 +4539,7 @@ async def select_design_sheet_panel(
         candidate_asset = _asset_by_id(sheet.panel_asset_ids[panel])
         if not candidate_asset:
             raise KeyError("The generated design candidate could not be found.")
-        now = datetime.utcnow()
+        now = utcnow_naive()
         job = GenerationJob(
             job_id=f"job_{uuid4().hex[:12]}",
             workspace_id=production.workspace_id,
@@ -4605,7 +4606,7 @@ async def select_design_sheet_panel(
         candidate_bytes = BytesIO()
         candidate.save(candidate_bytes, format="PNG")
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
     job = GenerationJob(
         job_id=f"job_{uuid4().hex[:12]}",
         workspace_id=production.workspace_id,
@@ -4778,12 +4779,12 @@ async def run_keyframe_background(production_id: str, shot_id: str, job_id: str,
             user,
             image_model,
             "",
-            datetime.utcnow(),
+            utcnow_naive(),
         )
         job.status = JobStatus.completed
         job.progress = 100
         job.message = f"Keyframe ready for S{shot.order:02d}. Review and approve it before video generation."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         shot.keyframe_asset_id = assets[0].id
         shot.status = "draft"
@@ -4797,7 +4798,7 @@ async def run_keyframe_background(production_id: str, shot_id: str, job_id: str,
         job.status = JobStatus.failed
         job.progress = 0
         job.message = f"Keyframe generation failed: {exc}"[:500]
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         shot.status = "failed"
         _save(production)
@@ -4851,7 +4852,7 @@ def _audio_plan_from_payload(production: VideoProduction, payload: dict[str, obj
         instrumental=bool(payload.get("instrumental", True)),
         cue_sheet=cue_sheet,
         music_asset_ids=production.audio_plan.music_asset_ids,
-        updated_at=datetime.utcnow(),
+        updated_at=utcnow_naive(),
     )
 
 
@@ -4930,7 +4931,7 @@ def create_production_audio_job(production_id: str, user: User) -> GenerationJob
         raise KeyError("Video production not found")
     if not production.audio_plan.music_prompt.strip():
         raise ValueError("Create an Audio Producer blueprint before generating music.")
-    now = datetime.utcnow()
+    now = utcnow_naive()
     job = GenerationJob(
         job_id=f"job_{uuid4().hex[:12]}",
         workspace_id=production.workspace_id,
@@ -4994,12 +4995,12 @@ async def run_production_audio_background(production_id: str, job_id: str, user:
         upsert_asset(asset)
         production.audio_plan.status = "ready"
         production.audio_plan.music_asset_ids.append(asset.id)
-        production.audio_plan.updated_at = datetime.utcnow()
+        production.audio_plan.updated_at = utcnow_naive()
         job.output_asset_ids = [asset.id]
         job.status = JobStatus.completed
         job.progress = 100
         job.message = "Soundtrack ready. Preview it in Edit, then render the final cut with music."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         production.conversation.append(VideoProductionConversationMessage(
             role="assistant",
@@ -5011,10 +5012,10 @@ async def run_production_audio_background(production_id: str, job_id: str, user:
         job.status = JobStatus.failed
         job.progress = 0
         job.message = f"Soundtrack generation failed: {exc}"[:500]
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         production.audio_plan.status = "failed"
-        production.audio_plan.updated_at = datetime.utcnow()
+        production.audio_plan.updated_at = utcnow_naive()
         _save(production)
 
 
@@ -5270,7 +5271,7 @@ def create_production_render_job(production_id: str, user: User, *, include_audi
         raise ValueError(f"Generate and select a video take for every included storyboard frame before assembling the edit. Missing: {labels}.")
     if include_audio and not production.audio_plan.music_asset_ids:
         raise ValueError("Generate a soundtrack with the Audio Producer before rendering a cut with music.")
-    now = datetime.utcnow()
+    now = utcnow_naive()
     job = GenerationJob(
         job_id=f"job_{uuid4().hex[:12]}",
         workspace_id=production.workspace_id,
@@ -5406,7 +5407,7 @@ def run_edit_reviewer(production_id: str, request: VideoProductionAgentRequest, 
         }
         production.edit_plan.review_status = "ready"
         production.edit_plan.review_summary = str(payload.get("summary") or "Take review is ready.")
-        production.edit_plan.reviewed_at = datetime.utcnow()
+        production.edit_plan.reviewed_at = utcnow_naive()
         production.conversation.append(VideoProductionConversationMessage(role="assistant", text=production.edit_plan.review_summary))
         return _save(production)
     except Exception:
@@ -5548,7 +5549,7 @@ async def run_production_render_background(production_id: str, job_id: str, user
         job.status = JobStatus.completed
         job.progress = 100
         job.message = "Selected-take edit ready. Review the complete video before delivery QA."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         production.final_asset_id = asset.id
         production.stage = VideoProductionStage.deliver
@@ -5562,7 +5563,7 @@ async def run_production_render_background(production_id: str, job_id: str, user
         job.status = JobStatus.failed
         job.progress = 0
         job.message = f"First-cut assembly failed: {exc}"[:500]
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -5664,7 +5665,7 @@ async def run_shot_video_background(production_id: str, shot_id: str, job_id: st
         job.status = JobStatus.completed
         job.progress = 100
         job.message = f"{len(job.output_asset_ids)} Veo take{'s' if len(job.output_asset_ids) != 1 else ''} ready for S{shot.order:02d}."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         shot.video_asset_ids = list(dict.fromkeys([*shot.video_asset_ids, *job.output_asset_ids]))
         # A generation job creates candidates, not an editorial decision. Keep
@@ -5686,7 +5687,7 @@ async def run_shot_video_background(production_id: str, shot_id: str, job_id: st
         job.status = JobStatus.failed
         job.progress = 0
         job.message = f"Shot generation failed: {exc}"[:500]
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         shot.status = "failed"
         _save(production)

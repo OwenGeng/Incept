@@ -1,4 +1,4 @@
-"""Authenticated MCP tools for Incept Video Production.
+"""Authenticated MCP tools for LinglongLab Video Production.
 
 This module exposes Project State through a separate automation transport.  It
 does not duplicate the web API's business rules: every tool delegates to the
@@ -90,7 +90,7 @@ _PAID_CONFIRMATION_MESSAGE = (
 )
 
 
-class InceptMCPTokenVerifier(TokenVerifier):
+class LinglongLabMCPTokenVerifier(TokenVerifier):
     """Verify only deployment-provisioned opaque automation credentials."""
 
     def __init__(self, principals: Mapping[str, Mapping[str, str]]) -> None:
@@ -127,7 +127,7 @@ def _automation_user(settings: Settings) -> User:
     claims = token.claims
     email = str(claims.get("email", "")).strip().lower()
     if not email or not email.endswith(f"@{settings.allowed_email_domain}"):
-        raise ToolError("The MCP principal is not in the allowed Incept email domain.")
+        raise ToolError("The MCP principal is not in the allowed LinglongLab email domain.")
     try:
         role = Role(str(claims.get("role", Role.user.value)))
     except ValueError as exc:
@@ -205,13 +205,13 @@ def build_video_production_mcp_server(
         raise ValueError("INCEPT_VIDEO_MCP_PUBLIC_URL must be an absolute HTTPS URL.")
 
     server = FastMCP(
-        "Incept Video Production",
+        "LinglongLab Video Production",
         instructions=(
-            "Use these tools only for authorized Incept Video Production work. "
+            "Use these tools only for authorized LinglongLab Video Production work. "
             "Read Project State before changing it. Preserve state_revision on updates. "
             "Tools that can incur model or generation cost require confirm_spend=true."
         ),
-        token_verifier=InceptMCPTokenVerifier(active_principals),
+        token_verifier=LinglongLabMCPTokenVerifier(active_principals),
         auth=AuthSettings(
             issuer_url=resource_url,
             resource_server_url=resource_url,

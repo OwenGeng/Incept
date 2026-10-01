@@ -155,6 +155,8 @@ class AgentMessage(BaseModel):
 class AgentConversation(BaseModel):
     id: str
     name: str
+    provider_id: str | None = Field(default=None, max_length=96)
+    model_id: str | None = Field(default=None, max_length=256)
     messages: list[AgentMessage] = Field(default_factory=list, max_length=1_000)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -207,13 +209,21 @@ class ExportJob(BaseModel):
 
 class MediaJobCreate(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
-    media_type: Literal["image", "video"]
+    media_type: Literal["image", "video", "audio"]
+    provider_id: str = Field(min_length=1, max_length=96)
+    model_id: str = Field(min_length=1, max_length=256)
     prompt: str = Field(min_length=1, max_length=12_000)
     ratio: str | None = Field(default=None, max_length=20)
     size: str | None = Field(default=None, max_length=40)
     duration: int | None = Field(default=None, ge=1, le=60)
     first_frame_path: str | None = Field(default=None, max_length=1_024)
     last_frame_path: str | None = Field(default=None, max_length=1_024)
+    output_directory: str = Field(default="generated", min_length=1, max_length=1_024)
+    resolution: str | None = Field(default=None, max_length=40)
+    generate_audio: bool | None = None
+    voice: str | None = Field(default=None, max_length=256)
+    speed: float | None = Field(default=None, gt=0, le=4)
+    format: str | None = Field(default=None, max_length=40)
 
 
 class MediaJob(BaseModel):

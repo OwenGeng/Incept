@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 /* ── Unified design token system ──────────────────────────────────────────────
-   Single source of truth for both InterSight and Incept.
-   Based on Incept's design language (clean white workspace, #fafbfc sidebar).
+   Single source of truth for the LinglongLab web application.
+   Based on LinglongLab's design language (clean white workspace, #fafbfc sidebar).
    ─────────────────────────────────────────────────────────────────────────── */
 :root {
   color-scheme: light;
@@ -28,7 +28,7 @@
 
   /* Brand */
   --primary:                 #171a20;
-  --accent:                  #356fec;   /* Incept blue */
+  --accent:                  #356fec;   /* LinglongLab blue */
   --soft-accent:             #f2f6ff;
   --ai-accent:               #2bacff;
   --ai-accent-soft:          #eef9ff;
@@ -89,4 +89,3 @@ textarea {
 table {
   border-collapse: collapse;
 }
-

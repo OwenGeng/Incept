@@ -1,4 +1,4 @@
-import { EventSourceParserStream } from "eventsource-parser/stream";
+import { createParser, type EventSourceMessage } from "eventsource-parser";
 import { chainMethods, queryMethods, runMethods } from "./browserTypes";
 import type { BrowserFfmpegCommand, BrowserFfmpegFactory, BrowserFfmpegOptions, BrowserFfmpegRequest, FfmpegCall, FfmpegRemoteEvent } from "./browserTypes";
 
@@ -83,25 +83,37 @@ export async function createBrowserFfmpeg(directory: string, signal?: AbortSigna
         ready = true;
         if (requestSignal.aborted) cancel();
         if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) throw new Error("FFmpeg 响应不是事件流");
-        const reader = response.body.pipeThrough(new TextDecoderStream()).pipeThrough(new EventSourceParserStream()).getReader();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const events: EventSourceMessage[] = [];
+        const parser = createParser({
+          maxBufferSize: 2 * 1024 * 1024,
+          onEvent: event => events.push(event),
+          onError: error => { throw error; },
+        });
         try {
           while (true) {
             const { value, done } = await reader.read();
             requestSignal.throwIfAborted();
-            if (done) break;
-            if (!value.data) continue;
-            const { event, args } = JSON.parse(value.data) as FfmpegRemoteEvent;
-            if (["error", "end", "result"].includes(event)) {
-              finished = true;
-              active = undefined;
+            if (value) parser.feed(decoder.decode(value, { stream: !done }));
+            if (done) parser.feed(decoder.decode());
+            while (events.length) {
+              const message = events.shift()!;
+              if (!message.data) continue;
+              const { event, args } = JSON.parse(message.data) as FfmpegRemoteEvent;
+              if (["error", "end", "result"].includes(event)) {
+                finished = true;
+                active = undefined;
+              }
+              if (event === "error") {
+                const error = remoteError(args[0]);
+                if (callback) callback(error);
+                else emit("error", [error, ...args.slice(1)]);
+              } else if (event === "result") callback?.(null, args[0]);
+              else emit(event, args);
+              if (finished) break;
             }
-            if (event === "error") {
-              const error = remoteError(args[0]);
-              if (callback) callback(error);
-              else emit("error", [error, ...args.slice(1)]);
-            } else if (event === "result") callback?.(null, args[0]);
-            else emit(event, args);
-            if (finished) break;
+            if (done || finished) break;
           }
           if (!finished) throw new Error("FFmpeg 连接已断开，未收到完成结果");
         } finally {

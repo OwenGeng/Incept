@@ -75,7 +75,7 @@ def list_users() -> UserListPayload:
             detail=(
                 f"User list unavailable — BigQuery query failed: {exc}. "
                 "Check BQ_WRITE_PROJECT / GCP_PROJECT_DEPLOY env vars and that "
-                "the `Incept.users` table exists with columns (email, role, allowed_projects ARRAY<STRING>)."
+                "the legacy `Incept.users` table exists with columns (email, role, allowed_projects ARRAY<STRING>)."
             ),
         ) from exc
 

@@ -58,7 +58,7 @@ flowchart LR
 
 ### 1.1 一个 Production Copilot，而不是多个串行 Agent
 
-Production Copilot 使用 `gemini-3.6-flash`，是用户从创意到成片唯一持续对话的对象。
+Production Copilot 使用 `gemini-3.8-flash`，是用户从创意到成片唯一持续对话的对象。
 
 它可以在同一会话里完成：
 
@@ -319,7 +319,7 @@ Florist Pack
 ```
 
 3. 用户可删、改、补充或上传参考图。
-4. Copilot 用 `gemini-3.6-flash` 生成图片方案和 Prompt。
+4. Copilot 用 `gemini-3.8-flash` 生成图片方案和 Prompt。
 5. 系统调用 `gemini-3.1-flash-image` 生成图。
 6. 用户从 Library 选择所需 Panel。
 

@@ -12,16 +12,13 @@ const ROLE_DISPLAY: Record<string, string> = {
   moloco_ctv:    "Moloco CTV",
   moloco_growth: "Moloco Growth",
   moloco_gtm:    "Moloco GTM",
-  moloco_supply: "Moloco Supply",
   agency:        "Agency",
   user:          "Moloco NBS",
 };
 
-// Supply's nav items (Supply SMB / AI Insights / Ask AI) were removed with the
-// rest of Supply. Nothing currently needs a populated sidebar — this component's
-// only remaining caller is app/brand/layout.tsx, which uses AppShell purely for
-// page chrome — so it renders brand/user info with an empty nav rather than
-// being deleted outright.
+// Nothing currently needs a populated sidebar. The remaining caller is
+// app/brand/layout.tsx, which uses AppShell for page chrome, so this component
+// renders brand/user info with an empty navigation list.
 export function Sidebar({
   email,
   name,
@@ -39,7 +36,7 @@ export function Sidebar({
       brandTitle="Linglong"
       brandSubtitle="Lab"
       logo="/logo.png"
-      storageKey="supply"
+      storageKey="brand"
       items={[]}
       isActive={() => false}
       user={{

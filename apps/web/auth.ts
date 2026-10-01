@@ -48,7 +48,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return true;
       }
 
-      // All @moloco.com accounts auto-granted admin access
+      // Moloco accounts are trusted internal users and default to admin.
       if (email.endsWith("@moloco.com")) {
         user.role = "admin";
         user.allowedProjects = null;

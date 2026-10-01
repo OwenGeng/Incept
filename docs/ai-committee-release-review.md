@@ -16,8 +16,7 @@ under `releases/`. Do not place secrets, API keys, or customer media here.
 | Product surface | Included | Evidence |
 | --- | --- | --- |
 | Image |  |  |
-| AI Video |  |  |
-| Video Production |  |  |
+| Video |  |  |
 | Gaming Playable |  |  |
 
 ## Model and data controls
@@ -29,17 +28,18 @@ under `releases/`. Do not place secrets, API keys, or customer media here.
 | Provider credentials | Secret Manager references only; no values recorded |
 | User media storage | GCS bucket, retention and access control |
 | Cloud SQL | migration Job name and migration result |
-| Async execution | Cloud Tasks queue, service account and private callback |
+| Async execution | Process-local job risks reviewed; no active jobs during rollout |
 | Logging and observability | request IDs, task IDs, error alert destination |
 
 ## Security and release evidence
 
-- [ ] API Cloud Run service is private; only Web and Cloud Tasks identities can invoke it.
+- [ ] API Cloud Run service is private; only the Web runtime identity can invoke it.
 - [ ] Runtime service account has least-privilege Vertex AI, GCS, Cloud SQL and Secret Manager access.
 - [ ] Video Production and Gaming Playable return 404 when excluded by the manifest.
 - [ ] Upload, file download, delete and a non-destructive Vertex generation smoke test passed.
 - [ ] `pnpm run typecheck:web` and `pnpm run build:web` passed from the release commit.
 - [ ] API health and AI Video health passed after Cloud Run deploy.
+- [ ] API `/readyz`, Web login, feedback, Image, and Video smoke tests passed.
 - [ ] API and Web Artifact Registry image digests were captured below.
 
 | Artifact | Immutable tag | Digest | Cloud Run revision |

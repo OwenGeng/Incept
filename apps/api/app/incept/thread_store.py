@@ -5,6 +5,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from app.incept.db import init_db, load_threads, upsert_thread
+from app.incept.datetime_utils import utcnow_naive
 from app.incept.models import Asset, CreativeThread, GenerationJob, GenerationMode, ThreadMessage
 
 THREADS: dict[str, CreativeThread] = {}
@@ -82,7 +83,7 @@ def delete_empty_threads() -> int:
     from app.incept.db import delete_thread as db_delete_thread
     from app.incept.store import ASSETS, JOBS  # avoid circular at import time
 
-    cutoff = datetime.utcnow() - timedelta(days=1)
+    cutoff = utcnow_naive() - timedelta(days=1)
     asset_thread_ids = {a.thread_id for a in ASSETS.values() if a.thread_id}
     job_thread_ids   = {j.thread_id for j in JOBS.values() if j.thread_id}
     used_thread_ids  = asset_thread_ids | job_thread_ids
@@ -105,7 +106,7 @@ def create_thread(
     created_by: str = "",
     origin_asset_id: str | None = None,
 ) -> CreativeThread:
-    now = datetime.utcnow()
+    now = utcnow_naive()
     thread = CreativeThread(
         thread_id=f"thr_{uuid4().hex[:12]}",
         workspace_id=workspace_id,
@@ -143,7 +144,7 @@ def ensure_thread(
             thread.title = normalized_title
             changed = True
         if changed:
-            thread.updated_at = datetime.utcnow()
+            thread.updated_at = utcnow_naive()
             upsert_thread(thread)
         return thread
     return create_thread(
@@ -174,7 +175,7 @@ def touch_thread(
         thread.cover_asset_id = cover_asset_id
     if title and title.strip():
         thread.title = title.strip()
-    thread.updated_at = datetime.utcnow()
+    thread.updated_at = utcnow_naive()
     upsert_thread(thread)
     return thread
 
@@ -307,7 +308,7 @@ def add_user_message(
     if reference_asset_ids:
         known = set(thread.reference_asset_ids)
         thread.reference_asset_ids = list(known | set(reference_asset_ids))
-    thread.updated_at = datetime.utcnow()
+    thread.updated_at = utcnow_naive()
     upsert_thread(thread)
 
 
@@ -323,7 +324,7 @@ def add_assistant_message(
     thread.messages.append(
         ThreadMessage(role="assistant", text=text, asset_ids=asset_ids, job_id=job_id)
     )
-    thread.updated_at = datetime.utcnow()
+    thread.updated_at = utcnow_naive()
     upsert_thread(thread)
 
 

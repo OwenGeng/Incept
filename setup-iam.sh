@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# InterSight -- Grant IAM roles to an existing Service Account (run once)
+# LinglongLab -- Grant IAM roles to an existing Service Account (run once)
 # Usage: ./setup-iam.sh your-sa@ads-bpd-guard-sandbox.iam.gserviceaccount.com
 # =============================================================================
 set -euo pipefail

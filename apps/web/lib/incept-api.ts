@@ -3,7 +3,7 @@ import type {
   CreativeThreadSummary,
   ImageGenerationRequest,
   ImageGenerationResponse,
-  InceptUser,
+  LinglongLabUser,
   JobSummary,
   RemediationAnalysisRequest,
   RemediationAnalysisResponse,
@@ -17,7 +17,7 @@ import type {
   VideoPlanRequest,
   VideoPlanResponse,
   WorkspaceSummary
-} from "@incept/shared";
+} from "@linglonglab/shared";
 
 /**
  * All incept API calls go through the Next.js proxy at /api/incept/[...path].
@@ -571,7 +571,7 @@ interface ApiAsset {
   width?: number | null;
   height?: number | null;
   theme?: string | null;
-  asset_role?: import("@incept/shared").AssetRole | null;
+  asset_role?: import("@linglonglab/shared").AssetRole | null;
   analysis?: Record<string, unknown> | null;
   thread_id?: string | null;
   parent_asset_id?: string | null;
@@ -589,13 +589,14 @@ interface ApiJob {
   source_asset_id?: string | null;
   message?: string;
   created_at?: string;
+  output_asset_ids?: string[];
 }
 
 interface ApiThread {
   thread_id: string;
   workspace_id: string;
   title: string;
-  generation_mode: import("@incept/shared").GenerationMode;
+  generation_mode: import("@linglonglab/shared").GenerationMode;
   created_by?: string;
   origin_asset_id?: string | null;
   cover_asset_id?: string | null;
@@ -789,7 +790,7 @@ interface ApiThemeCreateStyleReport {
   workspace_id: string;
   title: string;
   summary: string;
-  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  theme_create_mode: import("@linglonglab/shared").ThemeCreateMode;
   prompt_template: string;
   source_asset_id?: string | null;
   reference_asset_ids: string[];
@@ -810,8 +811,8 @@ interface ApiThemeCreatePreset {
   workspace_id?: string | null;
   name: string;
   description: string;
-  theme_create_mode: import("@incept/shared").ThemeCreateMode;
-  visibility: import("@incept/shared").ThemeCreatePresetVisibility;
+  theme_create_mode: import("@linglonglab/shared").ThemeCreateMode;
+  visibility: import("@linglonglab/shared").ThemeCreatePresetVisibility;
   prompt_template: string;
   style_name?: string | null;
   style_details?: string | null;
@@ -827,11 +828,11 @@ interface ApiThemeCreatePreset {
   is_official: boolean;
 }
 
-export async function getCurrentUser(): Promise<InceptUser | null> {
+export async function getCurrentUser(): Promise<LinglongLabUser | null> {
   if (!API_BASE_URL) {
     return null;
   }
-  return fetchJson<InceptUser>("/me");
+  return fetchJson<LinglongLabUser>("/me");
 }
 
 export async function getProviderConfig(): Promise<ProviderConfig | null> {
@@ -852,6 +853,18 @@ export async function getProviderConfig(): Promise<ProviderConfig | null> {
     maxImageVariants: config.max_image_variants,
     maxOutputSizes: config.max_output_sizes
   };
+}
+
+/** Poll a job until it finishes and return its output asset ids. */
+export async function waitForJobOutputs(jobId: string, { intervalMs = 2000, timeoutMs = 180_000 } = {}): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = await fetchJson<ApiJob>(`/jobs/${encodeURIComponent(jobId)}`);
+    if (job.status === "completed") return job.output_asset_ids ?? [];
+    if (job.status === "failed") throw new Error(job.message || "Job failed");
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("Timed out waiting for the job to finish.");
 }
 
 export async function getJob(jobId: string): Promise<JobSummary | null> {
@@ -1363,7 +1376,7 @@ export async function outpaintImage(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-}): Promise<import("@incept/shared").ImageGenerationResponse> {
+}): Promise<import("@linglonglab/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/outpaint`, {
     method: "POST",
@@ -1393,7 +1406,7 @@ export async function removeBackground(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-}): Promise<import("@incept/shared").ImageGenerationResponse> {
+}): Promise<import("@linglonglab/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/remove-background`, {
     method: "POST",
@@ -1422,7 +1435,7 @@ export async function addTextToImage(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-}): Promise<import("@incept/shared").ImageGenerationResponse> {
+}): Promise<import("@linglonglab/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/add-text`, {
     method: "POST",
@@ -1475,7 +1488,7 @@ export async function editImage(params: {
   sessionId?: string;
   threadId?: string;
   outputSizes?: string[];
-}): Promise<import("@incept/shared").ImageGenerationResponse> {
+}): Promise<import("@linglonglab/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/image-edit`, {
     method: "POST",
@@ -1502,7 +1515,7 @@ export async function cleanKakaoImage(params: {
   workspaceId: string;
   assetId: string;
   threadId?: string;
-}): Promise<import("@incept/shared").ImageGenerationResponse> {
+}): Promise<import("@linglonglab/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/kakao-clean`, {
     method: "POST",
@@ -1524,7 +1537,7 @@ export async function generateGifFromAsset(params: {
   workspaceId: string;
   assetId: string;
   threadId?: string;
-}): Promise<import("@incept/shared").ImageGenerationResponse> {
+}): Promise<import("@linglonglab/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/generate-gif`, {
     method: "POST",
@@ -1546,12 +1559,14 @@ export async function createKakaoBizboardJob(params: {
   workspaceId: string;
   cleanedAssetId: string;
   composedAssetId: string;
+  template: string;
   mainCopy: string;
+  subCopy: string;
   appDownloadCopy: string;
-  dspName: string;
+  additionalInfo: string;
   gacha: boolean;
   threadId?: string;
-}): Promise<import("@incept/shared").ImageGenerationResponse> {
+}): Promise<import("@linglonglab/shared").ImageGenerationResponse> {
   if (!API_BASE_URL) throw new Error("API not configured");
   const res = await fetch(`${API_BASE_URL}/workflows/kakao-bizboard`, {
     method: "POST",
@@ -1560,9 +1575,11 @@ export async function createKakaoBizboardJob(params: {
       workspace_id: params.workspaceId,
       cleaned_asset_id: params.cleanedAssetId,
       composed_asset_id: params.composedAssetId,
+      template: params.template,
       main_copy: params.mainCopy,
+      sub_copy: params.subCopy,
       app_download_copy: params.appDownloadCopy,
-      dsp_name: params.dspName,
+      additional_info: params.additionalInfo,
       gacha: params.gacha,
       thread_id: params.threadId ?? null,
     }),
@@ -1631,7 +1648,7 @@ export async function listUsageEvents(workspaceId?: string): Promise<UsageEvent[
 
 export async function listThemeCreatePresets(params?: {
   workspaceId?: string;
-  mode?: import("@incept/shared").ThemeCreateMode;
+  mode?: import("@linglonglab/shared").ThemeCreateMode;
 }): Promise<ThemeCreatePresetSummary[]> {
   if (!API_BASE_URL) return [];
   const query = new URLSearchParams();
@@ -1666,7 +1683,7 @@ export async function createThemeCreateReport(payload: {
   workspace_id: string;
   title: string;
   summary: string;
-  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  theme_create_mode: import("@linglonglab/shared").ThemeCreateMode;
   prompt_template: string;
   source_asset_id?: string;
   reference_asset_ids?: string[];
@@ -1710,7 +1727,7 @@ export async function createThemeCreateReport(payload: {
 
 export async function draftThemeCreateReport(payload: {
   workspace_id: string;
-  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  theme_create_mode: import("@linglonglab/shared").ThemeCreateMode;
   prompt_template: string;
   source_asset_id: string;
   reference_asset_ids?: string[];
@@ -1724,7 +1741,7 @@ export async function draftThemeCreateReport(payload: {
 }): Promise<{
   title: string;
   summary: string;
-  theme_create_mode: import("@incept/shared").ThemeCreateMode;
+  theme_create_mode: import("@linglonglab/shared").ThemeCreateMode;
   prompt_template: string;
   source_asset_id?: string;
   reference_asset_ids: string[];
@@ -1752,8 +1769,8 @@ export async function createThemeCreatePreset(payload: {
   workspace_id?: string;
   name: string;
   description: string;
-  theme_create_mode: import("@incept/shared").ThemeCreateMode;
-  visibility?: import("@incept/shared").ThemeCreatePresetVisibility;
+  theme_create_mode: import("@linglonglab/shared").ThemeCreateMode;
+  visibility?: import("@linglonglab/shared").ThemeCreatePresetVisibility;
   prompt_template: string;
   style_name?: string;
   style_details?: string;

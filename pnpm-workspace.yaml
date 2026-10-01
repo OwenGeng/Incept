@@ -1,4 +1,4 @@
 packages:
-  - "apps/*"
+  # The Vue video application owns a nested pnpm workspace and lockfile.
+  - "apps/web"
   - "packages/*"
-

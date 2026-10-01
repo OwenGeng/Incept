@@ -90,7 +90,7 @@ export default function BrandPage() {
           </div>
           <p className="mt-3 text-[12px] text-muted-foreground">
             <span className="font-semibold text-foreground">Rule:</span> always use semantic tokens in component code. Hardcode hex only in{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">supply-badges.tsx</code> for fixed-palette items.
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">shared badge components</code> for fixed-palette items.
           </p>
         </div>
       </section>
@@ -100,7 +100,7 @@ export default function BrandPage() {
         <h2 className="text-[22px] font-semibold tracking-tight">2. Typography</h2>
         <div className="space-y-4">
           {[
-            { role: "Display / Hero",     cls: "text-[42px] font-bold tracking-tight",                  sample: "Supply SMB Cross-Sell" },
+            { role: "Display / Hero",     cls: "text-[42px] font-bold tracking-tight",                  sample: "LinglongLab Creative Studio" },
             { role: "Page Title",         cls: "text-[28px] font-semibold tracking-tight",               sample: "Top Companies" },
             { role: "Product Name",       cls: "text-2xl font-semibold tracking-tight",                  sample: "Scout" },
             { role: "Card Title",         cls: "text-xl font-bold",                                      sample: "Prospect Funnel" },
@@ -233,8 +233,8 @@ export default function BrandPage() {
         <h2 className="text-[22px] font-semibold tracking-tight">5. Design Principles</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           {[
-            { icon: "◎", title: "Token-first, hex-last",       body: "Use semantic tokens everywhere. Only the badge/chart palette in supply-badges.tsx uses raw hex — making global theme changes a one-file edit." },
-            { icon: "⊞", title: "One shared component, two products", body: "AppSidebar, AppHeader, TableToolbar, and supply-badges are shared across Scout and Studio. Each product wraps shared components — never duplicates." },
+            { icon: "◎", title: "Token-first, hex-last",       body: "Use semantic tokens everywhere. Keep fixed badge and chart palettes in shared components so global theme changes stay centralized." },
+            { icon: "⊞", title: "Shared application chrome", body: "AppSidebar and AppHeader are shared across product surfaces. Each surface composes shared components instead of duplicating them." },
             { icon: "⬡", title: "Readable contrast everywhere", body: "P4 uses #475569 on #F1F5F9 (not muted-foreground). Every badge meets AA contrast. Avoid light-on-light." },
             { icon: "⟳", title: "Streaming over blocking",      body: "Pages never block on data. Shell + topbar render instantly; Suspense boundaries handle async data. Users see structure immediately, data fills in." },
             { icon: "▣", title: "Component over inline styles",  body: "Color values that appear in more than one place must live in a component or utility. Duplicated inline styles are a maintenance debt." },
@@ -268,8 +268,6 @@ export default function BrandPage() {
                 ["components/ui/app-header.tsx",                  "Shared page/section header"],
                 ["components/layout/sidebar.tsx",                 "Scout sidebar — nav items, active state, signOut"],
                 ["components/incept/Sidebar.tsx",                 "Studio sidebar — state-based nav, useSession"],
-                ["components/supply-smb/supply-badges.tsx",       "All tier/mono/supply badge colors + components"],
-                ["components/supply-smb/table-toolbar.tsx",       "Compact filter toolbar with CSV/Sheets export"],
                 ["lib/csv-export.ts",                             "downloadCsv() — browser-side Blob download"],
                 ["app/api/export/sheets/route.ts",                "Google Sheets export API route"],
                 ["app/brand/page.tsx",                            "This page — live brand reference at /brand"],

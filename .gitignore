@@ -66,3 +66,9 @@ apps/incept-api/regression_*/
 Thumbs.db
 # Added by code-review-graph
 .code-review-graph/
+
+# Local reference checkouts / scratch (not part of LinglongLab)
+ArcReel/
+screenshot-to-code/
+tasks/
+apps/data/

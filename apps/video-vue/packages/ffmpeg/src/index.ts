@@ -35,7 +35,7 @@ async function readVersion(path: string, name: string, signal?: AbortSignal) {
     stdin: "ignore", stdout: "pipe", stderr: "ignore", windowsHide: true, timeout: 15000, signal,
     env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "FFREPORT")),
   });
-  const [output, code] = await Promise.all([child.stdout.text(), child.exited]);
+  const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
   signal?.throwIfAborted();
   const version = output.split(/\r?\n/, 1)[0];
   if (code !== 0 || !version?.startsWith(`${name} version `)) throw new Error(`${name} 无法运行，请检查平台兼容性或重新下载`);

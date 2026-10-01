@@ -4,7 +4,7 @@
 
 ## 结论
 
-客户的正式游戏由 Unity 或 Cocos 制作，并不意味着试玩广告也应继续用 Unity/Cocos。对 Incept 而言，试玩不是把完整游戏移植到浏览器，而是把一个可控的「核心动作 → 爽点/失败 → CTA」做成确定性的轻量 HTML。
+客户的正式游戏由 Unity 或 Cocos 制作，并不意味着试玩广告也应继续用 Unity/Cocos。对 LinglongLab 而言，试玩不是把完整游戏移植到浏览器，而是把一个可控的「核心动作 → 爽点/失败 → CTA」做成确定性的轻量 HTML。
 
 **建议：先建设与引擎无关的 GamingPlayable 生产/导出层；首个复杂模板以 Phaser 实验，随后用 LittleJS 做同玩法的体积/性能对照。**
 
@@ -37,7 +37,7 @@
 | 引擎体积线索 | 未以 single-file ad 为目标 | 未以 single-file ad 为目标 | 全功能 min 约 1.29 MB raw；Arcade 约 1.18 MB raw | 官方 FAQ：`release/min` 远低于 100 KB |
 | 复杂玩法能力 | 最强，但对广告体积不友好 | 强，有编辑器工作流 | 强：Scene、Tilemap、物理、粒子、Tween、输入 | 中：2D 渲染、arcade physics、碰撞、粒子；重系统需自建/插件 |
 | 移动操作 | 可做，但 WebGL 资源/内存需谨慎 | Web Mobile、触摸与自适应成熟 | Pointer/drag/多点触控与 Scale Manager | Touch 自动映射为 mouse，可选虚拟手柄 |
-| 适合 Incept 的位置 | 读取客户原项目/素材的参考来源，非运行时 | 同左；必要时接入客户已有 Cocos 工程 | 复杂可复用试玩模板的 Runtime | 微型试玩、5 MB 高风险创意、快速定制 Runtime |
+| 适合 LinglongLab 的位置 | 读取客户原项目/素材的参考来源，非运行时 | 同左；必要时接入客户已有 Cocos 工程 | 复杂可复用试玩模板的 Runtime | 微型试玩、5 MB 高风险创意、快速定制 Runtime |
 
 ### Unity：客户来源强，广告 Runtime 弱
 
@@ -45,7 +45,7 @@ Unity WebGL 标准构建明确产生 loader、framework、WebAssembly、asset da
 
 Unity 仍能生成面向移动浏览器的构建，并提供 Size 优化和移动纹理压缩选项；但官方说明 Size 模式的目的就是缩小下载量、帮助较大 WebAssembly 构建在移动浏览器加载。这证实它在常规 Web 产品中可用，**不等于**适合 5 MB 的无网络单文件广告。 [Unity WebGL 构建与 Size 优化](https://docs.unity3d.com/2022.1/Documentation/Manual/webgl-building.html)
 
-**Incept 策略：** 用 Unity 客户的截图、Sprite、UI、录屏和玩法说明来建立试玩，而不把 Unity WebGL build 直接作为输出。只有客户已拥有一个极小、可合法重打包的 Unity WebGL 试玩时，才把它作为“导入并验证”的例外路径。
+**LinglongLab 策略：** 用 Unity 客户的截图、Sprite、UI、录屏和玩法说明来建立试玩，而不把 Unity WebGL build 直接作为输出。只有客户已拥有一个极小、可合法重打包的 Unity WebGL 试玩时，才把它作为“导入并验证”的例外路径。
 
 ### Cocos：客户来源强，standalone 同样需重构
 
@@ -53,7 +53,7 @@ Cocos Creator 提供 Web Mobile，默认全屏填充浏览器，并有方向和 
 
 但 Cocos 的资源管理以 Asset Bundle 为中心：构建后的代码、依赖资源和 `config.json` 放在 bundle 目录；可配置为 remote bundle，并通过 URL 加载。这对普通 Web 游戏很合理，却和禁止动态资源/请求的 standalone 合同相反。 [Cocos Asset Bundle](https://docs.cocos.com/creator/3.8/manual/en/asset/bundle.html)
 
-**Incept 策略：** 将 Cocos 客户理解为“已有游戏资产和玩法来源”。若未来客户提供 Cocos 工程，可做专门的 asset extractor；不要把 Cocos 标准 Web build 当作默认 playable exporter。
+**LinglongLab 策略：** 将 Cocos 客户理解为“已有游戏资产和玩法来源”。若未来客户提供 Cocos 工程，可做专门的 asset extractor；不要把 Cocos 标准 Web build 当作默认 playable exporter。
 
 ### Phaser：复杂玩法优先，但必须严控输出
 
@@ -71,13 +71,13 @@ LittleJS 官方定位是无依赖、轻量的 HTML5 引擎；支持 WebGL2 + Can
 
 它不是“零打包工作”：通常 `engineInit(..., ['tiles.png'])` 仍会引用外部资源。并且 Box2D 插件需要 JS loader 和独立 WASM，严格单文件时应默认不用；只有我们的 exporter 证明可以安全内联后再开放。 [LittleJS FAQ：插件与素材加载](https://github.com/KilledByAPixel/LittleJS/blob/main/FAQ.md)
 
-**Incept 策略：** LittleJS 适合“一个动作做到极好”的轻量定制：拖拽拼图、串珠、整理、合成、路径引导、点击战斗。不要一开始把它用于完整 Match-3 生态或重 UI 编辑器；否则会把 Phaser 现成的结构能力重新造一遍。
+**LinglongLab 策略：** LittleJS 适合“一个动作做到极好”的轻量定制：拖拽拼图、串珠、整理、合成、路径引导、点击战斗。不要一开始把它用于完整 Match-3 生态或重 UI 编辑器；否则会把 Phaser 现成的结构能力重新造一遍。
 
 ## 商用与再分发：可用，但把许可证做成导出器的硬规则
 
 **两个核心引擎都是 MIT。** Phaser 官方 `package.json` 标识其 license 为 MIT；LittleJS 的官方 `LICENSE` 明确允许使用、复制、修改、发布、分发、再许可及销售。两者在“为客户制作并交付收费 playable”的场景中都可以使用。 [Phaser 官方 package metadata](https://github.com/phaserjs/phaser/blob/master/package.json) [LittleJS 官方 LICENSE](https://github.com/KilledByAPixel/LittleJS/blob/main/LICENSE)
 
-MIT 的条件也不可省略：交付副本或实质性部分时，必须保留原版权声明与许可文本。对 Incept 而言，最终单 HTML 应由 exporter 自动在注释中写入 `Third-party notices`，并在交付目录额外输出一份 `THIRD_PARTY_NOTICES.txt`；不要指望客户或创意人员手工维护。
+MIT 的条件也不可省略：交付副本或实质性部分时，必须保留原版权声明与许可文本。对 LinglongLab 而言，最终单 HTML 应由 exporter 自动在注释中写入 `Third-party notices`，并在交付目录额外输出一份 `THIRD_PARTY_NOTICES.txt`；不要指望客户或创意人员手工维护。
 
 还要分清“引擎代码”和“其它内容”：Phaser 官方仓库明确说明其 logo/characters 属于 Phaser Studio；LittleJS/Phaser 的示例素材、客户提供的游戏截图、字体、音频、第三方插件/物理库都不应因引擎是 MIT 就默认获得商业再分发权。每个模板需要一份**第三方依赖与资产清单（BOM）**，并在导出前阻止无来源/无授权素材。 [Phaser 官方 README 的品牌权属说明](https://github.com/phaserjs/phaser)
 

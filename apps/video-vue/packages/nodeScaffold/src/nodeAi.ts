@@ -13,6 +13,7 @@ export type NodeAiModel = {
   protocol: "openai-completions" | "openai-responses" | "anthropic-messages";
   contextWindow?: number;
   maxOutputTokens?: number;
+  isDefault?: boolean;
 };
 export type NodeMediaModel = Omit<MediaModel, "mode"> & {
   mode?: (string | string[])[];
@@ -30,6 +31,8 @@ export type NodeImageRequest = {
 export type NodeImageResult = { path: string; mimeType: string; mediaType: "image" };
 export type NodeVideoRequest = Omit<MediaGenerationRequest, "size"> & { directory: string; outputDirectory: string };
 export type NodeVideoResult = { path: string; mimeType: string; mediaType: "video" };
+export type NodeAudioRequest = MediaGenerationRequest & { directory: string; outputDirectory: string };
+export type NodeAudioResult = { path: string; mimeType: string; mediaType: "audio" };
 export type NodeAiRequest = {
   providerId: string;
   modelId: string;
@@ -59,6 +62,10 @@ export function groupNodeModels<T extends Pick<NodeAiModel, "providerId" | "prov
   return [...Map.groupBy(models, item => item.providerId)].map(([id, items]) => ({
     id, label: items[0]!.providerLabel, models: items,
   }));
+}
+
+export function defaultNodeModel<T extends { isDefault?: boolean }>(models: readonly T[]) {
+  return models.find(model => model.isDefault) ?? models[0];
 }
 
 async function readResult<T>(response: Response): Promise<T> {
@@ -162,7 +169,7 @@ export function useNodeAi() {
     return readModels<NodeMediaModel>("/api/ai/media/models", requestSignal(signal));
   }
 
-  async function generateMedia<T extends "image" | "video">(mediaType: T, input: NodeImageRequest | NodeVideoRequest, signal?: AbortSignal) {
+  async function generateMedia<T extends "image" | "video" | "audio">(mediaType: T, input: NodeImageRequest | NodeVideoRequest | NodeAudioRequest, signal?: AbortSignal) {
     return readResult<{ path: string; mimeType: string; mediaType: T }[]>(await fetch("/api/ai/media/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-linglonglabVideo-workspace": "1" },
@@ -175,8 +182,57 @@ export function useNodeAi() {
     return generateMedia("image", input, signal);
   }
 
-  function generateVideo(input: NodeVideoRequest, signal?: AbortSignal) {
-    return generateMedia("video", input, signal);
+  async function generateVideo(input: NodeVideoRequest, signal?: AbortSignal) {
+    const combinedSignal = requestSignal(signal);
+    const idempotencyKey = crypto.randomUUID();
+    const job = await readResult<{
+      id: string;
+      status: "queued" | "running" | "completed" | "failed" | "cancelled";
+      message: string;
+      result_asset_path?: string;
+      result_mime_type?: string;
+    }>(await fetch("/api/ai/media/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-linglonglabVideo-workspace": "1" },
+      body: JSON.stringify({ ...input, mediaType: "video", idempotencyKey }),
+      signal: combinedSignal,
+    }));
+    try {
+      for (;;) {
+        combinedSignal.throwIfAborted();
+        const current = await readResult<typeof job>(await fetch(
+          `/api/ai/media/jobs/${encodeURIComponent(job.id)}?directory=${encodeURIComponent(input.directory)}`,
+          { cache: "no-store", signal: combinedSignal },
+        ));
+        if (current.status === "completed") {
+          if (!current.result_asset_path || !current.result_mime_type) throw new Error("视频任务完成但没有返回文件");
+          return [{ path: current.result_asset_path, mimeType: current.result_mime_type, mediaType: "video" as const }];
+        }
+        if (current.status === "failed" || current.status === "cancelled") {
+          throw new Error(current.message || (current.status === "cancelled" ? "视频任务已取消" : "视频生成失败"));
+        }
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => {
+            window.clearTimeout(timer);
+            reject(combinedSignal.reason);
+          };
+          const timer = window.setTimeout(() => {
+            combinedSignal.removeEventListener("abort", onAbort);
+            resolve();
+          }, 2000);
+          combinedSignal.addEventListener("abort", onAbort, { once: true });
+        });
+      }
+    } catch (error) {
+      if (combinedSignal.aborted) {
+        void fetch(`/api/ai/media/jobs/${encodeURIComponent(job.id)}?directory=${encodeURIComponent(input.directory)}`, { method: "DELETE" });
+      }
+      throw error;
+    }
+  }
+
+  function generateAudio(input: NodeAudioRequest, signal?: AbortSignal) {
+    return generateMedia("audio", input, signal);
   }
 
   async function generate(input: NodeAiRequest): Promise<NodeAiResult> {
@@ -229,5 +285,5 @@ export function useNodeAi() {
     return { text, ...(reasoning ? { reasoning } : {}) };
   }
 
-  return { getModels, getMediaModels, generateImage, generateVideo, generate };
+  return { getModels, getMediaModels, generateImage, generateVideo, generateAudio, generate };
 }

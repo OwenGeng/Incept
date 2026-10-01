@@ -9,7 +9,6 @@ VALID_ROLES = {
     "moloco_ctv",
     "moloco_growth",
     "moloco_gtm",
-    "moloco_supply",
     "agency",
     "user",  # legacy alias for moloco_nbs
 }

@@ -14,8 +14,7 @@ export default async function StudioLayout({
     redirect("/sign-in");
   }
 
-  // Studio is for all Moloco users. Agency accounts had Supply-only access;
-  // Supply has been retired from this app, so there is nowhere left for them to land.
+  // Studio is internal-only; legacy agency accounts have no active surface.
   if (session?.user?.role === "agency") {
     redirect("/unauthorized");
   }

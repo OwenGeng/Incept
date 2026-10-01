@@ -8,6 +8,8 @@ from typing import Any
 from google.genai import types as genai_types
 
 from app.incept.vertex_generation import _call_multimodal_text_model
+from app.incept.config import get_settings
+from app.routers.video_runtime import configured_text_models
 
 from . import store
 from .models import (
@@ -43,8 +45,53 @@ RESEARCH_ONLY_SKILLS = {"ctv-reference-research", "brand-product-intake"}
 MANUAL_RESEARCH_SKILLS = RESEARCH_ONLY_SKILLS | {"ctv-creative-strategy"}
 
 
-def _call_model(prompt: str, parts: list[genai_types.Part]) -> str:
-    return _call_multimodal_text_model(prompt=prompt, parts=parts, json_response=True)
+def _call_model(
+    prompt: str,
+    parts: list[genai_types.Part],
+    *,
+    provider_id: str,
+    model_id: str,
+) -> str:
+    if provider_id == "google-vertex-ai":
+        return _call_multimodal_text_model(prompt=prompt, parts=parts, model_id=model_id, json_response=True)
+
+    text_parts = [str(value) for part in parts if (value := getattr(part, "text", None))]
+    if any(getattr(part, "inline_data", None) is not None for part in parts):
+        raise ValueError("Project image, audio, video, and PDF attachments currently require a Google Vertex AI agent model")
+    request = "\n\n".join([prompt, *text_parts])
+    settings = get_settings()
+    if provider_id == "openai":
+        if not settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is not configured")
+        from openai import OpenAI
+
+        response = OpenAI(api_key=settings.openai_api_key).responses.create(
+            model=model_id,
+            input=request,
+            store=False,
+        )
+        if not response.output_text:
+            raise RuntimeError("OpenAI returned no agent response")
+        return response.output_text
+    if provider_id == "anthropic":
+        if not settings.anthropic_api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+        from anthropic import Anthropic
+
+        response = Anthropic(api_key=settings.anthropic_api_key).messages.create(
+            model=model_id,
+            max_tokens=32768,
+            messages=[{"role": "user", "content": request}],
+        )
+        text = "\n".join(
+            str(getattr(block, "text", ""))
+            for block in response.content
+            if getattr(block, "type", "") == "text"
+        ).strip()
+        if not text:
+            raise RuntimeError("Anthropic returned no agent response")
+        return text
+    raise ValueError("The selected agent provider is not supported")
 
 
 def _asset_parts(
@@ -352,6 +399,8 @@ def run_agent(
     conversation_id: str | None,
     agent_id: str | None = None,
     asset_paths: list[str] | None = None,
+    provider_id: str | None = None,
+    model_id: str | None = None,
 ) -> tuple[AgentConversation, CanvasDocument, str]:
     project = store.get_project(email, project_id)
     settings = store.get_settings(email)
@@ -371,10 +420,25 @@ def run_agent(
         if f"node-{node_type.lower()}" in enabled_extensions
     }
     allow_canvas_edits = "tool-canvas" in enabled_extensions
+    available_models = configured_text_models()
+    selected_model = next(
+        (
+            item for item in available_models
+            if item["providerId"] == provider_id and item["modelId"] == model_id
+        ),
+        None,
+    ) if provider_id and model_id else next((item for item in available_models if item.get("isDefault")), None)
+    selected_model = selected_model or (available_models[0] if available_models else None)
+    if not selected_model:
+        raise ValueError("No agent model is enabled by this deployment")
+    if (provider_id or model_id) and (not provider_id or not model_id or selected_model["providerId"] != provider_id or selected_model["modelId"] != model_id):
+        raise ValueError("The selected agent model is not enabled by this deployment")
     if conversation_id:
         conversation = store.get_conversation(email, project_id, conversation_id)
     else:
         conversation = AgentConversation(id=uuid.uuid4().hex, name=prompt.strip()[:60])
+    conversation.provider_id = selected_model["providerId"]
+    conversation.model_id = selected_model["modelId"]
     conversation.messages.append(
         AgentMessage(id=uuid.uuid4().hex, role="user", content=prompt.strip())
     )
@@ -404,6 +468,8 @@ def run_agent(
                 tool_history=tool_history,
             ),
             parts,
+            provider_id=selected_model["providerId"],
+            model_id=selected_model["modelId"],
         )
         result = _parse_response(raw)
         tool_calls = _parse_tool_calls(result.get("tool_calls"))

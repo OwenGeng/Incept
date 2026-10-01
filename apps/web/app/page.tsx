@@ -9,7 +9,7 @@ export default async function PortalPage() {
   const session = await auth();
 
   if (isAuthDevSkipped()) {
-    redirect("/incept");
+    redirect("/linglonglab");
   }
 
   if (!session) {
@@ -19,8 +19,7 @@ export default async function PortalPage() {
   const user  = session.user;
   const role  = user?.role;
   const showGamingPlayable = isDeferredProductSurfaceEnabled("gamingPlayable");
-  // Agency accounts had Supply-only access; Supply has been retired from this
-  // app, so there is nowhere left for them to land.
+  // Legacy agency accounts have no active product surface.
   if (role === "agency") {
     redirect("/unauthorized");
   }
@@ -69,7 +68,7 @@ export default async function PortalPage() {
       <div className="mx-auto max-w-4xl px-6 pb-16">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Link
-            href="/incept"
+            href="/linglonglab"
             className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
           >
             <div className="flex h-28 items-center justify-center bg-gradient-to-br from-[#F3EEFB] to-[#EDE4FF]">

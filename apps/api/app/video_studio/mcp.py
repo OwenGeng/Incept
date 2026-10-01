@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 
+from app.incept.config import get_settings
 from app.routers.video_runtime import ManagedMediaRequest, generate_media
 
 from . import store
@@ -207,9 +208,14 @@ def build_video_studio_mcp_server(
     ) -> dict[str, Any]:
         _require_spend_confirmation(confirm_spend)
         try:
+            deployment = get_settings()
+            provider_id = "google-vertex-ai"
+            model_id = deployment.vertex_gemini_image_model if media_type == "image" else deployment.vertex_veo_fast_model
             response = await generate_media(
                 ManagedMediaRequest(
                     media_type=media_type,
+                    provider_id=provider_id,
+                    model_id=model_id,
                     prompt=prompt,
                     ratio=ratio,
                     duration=duration if media_type == "video" else None,

@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS `ads-bpd-guard-sandbox.config.users` (
   email            STRING    NOT NULL,
-  role             STRING    NOT NULL,   -- 'admin' | 'user' | 'agency'
+  role             STRING    NOT NULL,   -- admin, Moloco team role, or agency
   allowed_projects ARRAY<STRING>,        -- NULL means all projects
   created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
   created_by       STRING
@@ -17,4 +17,4 @@ VALUES
 
 -- Example agency user with restricted project access:
 -- INSERT INTO `ads-bpd-guard-sandbox.config.users` (email, role, allowed_projects, created_by)
--- VALUES ('agency-user@example.com', 'agency', ['supply-smb'], 'owen.geng@moloco.com');
+-- VALUES ('agency-user@example.com', 'agency', ['project-a'], 'owen.geng@moloco.com');

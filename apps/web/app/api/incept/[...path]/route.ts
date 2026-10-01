@@ -1,7 +1,7 @@
 /**
  * Catch-all proxy: /api/incept/[...path] → nbs-api (unified backend)
  *
- * All Incept API calls from the browser go through here instead of hitting
+ * All LinglongLab API calls from the browser go through here instead of hitting
  * the backend directly. This lets us:
  *   - enforce auth with the existing NextAuth session
  *   - keep nbs-api behind --no-allow-unauthenticated on Cloud Run
@@ -14,9 +14,9 @@
  *   INCEPT_API_BASE_URL (explicit override) → API_BASE_URL → localhost:8000
  */
 
-import http from "node:http";
 import { type NextRequest, NextResponse } from "next/server";
 import { isAuthDevSkipped } from "@/lib/auth-mode";
+import { getCloudRunIdentityToken } from "@/lib/cloud-run-auth";
 
 const INCEPT_BASE = (
   process.env.INCEPT_API_BASE_URL ??
@@ -42,39 +42,14 @@ const delay = (milliseconds: number) => new Promise<void>((resolve) => {
   setTimeout(resolve, milliseconds);
 });
 
-async function getCloudRunIdentityToken(audience: string): Promise<string | null> {
-  if (!process.env.K_SERVICE) return null;
-  return new Promise((resolve) => {
-    const metaUrl =
-      `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity` +
-      `?audience=${encodeURIComponent(audience)}`;
-    const request = http.get(metaUrl, { headers: { "Metadata-Flavor": "Google" } }, (response) => {
-      if (response.statusCode !== 200) {
-        resolve(null);
-        return;
-      }
-      let data = "";
-      response.on("data", (chunk: unknown) => {
-        data += String(chunk);
-      });
-      response.on("end", () => resolve(data.trim() || null));
-    });
-    request.on("error", () => resolve(null));
-    request.setTimeout(2000, () => {
-      request.destroy();
-      resolve(null);
-    });
-  });
-}
-
 async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
   const { path } = await ctx.params;
   // ── 1. Auth ──────────────────────────────────────────────────────────────
-  const isPublicVideoStudio = path[0] === "video-studio";
-  const session = isAuthDevSkipped()
+  const devAuthSkipped = isAuthDevSkipped();
+  const session = devAuthSkipped
     ? null
     : await import("@/auth").then((mod) => mod.auth());
-  if (!isAuthDevSkipped() && !isPublicVideoStudio && !session?.user) {
+  if (!devAuthSkipped && !session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -85,7 +60,7 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
   // ── 3. Request headers ────────────────────────────────────────────────────
   const fwd: Record<string, string> = {
     "x-internal-api-key": INTERNAL_KEY,
-    "x-user-email":       session?.user?.email ?? (isPublicVideoStudio ? "local@linglonglab.internal" : ""),
+    "x-user-email":       session?.user?.email ?? "local@linglonglab.internal",
     "x-user-role":        session?.user?.role  ?? "user",
   };
   if (identityToken) {

@@ -23,6 +23,7 @@ from google.genai import types as genai_types
 from app.incept import thread_store
 from app.incept.bigquery_store import persist_generation
 from app.incept.config import get_settings
+from app.incept.datetime_utils import utcnow_naive
 from app.incept.db import load_video_plans, upsert_asset, upsert_job, upsert_usage_event, upsert_video_plan
 from app.incept.models import Asset, AssetRole, CreativeThread, GenerationJob, GenerationMode, JobStatus, UsageEvent, User, VideoBudgetStatus, VideoGenerationBeat, VideoGenerationMode, VideoGenerationPlan, VideoGenerationRequest, VideoPlanConversationMessage, VideoPlanRequest, VideoPlanResponse
 from app.incept.playable_capture import capture_playable_to_mp4
@@ -238,7 +239,7 @@ def _video_analysis_model_id() -> str:
 
 
 def _text_model_asset_mime_type(asset: Asset) -> str:
-    """Return a Gemini-supported media MIME type for an Incept asset.
+    """Return a Gemini-supported media MIME type for an LinglongLab asset.
 
     Generated assets are often titled with an internal ID (for example,
     ``vprod_…_vid``) rather than a filename. Guessing from that title alone
@@ -303,7 +304,7 @@ def _persist_generated_report_asset(
         job_id=job.job_id,
         prompt_hash="",
         created_by=user.id,
-        created_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
         asset_role=AssetRole.generated,
         analysis={"report_kind": request.video_generation_mode.value},
         thread_id=job.thread_id,
@@ -338,7 +339,7 @@ def _persist_generated_image_asset(
 ) -> Asset:
     from PIL import Image
 
-    created_at = datetime.utcnow()
+    created_at = utcnow_naive()
     asset_id = f"asset_video_src_{uuid4().hex[:12]}"
     extension = ".png"
     filename = f"{asset_id}{extension}"
@@ -473,7 +474,7 @@ def _persist_generated_playable_asset(
         job_id=job.job_id,
         prompt_hash="",
         created_by=user.id,
-        created_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
         asset_role=AssetRole.generated,
         analysis={
             "playable": {
@@ -827,7 +828,7 @@ def create_or_update_video_plan(request: VideoPlanRequest, user: User) -> VideoP
         if override:
             previous_plan.generation_prompt = override
         previous_plan.status = "confirmed"
-        previous_plan.updated_at = datetime.utcnow()
+        previous_plan.updated_at = utcnow_naive()
         previous_plan.conversation.extend(
             [
                 VideoPlanConversationMessage(role="user", text="Confirm the current plan."),
@@ -904,8 +905,8 @@ def create_or_update_video_plan(request: VideoPlanRequest, user: User) -> VideoP
         },
         execution_intent="generate" if requested_execution else "chat",
         conversation=conversation,
-        created_at=previous_plan.created_at if previous_plan else datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=previous_plan.created_at if previous_plan else utcnow_naive(),
+        updated_at=utcnow_naive(),
     )
 
     _persist_video_plan(plan)
@@ -1176,7 +1177,7 @@ async def _request_veo_videos(
     operation = await asyncio.to_thread(client.models.generate_videos, **kwargs)
     job.progress = progress
     job.message = message
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utcnow_naive()
     upsert_job(job)
 
     response = await _wait_for_operation(client, operation)
@@ -1537,7 +1538,7 @@ def _persist_browser_capture_video_asset(
 
 def create_video_generation_job(request: VideoGenerationRequest, user: User) -> GenerationJob:
     thread = _resolve_thread_for_video_request(request, user)
-    now = datetime.utcnow()
+    now = utcnow_naive()
     job = GenerationJob(
         job_id=f"job_{uuid4().hex[:12]}",
         workspace_id=request.workspace_id,
@@ -1708,7 +1709,7 @@ async def _execute_veo_sequence(
 
         job.progress = 92
         job.message = "Assembling the continuous Veo sequence…"
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         final_video = await asyncio.to_thread(
             _concat_video_sequence, clips=clips, target_seconds=request.duration_seconds
@@ -2066,7 +2067,7 @@ def _record_video_usage(
         estimated_provider_generations=provider_generations,
         output_asset_count=len(created_assets),
         estimated_cost_usd=_estimate_video_cost_usd(request),
-        created_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
     )
     USAGE_EVENTS[usage_id] = usage_event
     upsert_usage_event(usage_event)
@@ -2090,7 +2091,7 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
             if mode == VideoGenerationMode.playable_to_video
             else f"Preparing {mode.value} pipeline…"
         )
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         created_assets: list[Asset] = []
@@ -2109,7 +2110,7 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
             capture_output = STATIC_DIR / f"{job.lineage_key}_browser_capture.mp4"
             job.progress = 25
             job.message = "Launching the playable in Chrome and starting the automated interaction path…"
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
             upsert_job(job)
             capture_result = await asyncio.to_thread(
                 capture_playable_to_mp4,
@@ -2123,7 +2124,7 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
             try:
                 job.progress = 88
                 job.message = "Encoding captured browser frames into MP4 and verifying visible gameplay…"
-                job.updated_at = datetime.utcnow()
+                job.updated_at = utcnow_naive()
                 upsert_job(job)
                 capture_bytes = capture_result.video_path.read_bytes()
                 created_assets.append(
@@ -2219,7 +2220,7 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
                 raise RuntimeError("VERTEX_VEO_FAST_MODEL is not configured.")
             used_veo = True
             job.message = f"Submitting Veo job with model {model_id}…"
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
             upsert_job(job)
             created_assets = await _execute_veo_request(
                 job=job,
@@ -2235,7 +2236,7 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
             f"Completed {request.video_generation_mode.value}. "
             f"Produced {len(created_assets)} output asset(s)."
         )
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         if job.thread_id:
@@ -2287,5 +2288,5 @@ async def run_video_generation_background(job_id: str, request: VideoGenerationR
                 asset_ids=[],
                 job_id=job.job_id,
             )
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)

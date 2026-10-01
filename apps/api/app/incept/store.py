@@ -12,6 +12,7 @@ from uuid import uuid4
 from app.incept.bigquery_store import persist_generation
 from app.incept.config import get_settings
 from app.incept.db import delete_asset as db_delete_asset, init_db, load_assets, load_job, load_jobs, load_theme_create_presets, load_theme_create_reports, load_usage_events, upsert_asset, upsert_job, upsert_theme_create_preset, upsert_theme_create_report, upsert_usage_event
+from app.incept.datetime_utils import utcnow_naive
 from app.incept.models import Asset, AssetRole, AddTextRequest, CreativeThread, GenerateGifRequest, GenerationJob, GenerationMode, GenerationRequest, ImageEditRequest, JobStatus, KakaoBizboardComposeRequest, OutpaintRequest, RemediationAnalysisRequest, RemediationAnalysisResponse, RemediationAnalysisResult, RemediationViolation, RemoveBGRequest, ThemeCreatePreset, ThemeCreatePresetCreateRequest, ThemeCreatePresetFromReportRequest, ThemeCreateStyleReport, ThemeCreateStyleReportCreateRequest, ThemeCreateStyleReportDraftRequest, UsageEvent, User, Workspace
 from app.incept.prompt_builder import (
     build_generation_prompt,
@@ -62,7 +63,7 @@ WORKSPACES: dict[str, Workspace] = {
         owner_user_id="usr_jane",
         team="IM GM",
         status=JobStatus.running,
-        updated_at=datetime.utcnow(),
+        updated_at=utcnow_naive(),
     ),
     "wsp_tiktok": Workspace(
         id="wsp_tiktok",
@@ -71,7 +72,7 @@ WORKSPACES: dict[str, Workspace] = {
         owner_user_id="usr_jane",
         team="Creative Studio",
         status=JobStatus.pending,
-        updated_at=datetime.utcnow(),
+        updated_at=utcnow_naive(),
     ),
 }
 
@@ -279,7 +280,7 @@ def list_theme_create_reports(
 
 
 def create_theme_create_report(request: ThemeCreateStyleReportCreateRequest) -> ThemeCreateStyleReport:
-    now = datetime.utcnow()
+    now = utcnow_naive()
     report = ThemeCreateStyleReport(
         report_id=f"tcr_{uuid4().hex[:12]}",
         workspace_id=request.workspace_id,
@@ -325,7 +326,7 @@ def list_theme_create_presets(
 
 
 def create_theme_create_preset(request: ThemeCreatePresetCreateRequest) -> ThemeCreatePreset:
-    now = datetime.utcnow()
+    now = utcnow_naive()
     preset = ThemeCreatePreset(
         preset_id=f"tcp_{uuid4().hex[:12]}",
         name=request.name.strip() or "Untitled preset",
@@ -627,7 +628,7 @@ def analyze_remediation_assets(
             **(asset.analysis or {}),
             "remediation_analysis": result.model_dump(),
             "remediation_analysis_version": "v2_scan_then_fix",
-            "remediation_analyzed_at": datetime.utcnow().isoformat(),
+            "remediation_analyzed_at": utcnow_naive().isoformat(),
             "remediation_analyzed_by": created_by,
         }
         upsert_asset(asset)
@@ -655,7 +656,7 @@ def _mark_generation_progress(
     job.progress = max(0, min(99, progress))
     if message:
         job.message = message
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utcnow_naive()
     upsert_job(job)
     return True
 
@@ -998,7 +999,7 @@ async def _export_master_images_to_assets(
     target_sizes = _effective_output_sizes(requested_sizes, source_asset)
 
     created_assets: list[Asset] = []
-    now = created_at or datetime.utcnow()
+    now = created_at or utcnow_naive()
 
     for size in target_sizes:
         width, height = _parse_size(size)
@@ -1110,7 +1111,7 @@ async def _export_oversampled_728x180_resize_assets(
     from app.incept.composite import split_728x180_into_two_728x90
 
     created_assets: list[Asset] = []
-    now = created_at or datetime.utcnow()
+    now = created_at or utcnow_naive()
     base_source_title = _normalized_source_title(source_asset.title) if source_asset and source_asset.title else ""
 
     output_counter = 0
@@ -1408,7 +1409,7 @@ def save_uploaded_asset(
     ext = Path(filename).suffix or ".png"
     dest = UPLOAD_DIR / f"{asset_id}{ext}"
     dest.write_bytes(content)
-    created_at = datetime.utcnow()
+    created_at = utcnow_naive()
 
     asset = Asset(
         id=asset_id,
@@ -1513,7 +1514,7 @@ def _estimate_cost_usd(request: GenerationRequest, provider_generations: int) ->
 
 def _month_window(now: datetime | None = None) -> tuple[datetime, datetime]:
     """Return the current UTC calendar-month window without a reset job."""
-    current = now or datetime.utcnow()
+    current = now or utcnow_naive()
     start = datetime(current.year, current.month, 1)
     if current.month == 12:
         return start, datetime(current.year + 1, 1, 1)
@@ -2169,7 +2170,7 @@ def create_image_generation_job(request: GenerationRequest, user: User) -> Gener
     settings = get_settings()
     job_id = f"job_{uuid4().hex[:12]}"
     lineage_key = f"llg_ast_{uuid4().hex[:16]}"
-    now = datetime.utcnow()
+    now = utcnow_naive()
 
     is_openai_real = bool(settings.openai_api_key and request.provider == "openai")
     is_vertex_real = bool(
@@ -2423,7 +2424,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
 
     settings = get_settings()
     lineage_key = job.lineage_key
-    now = datetime.utcnow()
+    now = utcnow_naive()
     prompt_hash = sha256(request.prompt.encode()).hexdigest()[:16]
 
     # Resolve the effective model for each provider
@@ -2697,7 +2698,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 f"Generated {len(asset_ids)} resize assets with {provider_label}: "
                 f"{request.variants} variants × {len(requested_sizes)} sizes."
             )
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
 
             if job.thread_id:
                 thread_store.add_assistant_message(
@@ -2860,7 +2861,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 f"Generated {len(asset_ids)} Theme Create assets with {provider_label}: "
                 f"{request.variants} variants × {len(requested_theme_sizes)} sizes."
             )
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
 
             if job.thread_id:
                 thread_store.add_assistant_message(
@@ -3026,7 +3027,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
                 f"Generated {len(asset_ids)} remediation assets with {provider_label}: "
                 f"{request.variants} variants × {len(requested_remediation_sizes)} sizes."
             )
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
 
             if job.thread_id:
                 thread_store.add_assistant_message(
@@ -3152,7 +3153,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
             f"Generated {len(asset_ids)} assets with {provider_label}: "
             f"{request.variants} variants × {len(requested_sizes)} sizes."
         )
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         if job.thread_id:
             thread_store.add_assistant_message(
@@ -3172,7 +3173,7 @@ async def run_generation_background(job_id: str, request: GenerationRequest, use
         job.message = (
             f"Image generation failed: {error_summary}"
         )
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -3180,7 +3181,7 @@ def create_edit_job(request: "ImageEditRequest", user: User) -> GenerationJob:
     """Create a job record for an inpainting edit. Background task fills it."""
     job_id = f"job_{uuid4().hex[:12]}"
     lineage_key = f"llg_edit_{uuid4().hex[:16]}"
-    now = datetime.utcnow()
+    now = utcnow_naive()
     source_asset = _get_asset(request.asset_id)
     thread = _resolve_thread_for_request(
         workspace_id=request.workspace_id,
@@ -3282,7 +3283,7 @@ async def run_kakao_clean_background(
 
     settings = get_settings()
     effective_model = settings.vertex_gemini_image_model
-    now = datetime.utcnow()
+    now = utcnow_naive()
 
     try:
         original_asset = _get_asset(request.asset_id)
@@ -3293,7 +3294,7 @@ async def run_kakao_clean_background(
         if not original_bytes:
             raise FileNotFoundError(f"Image bytes not found for {request.asset_id}")
         job.progress = 20
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         b64_images = await _generate_kakao_clean_image(
@@ -3305,7 +3306,7 @@ async def run_kakao_clean_background(
             raise RuntimeError("Kakao clean returned no image data")
 
         job.progress = 80
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         raw_outputs = [base64.b64decode(b64) for b64 in b64_images if b64]
@@ -3333,7 +3334,7 @@ async def run_kakao_clean_background(
         job.status = JobStatus.completed
         job.progress = 100
         job.message = "Kakao clean completed."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         if job.thread_id:
@@ -3356,7 +3357,7 @@ async def run_kakao_clean_background(
         job.progress = 0
         error_summary = f"{exc.__class__.__name__}: {str(exc)}"[:500]
         job.message = f"Kakao clean failed: {error_summary}"
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -3369,7 +3370,7 @@ async def run_generate_gif_background(
     if not job:
         return
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
 
     try:
         source_asset = _get_asset(request.asset_id)
@@ -3458,7 +3459,7 @@ async def run_generate_gif_background(
         job.status = JobStatus.completed
         job.progress = 100
         job.message = f"Generated GIF for {size_str}."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         if job.thread_id:
@@ -3480,7 +3481,7 @@ async def run_generate_gif_background(
         job.status = JobStatus.failed
         job.progress = 0
         job.message = f"Generate GIF failed: {str(exc).strip() or exc.__class__.__name__}"
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -3493,7 +3494,7 @@ async def run_kakao_bizboard_background(
     if not job:
         return
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
 
     try:
         cleaned_asset = _get_asset(request.cleaned_asset_id)
@@ -3511,7 +3512,7 @@ async def run_kakao_bizboard_background(
             )
         job.progress = 40
         job.message = "Finalizing Kakao Bizboard asset..."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         created_assets = await _export_master_images_to_assets(
@@ -3523,7 +3524,7 @@ async def run_kakao_bizboard_background(
             model="bizboard-template",
             label="Kakao Bizboard",
             theme="Kakao Bizboard",
-            requested_sizes=["1029x258"],
+            requested_sizes=["960x300"],
             source_asset=cleaned_asset,
             context_assets=[cleaned_asset],
             created_at=now,
@@ -3531,9 +3532,11 @@ async def run_kakao_bizboard_background(
         asset_ids = [asset.id for asset in created_assets]
 
         prompt_hash_source = "|".join([
+            request.template,
             request.main_copy.strip(),
+            request.sub_copy.strip(),
             request.app_download_copy.strip(),
-            request.dsp_name.strip(),
+            request.additional_info.strip(),
             "gacha" if request.gacha else "standard",
         ])
         prompt_hash = sha256(prompt_hash_source.encode()).hexdigest()[:16]
@@ -3547,7 +3550,7 @@ async def run_kakao_bizboard_background(
         job.status = JobStatus.completed
         job.progress = 100
         job.message = "Kakao Bizboard completed."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         if job.thread_id:
@@ -3570,7 +3573,7 @@ async def run_kakao_bizboard_background(
         job.status = JobStatus.failed
         job.progress = 0
         job.message = f"Kakao Bizboard failed: {error_summary}"
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -3584,7 +3587,7 @@ async def run_edit_background(
     if not job:
         return
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
 
     try:
         original_asset = _get_asset(request.asset_id)
@@ -3602,11 +3605,11 @@ async def run_edit_background(
             mask_bytes = base64.b64decode(mask_b64)
 
         job.progress = 15
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         logo_assets = [_get_asset(aid) for aid in (request.extra_asset_ids or []) if _get_asset(aid)]
         job.progress = 25
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         if _is_gemini_image_model(request.model):
             reference_images = [original_bytes]
@@ -3626,7 +3629,7 @@ async def run_edit_background(
                 raise RuntimeError("Gemini image edit returned no image data")
 
             job.progress = 80
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
 
             prompt_hash = sha256(request.prompt.encode()).hexdigest()[:16]
             raw_outputs = [base64.b64decode(b64) for b64 in b64_images if b64]
@@ -3653,7 +3656,7 @@ async def run_edit_background(
             job.status = JobStatus.completed
             job.progress = 100
             job.message = f"Edited {len(asset_ids)} image(s)."
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
             upsert_job(job)
 
             if job.thread_id:
@@ -3676,12 +3679,12 @@ async def run_edit_background(
             job.status = JobStatus.failed
             job.progress = 0
             job.message = "Manual mask required for non-Gemini edits."
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utcnow_naive()
             upsert_job(job)
             return
 
         job.progress = 40
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         b64_images = await _edit_image_openai(
             original_bytes=original_bytes,
@@ -3692,7 +3695,7 @@ async def run_edit_background(
         )
 
         job.progress = 80
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         # ── Save output assets ──────────────────────────────────────────────
         prompt_hash = sha256(request.prompt.encode()).hexdigest()[:16]
@@ -3726,7 +3729,7 @@ async def run_edit_background(
         job.status = JobStatus.completed
         job.progress = 100
         job.message = f"Edited {len(asset_ids)} image(s)."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
         # ── Update session ──────────────────────────────────────────────────
@@ -3750,7 +3753,7 @@ async def run_edit_background(
         job.progress = 0
         error_summary = f"{exc.__class__.__name__}: {str(exc)}"[:500]
         job.message = f"Image edit failed for model {request.model}: {error_summary}"
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -3780,7 +3783,7 @@ def _make_simple_job(
 ) -> GenerationJob:
     job_id = f"job_{uuid4().hex[:12]}"
     lineage_key = f"llg_{tool_id}_{uuid4().hex[:12]}"
-    now = datetime.utcnow()
+    now = utcnow_naive()
     job = GenerationJob(
         job_id=job_id,
         workspace_id=workspace_id,
@@ -3827,7 +3830,7 @@ def _save_output_asset(
         except Exception:
             pass
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
     asset = Asset(
         id=asset_id,
         title=label,
@@ -3902,7 +3905,7 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
             raise FileNotFoundError("Image bytes not found")
 
         job.progress = 15
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         from app.incept.composite import create_outpaint_inputs
         expanded_bytes, mask_bytes = create_outpaint_inputs(
@@ -3910,7 +3913,7 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
         )
 
         job.progress = 30
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         prompt = request.prompt or (
             f"Seamlessly extend this image {request.direction}ward. "
@@ -3947,7 +3950,7 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
         job.status = JobStatus.completed
         job.progress = 100
         job.message = f"Outpainted {request.direction}."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         if job.thread_id:
             thread_store.add_assistant_message(
@@ -3968,7 +3971,7 @@ async def run_outpaint_background(job_id: str, request: OutpaintRequest, user: U
         logger.exception("Outpaint failed for job %s", job_id)
         job.status = JobStatus.failed
         job.message = "Outpaint failed. Check OPENAI_API_KEY and logs."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -4008,7 +4011,7 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
             raise FileNotFoundError("Image bytes not found")
 
         job.progress = 20
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         from app.incept.composite import remove_background
         result_bytes, used_rembg = remove_background(original_bytes)
@@ -4064,7 +4067,7 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
         job.status = JobStatus.completed
         job.progress = 100
         job.message = "Background removed."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         if job.thread_id:
             thread_store.add_assistant_message(
@@ -4085,7 +4088,7 @@ async def run_remove_bg_background(job_id: str, request: RemoveBGRequest, user: 
         logger.exception("Remove-BG failed for job %s", job_id)
         job.status = JobStatus.failed
         job.message = "Background removal failed."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
 
 
@@ -4126,7 +4129,7 @@ async def run_add_text_background(job_id: str, request: AddTextRequest, user: Us
             raise FileNotFoundError("Image bytes not found")
 
         job.progress = 30
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
 
         from app.incept.composite import add_text_overlay
         result_bytes = add_text_overlay(
@@ -4155,7 +4158,7 @@ async def run_add_text_background(job_id: str, request: AddTextRequest, user: Us
         job.status = JobStatus.completed
         job.progress = 100
         job.message = f"Text added: {request.text[:40]}"
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
         if job.thread_id:
             thread_store.add_assistant_message(
@@ -4176,5 +4179,5 @@ async def run_add_text_background(job_id: str, request: AddTextRequest, user: Us
         logger.exception("Add-text failed for job %s", job_id)
         job.status = JobStatus.failed
         job.message = "Text overlay failed."
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)

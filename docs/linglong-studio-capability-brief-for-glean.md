@@ -246,7 +246,7 @@ Studio 的 Agent 设计重点是“职责分工 + 共享合同 + 软件校验”
 
 - **前端**：Next.js 15 + TypeScript；
 - **API**：FastAPI + Python；
-- **文本/Agent 模型**：Gemini `gemini-3.6-flash`；
+- **文本/Agent 模型**：Gemini `gemini-3.8-flash`；
 - **图片生成模型**：Gemini `gemini-3.1-flash-image`；
 - **视频生成模型**：Veo `veo-3.1-fast-generate-001`；
 - **云端素材存储**：GCS `incept-assets`；

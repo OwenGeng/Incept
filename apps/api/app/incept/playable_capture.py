@@ -235,7 +235,7 @@ def capture_playable_to_mp4(
                 {
                     "schemaVersion": 1,
                     "id": slug,
-                    "name": "Incept Browser Capture",
+                    "name": "LinglongLab Browser Capture",
                     "version": "1.0.0",
                     "kind": "creative-template",
                     "sourceType": "local",
@@ -265,7 +265,7 @@ def capture_playable_to_mp4(
                 {
                     "schemaVersion": 1,
                     "id": "incept-browser-capture",
-                    "name": "Incept Browser Capture",
+                    "name": "LinglongLab Browser Capture",
                     "video": {
                         "width": width,
                         "height": height,

@@ -1,11 +1,11 @@
 """
-Incept router — all Incept image-generation endpoints.
+LinglongLab router — all LinglongLab image-generation endpoints.
 
 Mounted into the unified nbs-api at root level (no prefix), so the
 Next.js proxy at /api/incept/[...path] can forward calls unchanged:
   browser  →  /api/incept/assets
-  proxy    →  <API_BASE_URL>/assets          (Incept)
-  browser  →  /api/v1/supply-smb/...         (InterSight — different prefix, no conflict)
+  proxy    →  <API_BASE_URL>/assets          (LinglongLab)
+  browser  →  /api/incept/...                (LinglongLab workspace API)
 """
 
 import io
@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from app.incept.auth import get_current_user, require_role
 from app.incept.config import get_settings
+from app.incept.datetime_utils import utcnow_naive
 from app.incept.models import (
     AddTextRequest,
     Asset,
@@ -304,7 +305,7 @@ def cancel_job(job_id: str, user: User = Depends(get_current_user)) -> Generatio
         job.status = JobStatus.failed
         job.message = "Cancelled by user"
         job.progress = 0
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utcnow_naive()
         upsert_job(job)
     return job
 

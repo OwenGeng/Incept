@@ -1,5 +1,5 @@
 # =============================================================================
-# Incept API -- Cloud Run Dockerfile
+# LinglongLab API -- Cloud Run Dockerfile
 #
 # Build context: repo root, plus a named `creative-core` context:
 # docker build --build-context creative-core=/path/to/creative-core ...
@@ -74,20 +74,16 @@ COPY apps/api/app/ ./app/
 # are available to the separately created Cloud Run migration Job.
 COPY apps/api/scripts/migrate_sqlite_to_postgres.py ./scripts/migrate_sqlite_to_postgres.py
 
-# SQL query files are loaded at runtime by supply_smb_live.py
-COPY sql/ ./sql/
-
-# Fonts + template for server-side Kakao Bizboard image generation (Pillow/FreeType)
+# Kakao fonts: Pretendard for the 960x300 Bizboard composer, Spoqa for the
+# gacha disclosure stamped on resized Kakao creatives (composite.py).
+COPY apps/web/public/Pretendard/ ./fonts/kakao/
 COPY apps/web/public/SpoqaHanSansNeo_all/SpoqaHanSansNeo_TTF_original/ ./fonts/kakao/
-COPY apps/web/public/kakao-bizboard-template.png ./fonts/kakao/kakao-bizboard-template.png
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 # Tells _project_root() exactly where to look -- no directory traversal needed
 ENV INCEPT_PROJECT_ROOT=/app
-# Kakao font/template paths inside the container
 ENV KAKAO_FONT_DIR=/app/fonts/kakao
-ENV KAKAO_TEMPLATE_PATH=/app/fonts/kakao/kakao-bizboard-template.png
 # Browser capture dependencies for Playable -> Video.
 ENV CREATIVE_CORE_HOME=/opt/creative-core
 ENV PLAYABLE_CAPTURE_CHROME_PATH=/usr/local/bin/incept-chromium

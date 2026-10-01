@@ -7,7 +7,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from app.routers.video_runtime import ManagedMediaRequest, generate_media
+from app.routers.video_runtime import ManagedMediaRequest, generate_media, validate_media_model
 from app.incept.config import get_settings
 
 from . import store
@@ -39,6 +39,10 @@ def _extension_for_mime(mime_type: str) -> str:
         "video/mp4": ".mp4",
         "video/webm": ".webm",
         "video/quicktime": ".mov",
+        "audio/mpeg": ".mp3",
+        "audio/wav": ".wav",
+        "audio/ogg": ".ogg",
+        "audio/opus": ".opus",
     }
     return preferred.get(mime_type) or mimetypes.guess_extension(mime_type) or ".bin"
 
@@ -50,6 +54,7 @@ def _write_result(
     media_type: str,
     mime_type: str,
     encoded: str,
+    output_directory: str,
 ) -> tuple[str, int]:
     try:
         payload = base64.b64decode(encoded, validate=True)
@@ -59,7 +64,8 @@ def _write_result(
         raise ValueError("Vertex returned an empty media file")
 
     root = store.assets_root(email, project_id)
-    relative_path = Path("generated") / f"{media_type}-{job_id}{_extension_for_mime(mime_type)}"
+    directory = store.safe_asset_path(root, output_directory, allow_root=True)
+    relative_path = directory.relative_to(root) / f"{media_type}-{job_id}{_extension_for_mime(mime_type)}"
     target = store.safe_asset_path(root, relative_path.as_posix())
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
@@ -71,6 +77,7 @@ def _write_result(
 def create_media_job(email: str, project_id: str, request: MediaJobCreate) -> MediaJob:
     # Validate ownership before accepting a potentially billable operation.
     store.get_project(email, project_id)
+    validate_media_model(request.media_type, request.provider_id, request.model_id)
     if request.idempotency_key:
         existing = next(
             (
@@ -85,19 +92,15 @@ def create_media_job(email: str, project_id: str, request: MediaJobCreate) -> Me
                 _start_task(email, project_id, existing.id)
             return existing
     settings = get_settings()
-    model = (
-        settings.vertex_gemini_image_model
-        if request.media_type == "image"
-        else (settings.vertex_veo_model or settings.vertex_veo_fast_model or "")
-    )
-    location = settings.gcp_location if request.media_type == "image" else settings.vertex_veo_location
+    location = settings.vertex_veo_location if request.media_type == "video" else settings.gcp_location
     job = store.save_media_job(
         email,
         MediaJob(
             id=uuid.uuid4().hex,
             project_id=project_id,
             request=request,
-            model=model,
+            provider=request.provider_id,
+            model=request.model_id,
             location=location,
         ),
     )
@@ -171,12 +174,19 @@ async def _run_media(email: str, project_id: str, job_id: str) -> None:
         response = await generate_media(
             ManagedMediaRequest(
                 media_type=current.request.media_type,
+                provider_id=current.request.provider_id,
+                model_id=current.request.model_id,
                 prompt=current.request.prompt,
                 ratio=current.request.ratio,
                 size=current.request.size,
                 duration=current.request.duration,
                 first_frame=first_frame,
                 last_frame=last_frame,
+                resolution=current.request.resolution,
+                generate_audio=current.request.generate_audio,
+                voice=current.request.voice,
+                speed=current.request.speed,
+                format=current.request.format,
             )
         )
         if store.get_media_job(email, project_id, job_id).status == "cancelled":
@@ -195,6 +205,7 @@ async def _run_media(email: str, project_id: str, job_id: str) -> None:
             response.media_type,
             response.mime_type,
             response.data,
+            current.request.output_directory,
         )
         latest = store.get_media_job(email, project_id, job_id)
         if latest.status != "cancelled":
@@ -231,9 +242,14 @@ def cancel_media_job(email: str, project_id: str, job_id: str) -> MediaJob:
     job = store.get_media_job(email, project_id, job_id)
     if job.status in {"completed", "failed", "cancelled"}:
         return job
-    return store.save_media_job(
+    cancelled = store.save_media_job(
         email,
         job.model_copy(
             update={"status": "cancelled", "message": "Cancellation requested"}
         ),
     )
+    with _lock:
+        active = _tasks.get(job_id)
+    if active and not active.done():
+        active.cancel()
+    return cancelled

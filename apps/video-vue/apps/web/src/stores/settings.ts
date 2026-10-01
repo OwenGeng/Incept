@@ -83,7 +83,7 @@ export const privacySettings = computed(() => {
   };
 });
 
-export type CustomProviderModel = { id: string; label: string; contextWindow?: number; maxOutputTokens?: number };
+export type CustomProviderModel = { id: string; label: string; contextWindow?: number; maxOutputTokens?: number; isDefault?: boolean };
 export type CustomProvider = { id: string; label: string; version?: string; apiUrl: string; apiKey: string; protocol: string; models: CustomProviderModel[] };
 export const customProviders = computed<CustomProvider[]>(() => Array.isArray(settings.value.customProviders)
   ? settings.value.customProviders.filter((item): item is CustomProvider => !!item && typeof item.id === "string" && typeof item.label === "string" && Array.isArray(item.models)
@@ -91,7 +91,7 @@ export const customProviders = computed<CustomProvider[]>(() => Array.isArray(se
   : []);
 
 export const modelChoices = computed(() => customProviders.value.flatMap(provider => provider.models.map(model => ({
-  value: JSON.stringify([provider.id, model.id]), providerId: provider.id, modelId: model.id, label: model.label, contextWindow: model.contextWindow,
+  value: JSON.stringify([provider.id, model.id]), providerId: provider.id, modelId: model.id, label: model.label, contextWindow: model.contextWindow, isDefault: model.isDefault,
 }))));
 
 export async function loadSettings() {

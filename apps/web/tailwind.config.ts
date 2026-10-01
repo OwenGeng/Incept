@@ -9,7 +9,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // ── Incept: semantic tokens matching original Incept-ai-workspace ──────
+        // ── LinglongLab: semantic tokens matching original LinglongLab-ai-workspace ──────
         // CSS variables are defined in .incept-scope in globals.css (hex values).
         // Direct var() references — solid colors work perfectly.
         // Note: opacity modifiers (bg-muted/60) are not supported with this format.
@@ -64,26 +64,6 @@ const config: Config = {
           orange: "#fb5607",
           yellow: "#ffbe0b",
         },
-        intersight: {
-          primary:      "#3a86ff",
-          primaryHover: "#2872f0",
-          primarySoft:  "#EEF4FF",
-          primaryBorder:"#C7DEFF",
-          mist:         "#F4F7FF",
-          lavender:     "#EEF2FF",
-          pearl:        "#F8FAFF",
-          sky:          "#EDF4FF",
-          text:         "#1F2230",
-          secondary:    "#586174",
-          tertiary:     "#8B92A8",
-          border:       "#E0E8F5",
-          softBorder:   "#EAF0FA",
-          success:      "#2FA66A",
-          warning:      "#E59A2F",
-          danger:       "#D85C5C",
-          purple:       "#8338ec",
-          teal:         "#4FA4D9"
-        }
       },
       boxShadow: {
         shell: "0 20px 50px rgba(20,30,48,0.10)",

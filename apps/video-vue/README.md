@@ -1,6 +1,6 @@
 # LinglongLab Video workspace
 
-This directory contains the restored Vue video workspace used by the Incept
+This directory contains the restored Vue video workspace used by the LinglongLab
 web application. It is compiled as static assets and served by the existing
 Next.js service at `/video-app`; `/video` embeds that build without adding a
 third Cloud Run service.
@@ -12,7 +12,7 @@ uses the fixed internal workspace identity `local@linglonglab.internal`.
 
 Runtime model names, providers, locations, and credentials are never stored in
 the Vue bundle. FastAPI exposes the deployment-managed Vertex model catalog and
-executes text, image, and video requests through the existing Incept backend.
+executes text, image, and video requests through the existing LinglongLab backend.
 In production, the existing Cloud Run deployment mounts the configured video
 bucket at `VIDEO_STUDIO_DATA_DIR`, so the Vue filesystem-shaped project API is
 durable without a second storage service or duplicate object writes. Project

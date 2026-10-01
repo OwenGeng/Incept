@@ -14,13 +14,13 @@ selected takes, and a traceable delivery without losing creative control.
 
 ## Product Purpose
 
-Incept Video Production is a workspace-first AI commercial-video system. A
+LinglongLab Video Production is a workspace-first AI commercial-video system. A
 single project keeps the brief, source assets, plan, generated takes, edit
 decisions, QA state, and final delivery together.
 
 ## Positioning
 
-Unlike a one-prompt video generator, Incept makes every billable generation a
+Unlike a one-prompt video generator, LinglongLab makes every billable generation a
 specific, reviewable shot operation and keeps the selected-take lineage through
 to delivery.
 
@@ -43,13 +43,13 @@ delivery. Work may start as a new ad, a repair, or a CTV composition.
 
 ## Brand Commitments
 
-Use the established Linglong / Incept identity. Video Production uses a
+Use the established Linglong / LinglongLab identity. Video Production uses a
 Linglong-owned production control-room interface, branding, code, content,
 and assets.
 
 ## Evidence on Hand
 
-- Product workflow: `docs/incept-video-production-workspace.md`
+- Product workflow: `docs/linglonglab-video-production-workspace.md`
 - Current boundary: `docs/video-production-product-design.md`
 - Maturity baseline: `docs/video-production-maturity-register.md`
 - Workspace interaction reference: https://higgsfield.ai/generate

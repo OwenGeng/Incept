@@ -73,6 +73,7 @@ export interface MediaModel {
   providerLabel: string;
   modelId: string;
   label: string;
+  isDefault?: boolean;
   type: "image" | "video" | "audio";
   mode?: unknown;
   imageSizes?: string[];

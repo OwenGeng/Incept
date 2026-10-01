@@ -32,7 +32,7 @@ class BigQueryService:
         sql = Path(file_path).read_text(encoding="utf-8")
         return self.query(sql)
 
-    # ── Intersight dataset bootstrap ───────────────────────────────────────────
+    # ── Application dataset bootstrap ───────────────────────────────────────────
 
     def _write_project(self) -> str:
         return (
@@ -42,16 +42,16 @@ class BigQueryService:
         )
 
     def _write_dataset(self) -> str:
-        return settings.bq_dataset_supply_smb_write or "intersight"
+        return settings.bq_dataset_app_write or "Incept"
 
-    def ensure_intersight_tables(self) -> None:
-        """Create the intersight dataset and required tables if they don't exist."""
+    def ensure_app_tables(self) -> None:
+        """Create the application dataset and required tables if they don't exist."""
         if self._tables_ready:
             return
         project = self._write_project()
         dataset_name = self._write_dataset()
         if not project:
-            logger.warning("No write project configured — skipping intersight table setup.")
+            logger.warning("No write project configured — skipping application table setup.")
             return
 
         # Ensure dataset exists
@@ -64,7 +64,7 @@ class BigQueryService:
             try:
                 self.client.create_dataset(dataset, exists_ok=True)
             except Exception as exc:
-                logger.warning("Could not create intersight dataset: %s", exc)
+                logger.warning("Could not create application dataset: %s", exc)
 
         # Ensure tables exist via DDL
         ddl_statements = [
@@ -90,7 +90,7 @@ class BigQueryService:
     # ── Feedback ───────────────────────────────────────────────────────────────
 
     def write_feedback(self, feedback: dict[str, Any]) -> None:
-        """Insert a user feedback row into intersight.feedback."""
+        """Insert a user feedback row into the application feedback table."""
         project = self._write_project()
         dataset_name = self._write_dataset()
         if not project:

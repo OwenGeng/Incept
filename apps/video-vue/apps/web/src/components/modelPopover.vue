@@ -61,7 +61,7 @@ const selectedModelChoice = computed(() => modelChoices.value.find(item => item.
 const reasoningLabel = computed(() => reasoningOptions.find(item => item.value === reasoningEffort.value)?.label ?? "默认");
 watch(selectedModel, () => { reasoningEffort.value = ""; });
 watch(modelChoices, items => {
-  if (!items.some(item => item.value === selectedModel.value)) selectedModel.value = items[0]?.value ?? "";
+  if (!items.some(item => item.value === selectedModel.value)) selectedModel.value = (items.find(item => item.isDefault) ?? items[0])?.value ?? "";
 }, { immediate: true });
 watch(() => !props.active || props.disabled, close => { if (close) visible.value = false; });
 </script>

@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.incept.config import get_settings
+from app.incept.datetime_utils import utcnow_naive
 from app.incept.db import _connect, _schedule_db_backup, init_db
 from app.incept.models import (
     PlayableCopilotMessage,
@@ -227,7 +228,7 @@ def _enforce_copilot_limits(request: PlayableCopilotMessageRequest, user: User) 
     message = request.message.strip()
     if len(message) > settings.studio_copilot_max_message_chars:
         raise ValueError(f"Copilot messages are limited to {settings.studio_copilot_max_message_chars:,} characters.")
-    now = datetime.utcnow()
+    now = utcnow_naive()
     recent = [
         event for event in USAGE_EVENTS.values()
         if event.user_id == user.id
@@ -315,7 +316,7 @@ def _persist_copilot_turn(
         user_email=user.email, provider="gemini", model=request.model, operation="playable_copilot", prompt_hash="",
         variants=1, output_size_count=0, output_format="text", estimated_provider_generations=1,
         output_asset_count=0, estimated_cost_usd=estimated_cost, input_tokens=input_tokens,
-        output_tokens=output_tokens, created_at=datetime.utcnow(),
+        output_tokens=output_tokens, created_at=utcnow_naive(),
     )
     USAGE_EVENTS[event.id] = event
     from app.incept.db import upsert_usage_event

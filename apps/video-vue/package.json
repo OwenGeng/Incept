@@ -18,7 +18,7 @@
     "build:web": "pnpm --filter '@linglonglab/video-web' build",
     "build": "pnpm build:nodes && pnpm build:web",
     "sync": "node scripts/sync-build.mjs",
-    "prepare:incept": "pnpm build && pnpm sync",
+    "prepare:linglonglab": "pnpm build && pnpm sync",
     "dev": "pnpm --filter '@linglonglab/video-web' dev",
     "check:i18n": "node scripts/check-i18n.mjs",
     "typecheck": "pnpm --filter '@linglonglab/video-*' typecheck"
@@ -29,5 +29,10 @@
     "postcss": "^8.5.28",
     "postcss-pxtorem": "^6.1.0",
     "typescript": "^7.0.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@earendil-works/pi-ai@0.85.1>@aws-sdk/client-bedrock-runtime": "-"
+    }
   }
 }

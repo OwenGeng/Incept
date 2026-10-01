@@ -24,13 +24,11 @@ class Settings(BaseSettings):
     gcp_project_data: str = Field(default="", alias="GCP_PROJECT_DATA")
     bq_write_project: str = Field(default="", alias="BQ_WRITE_PROJECT")
     bq_read_project: str = Field(default="", alias="BQ_READ_PROJECT")
-    bq_dataset_supply_smb_write: str = Field(default="Incept", alias="BQ_DATASET_SUPPLY_SMB_WRITE")
+    # Legacy production datasets retain their original name to preserve data.
+    bq_dataset_app_write: str = Field(default="Incept", alias="BQ_DATASET_APP_WRITE")
     bq_dataset_config: str = Field(default="Incept", alias="BQ_DATASET_CONFIG")
 
     google_cloud_project: str = Field(default="", alias="GOOGLE_CLOUD_PROJECT")
-    google_cloud_location: str = Field(default="global", alias="GOOGLE_CLOUD_LOCATION")
-    google_genai_use_enterprise: bool = Field(default=True, alias="GOOGLE_GENAI_USE_ENTERPRISE")
-    gemini_model: str = Field(default="gemini-3.6-flash", alias="GEMINI_MODEL")
 
     @cached_property
     def cors_allow_origins_list(self) -> list[str]:

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "release_id": "linglong-image-video-v1.0.0-rc.1",
+  "release_profile": "image-video",
+  "source_commit": "REPLACE_WITH_THE_RELEASE_COMMIT_SHA",
+  "products": {
+    "image": true,
+    "video": true,
+    "gaming_playable": false
+  },
+  "images": {
+    "api": { "tag": "linglong-image-video-v1.0.0-rc.1" },
+    "web": { "tag": "linglong-image-video-v1.0.0-rc.1" }
+  },
+  "approvals": {
+    "required": ["AI Committee", "Engineering owner", "Product owner"],
+    "records": []
+  },
+  "rollout": {
+    "strategy": "Cloud Run revision",
+    "rollback_release_id": "REPLACE_BEFORE_DEPLOY"
+  }
+}

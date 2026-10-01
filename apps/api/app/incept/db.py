@@ -91,7 +91,7 @@ def _validate_sqlite_candidate(path: Path) -> int:
             for row in candidate.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         }
         if not {"assets", "threads", "jobs"}.issubset(tables):
-            raise ValueError("SQLite candidate is missing required Incept tables")
+            raise ValueError("SQLite candidate is missing required LinglongLab tables")
         score = 0
         for table in ("assets", "threads", "video_productions", "jobs"):
             if table in tables:
@@ -137,7 +137,7 @@ def restore_db_from_gcs() -> None:
     # On Cloud Run, however, a non-empty DB can be baked into the image or left
     # by a prior request inside an ephemeral instance; GCS is authoritative.
     if not _is_cloud_run() and _DB_PATH.exists() and _DB_PATH.stat().st_size > 0:
-        logger.info("Keeping existing local Incept database; skipping GCS startup restore: %s", _DB_PATH)
+        logger.info("Keeping existing local LinglongLab database; skipping GCS startup restore: %s", _DB_PATH)
         return
     bucket_name = _get_db_bucket()
     if not bucket_name:
@@ -169,17 +169,17 @@ def restore_db_from_gcs() -> None:
                 if source == "canonical" and score > 0:
                     break
             except Exception:
-                logger.warning("Skipping invalid %s Incept DB candidate: gs://%s/%s", source, bucket_name, blob.name, exc_info=True)
+                logger.warning("Skipping invalid %s LinglongLab DB candidate: gs://%s/%s", source, bucket_name, blob.name, exc_info=True)
 
         if restored is None:
-            raise RuntimeError("No valid Incept database candidate could be restored from GCS")
+            raise RuntimeError("No valid LinglongLab database candidate could be restored from GCS")
         candidate_path, score, source = restored
         try:
             os.replace(candidate_path, _DB_PATH)
         finally:
             candidate_path.unlink(missing_ok=True)
         size_kb = _DB_PATH.stat().st_size // 1024
-        logger.info("Restored Incept DB from GCS %s (%d KB, metadata score=%d)", source, size_kb, score)
+        logger.info("Restored LinglongLab DB from GCS %s (%d KB, metadata score=%d)", source, size_kb, score)
     except Exception:
         global _cloud_restore_unavailable
         if _is_cloud_run():
@@ -217,10 +217,10 @@ def _backup_local_db_daily() -> Path | None:
         # process. The first valid snapshot of the day is deliberately frozen.
         if not snapshot_path.exists():
             os.replace(candidate_path, snapshot_path)
-            logger.info("Created immutable local Incept DB snapshot: %s", snapshot_path)
+            logger.info("Created immutable local LinglongLab DB snapshot: %s", snapshot_path)
         return snapshot_path
     except Exception:
-        logger.warning("Could not create local Incept database snapshot", exc_info=True)
+        logger.warning("Could not create local LinglongLab database snapshot", exc_info=True)
         return None
     finally:
         candidate_path.unlink(missing_ok=True)
@@ -246,7 +246,7 @@ def _do_backup_now() -> None:
     if not bucket_name or not _DB_PATH.exists():
         return
     if _is_cloud_run() and _cloud_restore_unavailable:
-        logger.error("Refusing to upload Incept DB: Cloud Run startup restore failed, so this instance may only contain an empty database")
+        logger.error("Refusing to upload LinglongLab DB: Cloud Run startup restore failed, so this instance may only contain an empty database")
         return
     try:
         client = _get_gcs_client()
@@ -265,10 +265,10 @@ def _do_backup_now() -> None:
                 f"{now.strftime('%Y%m%dT%H%M%S.%fZ')}.db"
             )
             bucket.blob(snapshot_name).upload_from_filename(str(_DB_PATH))
-            logger.info("Backed up Incept database to %s and %s", _GCS_DB_OBJECT, snapshot_name)
+            logger.info("Backed up LinglongLab database to %s and %s", _GCS_DB_OBJECT, snapshot_name)
         else:
             logger.info(
-                "Backed up Incept database to %s; immutable GCS snapshot not due until one hour after %s",
+                "Backed up LinglongLab database to %s; immutable GCS snapshot not due until one hour after %s",
                 _GCS_DB_OBJECT,
                 latest_snapshot_at.isoformat(),
             )

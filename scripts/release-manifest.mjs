@@ -9,16 +9,15 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const profiles = {
-  "image-ai-video": {
-    products: { image: true, ai_video: true, video_production: false, gaming_playable: false },
-  },
-  full: {
-    products: { image: true, ai_video: true, video_production: true, gaming_playable: true },
+  "image-video": {
+    products: { image: true, video: true, gaming_playable: false },
   },
 };
 
-const releaseIdPattern = /^linglong-(?:ai-video|full-studio)-v\d+\.\d+\.\d+(?:-(?:rc\.\d+|hotfix\.\d+))?$/;
+const releaseIdPattern = /^linglong-image-video-v\d+\.\d+\.\d+(?:-(?:rc\.\d+|hotfix\.\d+))?$/;
 const shaPattern = /^[0-9a-f]{40}$/;
+const requiredApprovalRoles = ["AI Committee", "Engineering owner", "Product owner"];
+const approvalDecisions = new Set(["approved", "rejected", "changes_requested"]);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function fail(message) {
@@ -44,9 +43,9 @@ function validate(manifest) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) fail("manifest must be a JSON object");
   if (manifest.schema_version !== 1) fail("schema_version must be 1");
   if (typeof manifest.release_id !== "string" || !releaseIdPattern.test(manifest.release_id)) {
-    fail("release_id must look like linglong-ai-video-v1.2.3 or linglong-full-studio-v1.2.3");
+    fail("release_id must look like linglong-image-video-v1.2.3");
   }
-  if (!(manifest.release_profile in profiles)) fail("release_profile must be image-ai-video or full");
+  if (!(manifest.release_profile in profiles)) fail("release_profile must be image-video");
   if (typeof manifest.source_commit !== "string" || !shaPattern.test(manifest.source_commit)) {
     fail("source_commit must be a full 40-character Git SHA");
   }
@@ -61,8 +60,34 @@ function validate(manifest) {
     const tag = manifest.images?.[artifact]?.tag;
     if (tag !== manifest.release_id) fail(`images.${artifact}.tag must exactly equal release_id`);
   }
-  if (!Array.isArray(manifest.approvals?.required) || manifest.approvals.required.length === 0) {
-    fail("approvals.required must name the required reviewers");
+  if (!Array.isArray(manifest.approvals?.required)) {
+    fail("approvals.required must be an array");
+  }
+  if (
+    manifest.approvals.required.length !== requiredApprovalRoles.length
+    || requiredApprovalRoles.some((role) => !manifest.approvals.required.includes(role))
+  ) {
+    fail(`approvals.required must contain exactly: ${requiredApprovalRoles.join(", ")}`);
+  }
+  if (!Array.isArray(manifest.approvals.records)) fail("approvals.records must be an array");
+  for (const record of manifest.approvals.records) {
+    if (!record || typeof record !== "object" || Array.isArray(record)) fail("each approval record must be an object");
+    if (!requiredApprovalRoles.includes(record.role)) fail(`unknown approval role: ${record.role ?? "missing"}`);
+    if (!approvalDecisions.has(record.decision)) fail(`invalid approval decision for ${record.role}`);
+    if (typeof record.reviewer !== "string" || !record.reviewer.trim()) fail(`approval reviewer is required for ${record.role}`);
+    if (typeof record.evidence !== "string" || !record.evidence.trim()) fail(`approval evidence is required for ${record.role}`);
+    if (typeof record.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) {
+      fail(`approval date must be YYYY-MM-DD for ${record.role}`);
+    }
+  }
+  if (manifest.rollout?.strategy !== "Cloud Run revision") {
+    fail("rollout.strategy must be Cloud Run revision");
+  }
+  if (!releaseIdPattern.test(manifest.rollout?.rollback_release_id ?? "")) {
+    fail("rollout.rollback_release_id must be a valid prior release ID");
+  }
+  if (manifest.rollout.rollback_release_id === manifest.release_id) {
+    fail("rollout.rollback_release_id must differ from release_id");
   }
   return manifest;
 }
@@ -83,12 +108,9 @@ function assertCheckout(manifest, manifestPath) {
 }
 
 function assertApproved(manifest) {
-  const approvedRoles = new Set(
-    (manifest.approvals.records ?? [])
-      .filter((record) => record && record.decision === "approved" && typeof record.role === "string")
-      .map((record) => record.role),
-  );
-  const missing = manifest.approvals.required.filter((role) => !approvedRoles.has(role));
+  const latestDecisionByRole = new Map();
+  for (const record of manifest.approvals.records) latestDecisionByRole.set(record.role, record.decision);
+  const missing = manifest.approvals.required.filter((role) => latestDecisionByRole.get(role) !== "approved");
   if (missing.length) fail(`missing approved review records for: ${missing.join(", ")}`);
 }
 
@@ -101,14 +123,13 @@ function printEnvironment(manifest) {
   const values = {
     RELEASE_ID: manifest.release_id,
     PRODUCT_RELEASE_PROFILE: manifest.release_profile,
-    INCEPT_ENABLE_VIDEO_PRODUCTION: String(products.video_production),
     INCEPT_ENABLE_GAMING_PLAYABLE: String(products.gaming_playable),
   };
   process.stdout.write(Object.entries(values).map(([key, value]) => `export ${key}=${shellQuote(value)}`).join("\n") + "\n");
 }
 
 function create(profile, releaseId) {
-  if (!(profile in profiles)) fail("profile must be image-ai-video or full");
+  if (!(profile in profiles)) fail("profile must be image-video");
   if (!releaseIdPattern.test(releaseId)) fail("invalid release ID");
   if (git("status", "--porcelain")) fail("checkout is dirty; create the manifest from the release commit");
 
@@ -122,7 +143,7 @@ function create(profile, releaseId) {
     products: profiles[profile].products,
     images: { api: { tag: releaseId }, web: { tag: releaseId } },
     approvals: {
-      required: ["AI Committee", "Engineering owner", "Product owner"],
+      required: requiredApprovalRoles,
       records: [],
     },
     rollout: { strategy: "Cloud Run revision", rollback_release_id: "REPLACE_BEFORE_DEPLOY" },

@@ -1,8 +1,8 @@
-"""One-time, idempotent SQLite-to-Cloud-SQL importer for Incept.
+"""One-time, idempotent SQLite-to-Cloud-SQL importer for LinglongLab.
 
 Run this from a Cloud Run Job with DATABASE_CONFIG_JSON mounted from Secret
 Manager and the Cloud SQL instance attached. Use --dry-run first, then --apply
-and finally --verify. The apply step refuses to write if any Incept table
+and finally --verify. The apply step refuses to write if any LinglongLab table
 already contains records; it never deletes destination records.
 """
 
@@ -99,7 +99,7 @@ def migrate(source: Path, *, apply: bool, verify: bool) -> int:
                 if occupied:
                     formatted = ", ".join(f"{table}={count}" for table, count in sorted(occupied.items()))
                     raise RuntimeError(
-                        "Refusing to import into non-empty Incept tables. "
+                        "Refusing to import into non-empty LinglongLab tables. "
                         f"Create a separate empty database or investigate first: {formatted}"
                     )
             for table in TABLES:

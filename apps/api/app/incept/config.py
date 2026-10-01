@@ -27,9 +27,11 @@ class Settings(BaseModel):
     bigquery_table_prefix: str = Field(default="ll_")
 
     openai_api_key: str | None = Field(default=None)
+    openai_text_model: str = Field(default="gpt-6-sol")
 
     default_image_provider: str = Field(default="gemini")
-    openai_image_model: str = Field(default="gpt-image-2")
+    openai_image_model: str = Field(default="gpt-image-2.5-flare")
+    openai_tts_model: str = Field(default="gpt-4o-mini-tts-2025-12-15")
     vertex_ai_enabled: bool = Field(default=False)
     # Imagen models (generate_images / edit_image API) — deprecated 2026-06-30
     vertex_imagen_model: str = Field(default="imagen-4.0-generate-001")
@@ -37,8 +39,8 @@ class Settings(BaseModel):
     # Gemini image generation (generate_content API — replaces Imagen long-term)
     vertex_gemini_image_model: str = Field(default="gemini-3.1-flash-image")
     vertex_gemini_enabled: bool = Field(default=True)
-    vertex_gemini_model: str = Field(default="gemini-3.6-flash")
-    vertex_playable_model: str = Field(default="gemini-3.6-flash")
+    vertex_gemini_model: str = Field(default="gemini-3.8-flash")
+    vertex_playable_model: str = Field(default="gemini-3.8-flash")
     # GamingPlayable's conversational planner has an explicit, intentionally
     # small model menu. Keep these independent from legacy video-to-playable
     # generation so an environment override cannot silently change that flow.
@@ -48,13 +50,18 @@ class Settings(BaseModel):
     # changed by GamingPlayable or legacy video-planning configuration.
     vertex_research_model: str = Field(default="gemini-3.8-flash")
     # Keep video planning on the richer model without changing image/remediation analysis.
-    vertex_video_analysis_model: str = Field(default="gemini-3.6-flash")
+    vertex_video_analysis_model: str = Field(default="gemini-3.8-flash")
+    google_tts_model: str = Field(default="gemini-3.1-flash-tts-preview")
     vertex_lyria_model: str = Field(default="lyria-3-clip-preview")
     vertex_lyria_location: str = Field(default="global")
     vertex_lyria_enabled: bool = Field(default=True)
-    vertex_veo_fast_model: str = Field(default="veo-3.1-fast-generate-001")
-    vertex_veo_location: str = Field(default="us-central1")
+    vertex_veo_fast_model: str = Field(default="gemini-omni-1.1-flash-preview")
+    vertex_veo_location: str = Field(default="global")
     vertex_veo_model: str = Field(default="")
+    # Claude uses Anthropic's first-party API. Keep it hidden from the model
+    # picker until a server-side key is configured.
+    anthropic_api_key: str | None = Field(default=None)
+    anthropic_model: str = Field(default="claude-sonnet-5")
     studio_user_budget_usd: float = Field(default=500.0)
     veo_fast_estimated_cost_per_second_usd: float = Field(default=0.08)
     # Gemini text pricing is deployment-owned. Keep the default at zero rather
@@ -122,25 +129,30 @@ def get_settings() -> Settings:
         bigquery_dataset=os.getenv("BIGQUERY_DATASET", "Incept"),
         bigquery_table_prefix=os.getenv("BIGQUERY_TABLE_PREFIX", "ll_"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
+        openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-6-sol"),
         default_image_provider=os.getenv("DEFAULT_IMAGE_PROVIDER", "gemini"),
-        openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2"),
+        openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare"),
+        openai_tts_model=os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts-2025-12-15"),
         vertex_ai_enabled=os.getenv("VERTEX_AI_ENABLED", "false").lower() == "true",
         vertex_imagen_model=os.getenv("VERTEX_IMAGEN_MODEL", "imagen-4.0-generate-001"),
         vertex_imagen_edit_model=os.getenv("VERTEX_IMAGEN_EDIT_MODEL", "imagen-4.0-generate-001"),
         vertex_gemini_image_model=os.getenv("VERTEX_GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
         vertex_gemini_enabled=os.getenv("VERTEX_GEMINI_ENABLED", "true").lower() == "true",
-        vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.6-flash"),
-        vertex_playable_model=os.getenv("VERTEX_PLAYABLE_MODEL", "gemini-3.6-flash"),
+        vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.8-flash"),
+        vertex_playable_model=os.getenv("VERTEX_PLAYABLE_MODEL", "gemini-3.8-flash"),
         vertex_playable_flash_model=os.getenv("VERTEX_PLAYABLE_FLASH_MODEL", "gemini-3.8-flash"),
         vertex_playable_pro_model=os.getenv("VERTEX_PLAYABLE_PRO_MODEL", "gemini-3.1-pro-preview"),
         vertex_research_model=os.getenv("VERTEX_RESEARCH_MODEL", "gemini-3.8-flash"),
-        vertex_video_analysis_model=os.getenv("VERTEX_VIDEO_ANALYSIS_MODEL", "gemini-3.6-flash"),
+        vertex_video_analysis_model=os.getenv("VERTEX_VIDEO_ANALYSIS_MODEL", "gemini-3.8-flash"),
+        google_tts_model=os.getenv("GOOGLE_TTS_MODEL", "gemini-3.1-flash-tts-preview"),
         vertex_lyria_model=os.getenv("VERTEX_LYRIA_MODEL", "lyria-3-clip-preview"),
         vertex_lyria_location=os.getenv("VERTEX_LYRIA_LOCATION", "global"),
         vertex_lyria_enabled=os.getenv("VERTEX_LYRIA_ENABLED", "true").lower() == "true",
-        vertex_veo_fast_model=os.getenv("VERTEX_VEO_FAST_MODEL") or "veo-3.1-fast-generate-001",
-        vertex_veo_location=os.getenv("VERTEX_VEO_LOCATION") or "us-central1",
+        vertex_veo_fast_model=os.getenv("VERTEX_VEO_FAST_MODEL") or "gemini-omni-1.1-flash-preview",
+        vertex_veo_location=os.getenv("VERTEX_VEO_LOCATION") or "global",
         vertex_veo_model=os.getenv("VERTEX_VEO_MODEL", ""),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
+        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
         studio_user_budget_usd=float(os.getenv("STUDIO_USER_BUDGET_USD", "500")),
         veo_fast_estimated_cost_per_second_usd=float(os.getenv("VEO_FAST_ESTIMATED_COST_PER_SECOND_USD", "0.08")),
         studio_copilot_estimated_cost_per_1k_tokens_usd=float(os.getenv("STUDIO_COPILOT_ESTIMATED_COST_PER_1K_TOKENS_USD", "0")),

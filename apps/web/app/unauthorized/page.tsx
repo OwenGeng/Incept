@@ -28,14 +28,6 @@ export default async function UnauthorizedPage() {
           </p>
 
           <div className="mt-6 flex flex-col gap-3">
-            {/*
-              Supply (this link's original target) has been retired from the app.
-              Agency-role accounts, whose only permitted page was Supply, have no
-              remaining destination — this now points at the portal root, which
-              will bounce them straight back here. That's an accurate reflection
-              of a bigger, not-yet-made product decision (whether to retire the
-              agency role entirely), not a bug to fix here.
-            */}
             <Link
               href="/"
               className="inline-flex h-10 items-center justify-center rounded-xl bg-accent px-5 text-sm font-semibold text-white transition hover:bg-accent/90"

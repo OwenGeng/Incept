@@ -1,5 +1,5 @@
 # =============================================================================
-# Incept Web — Cloud Run Dockerfile
+# LinglongLab Web — Cloud Run Dockerfile
 # Build context: repo root  (docker build -f Dockerfile.web .)
 # =============================================================================
 
@@ -13,9 +13,10 @@ RUN corepack enable
 # Monorepo manifests — copy first for layer cache
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/
+COPY packages/linglonglab-shared/package.json ./packages/linglonglab-shared/
 
 # Install only what the web app needs
-RUN pnpm install --frozen-lockfile --filter @incept/web...
+RUN pnpm install --frozen-lockfile --filter @linglonglab/web...
 
 # ── Stage 2: build the Vue video workspace ───────────────────────────────────
 FROM node:20-alpine AS video-builder
@@ -24,6 +25,7 @@ WORKDIR /app/apps/video-vue
 RUN corepack enable
 
 COPY apps/video-vue/package.json apps/video-vue/pnpm-lock.yaml apps/video-vue/pnpm-workspace.yaml ./
+COPY apps/video-vue/tsconfig.base.json ./tsconfig.base.json
 COPY apps/video-vue/apps ./apps
 COPY apps/video-vue/packages ./packages
 COPY apps/video-vue/postcss.config.ts ./postcss.config.ts
@@ -44,6 +46,7 @@ COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 # Copy source (after node_modules for better caching)
 COPY package.json pnpm-workspace.yaml ./
 COPY apps/web ./apps/web
+COPY packages/linglonglab-shared ./packages/linglonglab-shared
 COPY --from=video-builder /app/apps/video-vue/build/web ./apps/web/public/video-app
 COPY --from=video-builder /app/apps/video-vue/build/nodes ./apps/web/public/video-app/nodes
 
@@ -51,9 +54,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 # Middleware is bundled at build time. Keep the release flags available in
 # both this stage and the runtime stage so the deferred routes are fail-closed.
-ARG INCEPT_ENABLE_VIDEO_PRODUCTION=false
 ARG INCEPT_ENABLE_GAMING_PLAYABLE=false
-ENV INCEPT_ENABLE_VIDEO_PRODUCTION=${INCEPT_ENABLE_VIDEO_PRODUCTION}
 ENV INCEPT_ENABLE_GAMING_PLAYABLE=${INCEPT_ENABLE_GAMING_PLAYABLE}
 
 # next build runs from the web package dir
@@ -66,9 +67,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ARG INCEPT_ENABLE_VIDEO_PRODUCTION=false
 ARG INCEPT_ENABLE_GAMING_PLAYABLE=false
-ENV INCEPT_ENABLE_VIDEO_PRODUCTION=${INCEPT_ENABLE_VIDEO_PRODUCTION}
 ENV INCEPT_ENABLE_GAMING_PLAYABLE=${INCEPT_ENABLE_GAMING_PLAYABLE}
 
 # Non-root user

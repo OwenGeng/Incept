@@ -2,10 +2,14 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - build
+      - --platform
+      - linux/amd64
+      - --build-arg
+      - INCEPT_ENABLE_GAMING_PLAYABLE=$_INCEPT_ENABLE_GAMING_PLAYABLE
       - -f
       - Dockerfile.web
       - -t
-      - asia-northeast1-docker.pkg.dev/ads-bpd-guard-sandbox/incept/incept-web:latest
+      - $_IMAGE
       - .
 images:
-  - asia-northeast1-docker.pkg.dev/ads-bpd-guard-sandbox/incept/incept-web:latest
+  - $_IMAGE

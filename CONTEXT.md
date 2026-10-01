@@ -1,4 +1,4 @@
-# Incept domain language
+# LinglongLab domain language
 
 This file records the product terms that are deliberately stable across the
 GamingPlayable UI, API, and persistence layer.

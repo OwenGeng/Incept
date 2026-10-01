@@ -12,6 +12,7 @@ import hashlib
 from uuid import uuid4
 
 from app.incept.db import _connect, _schedule_db_backup, init_db
+from app.incept.datetime_utils import utcnow_naive
 from app.incept.workflows import (
     Workflow,
     WorkflowCreateRequest,
@@ -89,7 +90,7 @@ def update_workflow(workflow_id: str, request: WorkflowUpdateRequest, workspace_
         "title": request.title.strip() if request.title and request.title.strip() else current.title,
         "graph": request.graph,
         "revision": current.revision + 1,
-        "updated_at": datetime.utcnow(),
+        "updated_at": utcnow_naive(),
     })
     payload = next_workflow.model_dump_json()
     with _connect() as con:
@@ -136,7 +137,7 @@ def create_run(workflow_id: str, workspace_id: str, request: WorkflowRunRequest,
     unknown_outputs = [node_id for node_id in request.output_node_ids if node_id not in node_ids]
     if unknown_outputs:
         raise ValueError(f"Requested output node does not exist: {unknown_outputs[0]}")
-    now = datetime.utcnow()
+    now = utcnow_naive()
     run = WorkflowRun(
         run_id=f"wfr_{uuid4().hex[:16]}", workflow_id=workflow_id, workspace_id=workspace_id,
         revision=workflow.revision, requested_output_node_ids=request.output_node_ids, priority=request.priority, created_by=created_by,
@@ -214,7 +215,7 @@ def record_output(
     metadata: dict | None = None,
 ) -> WorkflowOutput:
     """Persist an approval once; a retry never mutates the prior run's output."""
-    now = datetime.utcnow()
+    now = utcnow_naive()
     output = WorkflowOutput(
         output_id=f"wfo_{uuid4().hex[:16]}", workflow_id=run.workflow_id, workspace_id=run.workspace_id,
         run_id=run.run_id, node_id=node_id, output_type=output_type, value_id=value_id,
@@ -285,7 +286,7 @@ def get_cached_node_result(cache_key: str) -> dict | None:
 
 
 def cache_node_result(workspace_id: str, node_type: str, cache_key: str, result: dict) -> None:
-    now = datetime.utcnow().isoformat()
+    now = utcnow_naive().isoformat()
     with _connect() as con:
         con.execute(
             """INSERT INTO workflow_node_cache (cache_key, workspace_id, node_type, result_json, created_at, updated_at)
@@ -299,7 +300,7 @@ def cache_node_result(workspace_id: str, node_type: str, cache_key: str, result:
 def claim_next_run() -> tuple[WorkflowRun, Workflow] | None:
     """Atomically claim one queued run. A future separate worker process uses the same claim."""
     init_db()
-    now = datetime.utcnow()
+    now = utcnow_naive()
     with _connect() as con:
         con.execute("BEGIN IMMEDIATE")
         row = con.execute("SELECT * FROM workflow_runs WHERE status = ? ORDER BY priority DESC, created_at ASC LIMIT 1", (WorkflowRunStatus.queued.value,)).fetchone()
@@ -320,7 +321,7 @@ def claim_next_run() -> tuple[WorkflowRun, Workflow] | None:
 
 
 def update_run_status(run_id: str, status: WorkflowRunStatus, message: str) -> None:
-    now = datetime.utcnow()
+    now = utcnow_naive()
     with _connect() as con:
         con.execute("UPDATE workflow_runs SET status = ?, updated_at = ? WHERE run_id = ?", (status.value, now.isoformat(), run_id))
     append_event(WorkflowEvent(event_id=f"wfe_{uuid4().hex[:16]}", run_id=run_id, type=f"run.{status.value}", message=message, progress=100 if status is WorkflowRunStatus.succeeded else None))
@@ -328,7 +329,7 @@ def update_run_status(run_id: str, status: WorkflowRunStatus, message: str) -> N
 
 
 def update_run_node(run_id: str, node_id: str, status: str, message: str, progress: int, result: dict | None = None) -> None:
-    now = datetime.utcnow()
+    now = utcnow_naive()
     with _connect() as con:
         con.execute("UPDATE workflow_run_nodes SET status = ?, message = ?, progress = ?, result_json = ?, updated_at = ? WHERE run_id = ? AND node_id = ?", (status, message, progress, json.dumps(result or {}), now.isoformat(), run_id, node_id))
     append_event(WorkflowEvent(event_id=f"wfe_{uuid4().hex[:16]}", run_id=run_id, node_id=node_id, type=f"node.{status}", message=message, progress=progress))
@@ -352,7 +353,7 @@ def append_event(event: WorkflowEvent) -> WorkflowEvent:
 
 
 def cancel_run(run_id: str, workspace_id: str) -> WorkflowRun | None:
-    now = datetime.utcnow()
+    now = utcnow_naive()
     with _connect() as con:
         row = con.execute("SELECT * FROM workflow_runs WHERE run_id = ? AND workspace_id = ?", (run_id, workspace_id)).fetchone()
         if not row:

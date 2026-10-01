@@ -14,6 +14,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.incept.datetime_utils import utcnow_naive
+
 
 class WorkflowTemplate(str, Enum):
     script = "script"
@@ -190,8 +192,8 @@ class Workflow(BaseModel):
     revision: int = 1
     graph: WorkflowGraph
     created_by: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -234,8 +236,8 @@ class WorkflowRun(BaseModel):
     requested_output_node_ids: list[str] = Field(default_factory=list)
     priority: int = 0
     created_by: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class WorkflowRunRequest(BaseModel):
@@ -251,8 +253,8 @@ class WorkflowRunNode(BaseModel):
     progress: int = 0
     message: str = ""
     result: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
+    updated_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class WorkflowOutput(BaseModel):
@@ -266,7 +268,7 @@ class WorkflowOutput(BaseModel):
     value_id: str
     created_by: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 class WorkflowLineage(BaseModel):
@@ -286,7 +288,7 @@ class WorkflowEvent(BaseModel):
     type: str
     message: str
     progress: int | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow_naive)
 
 
 def _node(node_id: str, type_: str, label: str, x: float, y: float, *, status: WorkflowNodeStatus = WorkflowNodeStatus.draft) -> WorkflowNode:

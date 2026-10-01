@@ -1,4 +1,4 @@
-import http from "node:http";
+import { cloudRunAuthorizationHeaders } from "@/lib/cloud-run-auth";
 
 type SessionUser = {
   email?: string | null;
@@ -31,40 +31,6 @@ function normalizeKeys<T>(value: T): T {
   return value;
 }
 
-/**
- * Fetch a Cloud Run identity token from the GCP metadata server.
- * Only works when running inside Cloud Run / GCE. Returns null in local dev.
- *
- * The token allows the web service (incept-web) to call incept-api even when
- * the API Cloud Run service is NOT set to allUsers — the IAM layer verifies
- * the identity token before forwarding the request to the application.
- */
-/**
- * Fetch a Cloud Run identity token from the GCP metadata server.
- * Only works when running inside Cloud Run / GCE. Returns null in local dev.
- *
- * Uses Node.js native http (not global fetch) to bypass Next.js App Router's
- * fetch wrapper, which intercepts http:// requests and breaks the metadata call.
- */
-async function getCloudRunIdentityToken(audience: string): Promise<string | null> {
-  // K_SERVICE is only set inside Cloud Run
-  if (!process.env.K_SERVICE) return null;
-  return new Promise((resolve) => {
-    const metaUrl =
-      `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity` +
-      `?audience=${encodeURIComponent(audience)}`;
-    const req = http.get(metaUrl, { headers: { "Metadata-Flavor": "Google" } }, (res) => {
-      if (res.statusCode !== 200) { resolve(null); return; }
-      let data = "";
-      res.on("data", (chunk: unknown) => { data += String(chunk); });
-      res.on("end", () => resolve(data.trim() || null));
-    });
-    req.on("error", () => resolve(null));
-    // 2-second timeout — metadata server is local, should respond instantly
-    req.setTimeout(2000, () => { req.destroy(); resolve(null); });
-  });
-}
-
 async function fetchFromApi<T>(
   path: string,
   user?: SessionUser,
@@ -79,7 +45,7 @@ async function fetchFromApi<T>(
 
   // Fetch Cloud Run identity token so incept-api can stay private (no allUsers invoker).
   // Falls back to null in local dev — the API allows unauthenticated calls there.
-  const identityToken = await getCloudRunIdentityToken(baseUrl);
+  const authorizationHeaders = await cloudRunAuthorizationHeaders(baseUrl);
 
   const method = options?.method ?? "GET";
   const response = await fetch(`${baseUrl}${path}`, {
@@ -91,7 +57,7 @@ async function fetchFromApi<T>(
       "X-User-Role": user?.role ?? "",
       "X-Allowed-Projects": user?.allowedProjects?.join(",") ?? "",
       "X-Allowed-Routing": user?.allowedRouting ?? "",
-      ...(identityToken ? { "Authorization": `Bearer ${identityToken}` } : {}),
+      ...authorizationHeaders,
       ...(options?.body ? { "Content-Type": "application/json" } : {}),
     },
     ...(options?.body ? { body: JSON.stringify(options.body) } : {}),

@@ -16,6 +16,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from app.incept.models import Session, SessionMessage
+from app.incept.datetime_utils import utcnow_naive
 
 # ── In-memory store ───────────────────────────────────────────────────────────
 
@@ -57,7 +58,7 @@ def add_user_message(
     if reference_asset_ids:
         known = set(session.reference_asset_ids)
         session.reference_asset_ids = list(known | set(reference_asset_ids))
-    session.updated_at = datetime.utcnow()
+    session.updated_at = utcnow_naive()
 
 
 def add_assistant_message(
@@ -71,7 +72,7 @@ def add_assistant_message(
         return
     msg = SessionMessage(role="assistant", text=text, asset_ids=asset_ids, job_id=job_id)
     session.messages.append(msg)
-    session.updated_at = datetime.utcnow()
+    session.updated_at = utcnow_naive()
 
 
 def get_context_messages(session_id: str, n: int = 6) -> list[dict]:

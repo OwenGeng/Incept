@@ -14,11 +14,11 @@ import type { AdminUser, AdminUserListPayload } from "@/lib/api";
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const ROLE_OPTIONS = [
+  { value: "admin",          label: "Admin" },
   { value: "moloco_nbs",    label: "Moloco NBS" },
   { value: "moloco_ctv",    label: "Moloco CTV" },
   { value: "moloco_growth", label: "Moloco Growth" },
   { value: "moloco_gtm",    label: "Moloco GTM" },
-  { value: "moloco_supply", label: "Moloco Supply" },
   { value: "agency",        label: "Agency" },
 ] as const;
 
@@ -30,7 +30,6 @@ const ROLE_BADGE: Record<string, string> = {
   moloco_ctv:     "bg-success-soft text-success",
   moloco_growth:  "bg-[#FFF7ED] text-[#C2410C]",
   moloco_gtm:     "bg-[#FDF4FF] text-[#9333EA]",
-  moloco_supply:  "bg-[#FEFCE8] text-[#A16207]",
   agency:         "bg-[#FFF1F2] text-[#E11D48]",
   user:           "bg-[#EDF3FF] text-accent",
 };
@@ -41,7 +40,6 @@ const ROLE_DISPLAY: Record<string, string> = {
   moloco_ctv:     "Moloco CTV",
   moloco_growth:  "Moloco Growth",
   moloco_gtm:     "Moloco GTM",
-  moloco_supply:  "Moloco Supply",
   agency:         "Agency",
   user:           "Moloco NBS",
 };
@@ -210,7 +208,7 @@ function UserRow({
 
 function AddUsersPanel({ onAdded }: { onAdded: (users: AdminUser[]) => void }) {
   const [emails, setEmails] = useState("");
-  const [role, setRole] = useState("moloco_nbs");
+  const [role, setRole] = useState("admin");
   const [routing, setRouting] = useState("");
   const [company, setCompany] = useState("");
   const [pending, startTransition] = useTransition();

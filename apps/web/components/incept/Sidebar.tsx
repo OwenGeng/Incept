@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { Activity, Home, ImageIcon, Library } from "lucide-react";
-import type { InceptUser } from "@incept/shared";
+import type { LinglongLabUser } from "@linglonglab/shared";
 import { AppSidebar, type SidebarNavItem } from "@/components/ui/app-sidebar";
 import type { ContentScope } from "@/lib/incept-api";
 
@@ -25,7 +25,7 @@ const BASE_ITEMS: Array<Omit<Extract<SidebarNavItem, { kind: "simple" }>, "onCli
 export interface SidebarProps {
   activeView: AppView;
   onViewChange: (view: AppView) => void;
-  currentUser: InceptUser;
+  currentUser: LinglongLabUser;
   contentScope: ContentScope;
   onContentScopeChange: (scope: ContentScope) => void;
 }

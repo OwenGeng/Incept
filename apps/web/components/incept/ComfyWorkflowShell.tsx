@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { AssetSummary, JobSummary } from "@incept/shared";
+import type { AssetSummary, JobSummary } from "@linglonglab/shared";
 import { listAssets, listJobs } from "@/lib/incept-api";
 import { ComfyUIView } from "./ComfyUIView";
 

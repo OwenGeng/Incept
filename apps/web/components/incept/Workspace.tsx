@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -30,7 +31,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import type { AssetSummary, CreativeThreadSummary, InceptUser, JobSummary } from "@incept/shared";
+import type { AssetSummary, CreativeThreadSummary, LinglongLabUser, JobSummary } from "@linglonglab/shared";
 import { HomeView } from "./HomeView";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -39,16 +40,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { createImageGenerationJob, createKakaoBizboardJob, deleteAssets, downloadAssetFile, downloadAssetsZip, generateGifFromAsset, getAssetFileExtension, listAssets, uploadAsset, type ContentScope } from "@/lib/incept-api";
 import {
-  buildKakaoDisclosure,
   composeKakaoBizboard,
-  KAKAO_DEFAULT_DISCLOSURE,
+  KAKAO_BIZBOARD_SIZE,
+  KAKAO_DEFAULT_APP_COPY,
   KAKAO_DEFAULT_MAIN_COPY,
-  KAKAO_DEFAULT_SUBTITLE,
-  loadSpoqaFonts,
+  KAKAO_DEFAULT_TEMPLATE,
+  kakaoTemplate,
+  loadKakaoFonts,
   validateKakaoBizboardInputs,
+  type KakaoCompositeParams,
+  type KakaoTemplateId,
 } from "@/lib/kakao-compositor";
 import type { AppView } from "./Sidebar";
 import { CreateImageView, KakaoBatchModal } from "./CreateImageView";
+import { useKakaoObjectImages } from "./useKakaoObjectImages";
 import { UsageView } from "./UsageView";
 import { AppHeader } from "@/components/ui/app-header";
 
@@ -87,7 +92,7 @@ interface WorkspaceProps {
   setLiveJobs: Dispatch<SetStateAction<JobSummary[]>>;
   liveThreads: CreativeThreadSummary[];
   setLiveThreads: Dispatch<SetStateAction<CreativeThreadSummary[]>>;
-  currentUser: InceptUser;
+  currentUser: LinglongLabUser;
   contentScope: ContentScope;
   activeWorkspaceId: string;
   activeThreadId: string | null;
@@ -606,8 +611,10 @@ function LibraryView({
   const [kakaoBatchSubmitting, setKakaoBatchSubmitting] = useState(false);
   const [kakaoBatchAppIconUrl, setKakaoBatchAppIconUrl] = useState<string | null>(null);
   const [kakaoBatchMainCopy, setKakaoBatchMainCopy] = useState(KAKAO_DEFAULT_MAIN_COPY);
-  const [kakaoBatchAppDownloadCopy, setKakaoBatchAppDownloadCopy] = useState(KAKAO_DEFAULT_SUBTITLE);
-  const [kakaoBatchDspName, setKakaoBatchDspName] = useState(KAKAO_DEFAULT_DISCLOSURE);
+  const [kakaoBatchTemplate, setKakaoBatchTemplate] = useState<KakaoTemplateId>(KAKAO_DEFAULT_TEMPLATE);
+  const [kakaoBatchAppDownloadCopy, setKakaoBatchAppDownloadCopy] = useState(KAKAO_DEFAULT_APP_COPY);
+  const [kakaoBatchSubCopy, setKakaoBatchSubCopy] = useState("");
+  const [kakaoBatchAdditionalInfo, setKakaoBatchAdditionalInfo] = useState("");
   const [kakaoBatchGacha, setKakaoBatchGacha] = useState(false);
   const [kakaoBatchPreviewUrl, setKakaoBatchPreviewUrl] = useState<string | null>(null);
   const [kakaoBatchPreviewAssetIndex, setKakaoBatchPreviewAssetIndex] = useState(0);
@@ -758,6 +765,8 @@ function LibraryView({
     () => selectedAssets.filter((asset) => asset.type === "image" && asset.url && !asset.url.includes("placeholder")),
     [selectedAssets],
   );
+  const kakaoObjects = useKakaoObjectImages(activeWorkspaceId, activeThreadId ?? undefined);
+  const kakaoObjectUrlFor = kakaoObjects.objectUrlFor;
   const selectedKakaoEligibleAssets = useMemo(
     () => liveAssets.filter(
       (asset) => selected.has(asset.id) && asset.type !== "gif" && asset.url && !asset.url.includes("placeholder")
@@ -776,14 +785,32 @@ function LibraryView({
     lastSelectionSignatureRef.current = nextSignature;
   }, [selectedAssets]);
 
-  useEffect(() => {
-    setKakaoBatchDspName(buildKakaoDisclosure(kakaoBatchGacha));
-  }, [kakaoBatchGacha]);
+  const kakaoBatchParams = useCallback((asset: { id: string; url: string }): KakaoCompositeParams => {
+    return {
+      template: kakaoBatchTemplate,
+      thumbnailUrl: kakaoTemplate(kakaoBatchTemplate).object ? kakaoObjectUrlFor(asset) : asset.url,
+      appIconUrl: kakaoBatchAppIconUrl,
+      appCopy: kakaoBatchAppDownloadCopy,
+      mainCopy: kakaoBatchMainCopy,
+      subCopy: kakaoBatchSubCopy,
+      additionalInfo: kakaoBatchAdditionalInfo,
+      gacha: kakaoBatchGacha,
+    };
+  }, [
+    kakaoBatchTemplate,
+    kakaoObjectUrlFor,
+    kakaoBatchAppIconUrl,
+    kakaoBatchAppDownloadCopy,
+    kakaoBatchMainCopy,
+    kakaoBatchSubCopy,
+    kakaoBatchAdditionalInfo,
+    kakaoBatchGacha,
+  ]);
 
   useEffect(() => {
     if (!kakaoBatchOpen) return;
 
-    loadSpoqaFonts().catch(() => {});
+    void loadKakaoFonts();
 
     const previewAsset =
       selectedKakaoEligibleAssets[kakaoBatchPreviewAssetIndex] ?? selectedKakaoEligibleAssets[0];
@@ -801,13 +828,7 @@ function LibraryView({
     let nextPreviewUrl: string | null = null;
 
     async function buildPreview() {
-      const validation = await validateKakaoBizboardInputs({
-        thumbnailUrl: previewAsset.url,
-        appIconUrl: kakaoBatchAppIconUrl,
-        subtitle: kakaoBatchAppDownloadCopy,
-        mainCopy: kakaoBatchMainCopy,
-        gacha: kakaoBatchGacha,
-      });
+      const validation = await validateKakaoBizboardInputs(kakaoBatchParams(previewAsset));
       if (cancelled) return;
 
       setKakaoBatchValidationErrors(validation.errors);
@@ -821,13 +842,7 @@ function LibraryView({
         return;
       }
 
-      const blob = await composeKakaoBizboard({
-        thumbnailUrl: previewAsset.url,
-        appIconUrl: kakaoBatchAppIconUrl,
-        subtitle: kakaoBatchAppDownloadCopy,
-        mainCopy: kakaoBatchMainCopy,
-        gacha: kakaoBatchGacha,
-      });
+      const blob = await composeKakaoBizboard(kakaoBatchParams(previewAsset));
       if (cancelled) return;
 
       nextPreviewUrl = URL.createObjectURL(blob);
@@ -854,18 +869,22 @@ function LibraryView({
     };
   }, [
     kakaoBatchOpen,
+    kakaoBatchParams,
     kakaoBatchAppIconUrl,
     kakaoBatchMainCopy,
     kakaoBatchAppDownloadCopy,
-    kakaoBatchDspName,
+    kakaoBatchTemplate,
+    kakaoBatchSubCopy,
+    kakaoBatchAdditionalInfo,
     kakaoBatchGacha,
+    kakaoObjects.objectUrls,
     kakaoBatchPreviewAssetIndex,
     selectedKakaoEligibleAssets,
   ]);
 
   function handleOpenKakaoBatch() {
     if (selectedKakaoEligibleAssets.length === 0) return;
-    setKakaoBatchAppDownloadCopy((prev) => prev.trim() || KAKAO_DEFAULT_SUBTITLE);
+    setKakaoBatchAppDownloadCopy((prev) => prev.trim() || KAKAO_DEFAULT_APP_COPY);
     setKakaoBatchMainCopy((prev) => prev.trim() || KAKAO_DEFAULT_MAIN_COPY);
     setKakaoBatchPreviewAssetIndex(0);
     setKakaoBatchOpen(true);
@@ -885,19 +904,14 @@ function LibraryView({
     setKakaoBatchSubmitting(true);
     try {
       const queuedJobs: JobSummary[] = [];
+      const template = kakaoTemplate(kakaoBatchTemplate);
 
       for (const asset of selectedKakaoEligibleAssets) {
-        const blob = await composeKakaoBizboard({
-          thumbnailUrl: asset.url,
-          appIconUrl: kakaoBatchAppIconUrl,
-          subtitle: kakaoBatchAppDownloadCopy,
-          mainCopy: kakaoBatchMainCopy,
-          gacha: kakaoBatchGacha,
-        });
+        const blob = await composeKakaoBizboard(kakaoBatchParams(asset));
         const safeName = (asset.title || "kakao_asset")
           .replace(/\.[^.]+$/, "")
           .replace(/[^a-zA-Z0-9_-]+/g, "_");
-        const file = new File([blob], `${safeName}_kakao_bizboard_1029x258.png`, {
+        const file = new File([blob], `${safeName}_kakao_bizboard_${KAKAO_BIZBOARD_SIZE}.png`, {
           type: "image/png",
         });
         const uploaded = await uploadAsset(file, activeWorkspaceId, "upload", activeThreadId ?? undefined);
@@ -909,9 +923,11 @@ function LibraryView({
           workspaceId: activeWorkspaceId,
           cleanedAssetId: asset.id,
           composedAssetId: uploaded.id,
+          template: kakaoBatchTemplate,
           mainCopy: kakaoBatchMainCopy,
-          appDownloadCopy: kakaoBatchAppDownloadCopy,
-          dspName: kakaoBatchDspName,
+          subCopy: template.subCopy ? kakaoBatchSubCopy : "",
+          appDownloadCopy: template.appCopy ? kakaoBatchAppDownloadCopy : "",
+          additionalInfo: kakaoBatchAdditionalInfo,
           gacha: kakaoBatchGacha,
           threadId: activeThreadId ?? undefined,
         });
@@ -1449,23 +1465,43 @@ function LibraryView({
         <KakaoBatchModal
           assets={selectedKakaoEligibleAssets}
           submitting={kakaoBatchSubmitting}
+          template={kakaoBatchTemplate}
           appIconUrl={kakaoBatchAppIconUrl}
+          appCopy={kakaoBatchAppDownloadCopy}
           mainCopy={kakaoBatchMainCopy}
-          appDownloadCopy={kakaoBatchAppDownloadCopy}
+          subCopy={kakaoBatchSubCopy}
+          additionalInfo={kakaoBatchAdditionalInfo}
           gacha={kakaoBatchGacha}
           previewUrl={kakaoBatchPreviewUrl}
           validationErrors={kakaoBatchValidationErrors}
           mainCopyWidthPx={kakaoBatchMainCopyWidthPx}
-          onClose={() => setKakaoBatchOpen(false)}
+          onClose={() => {
+            setKakaoBatchOpen(false);
+            kakaoObjects.reset();
+          }}
           onSubmit={handleGenerateKakaoSelected}
+          onTemplateChange={setKakaoBatchTemplate}
           onAppIconChange={handleKakaoBatchIconChange}
           setGacha={setKakaoBatchGacha}
-          onSubtitleChange={setKakaoBatchAppDownloadCopy}
+          onAppCopyChange={setKakaoBatchAppDownloadCopy}
           onMainCopyChange={setKakaoBatchMainCopy}
+          onSubCopyChange={setKakaoBatchSubCopy}
+          onAdditionalInfoChange={setKakaoBatchAdditionalInfo}
           onApplyChanges={() => {}}
           previewBusy={false}
           previewAssetIndex={kakaoBatchPreviewAssetIndex}
           onPreviewAssetChange={setKakaoBatchPreviewAssetIndex}
+          objectUrl={(() => {
+            const asset = selectedKakaoEligibleAssets[kakaoBatchPreviewAssetIndex] ?? selectedKakaoEligibleAssets[0];
+            return asset ? kakaoObjects.objectUrlFor(asset) : null;
+          })()}
+          objectBusy={kakaoObjects.removing}
+          objectError={kakaoObjects.error}
+          onRemoveBackgrounds={() => void kakaoObjects.removeBackgrounds(selectedKakaoEligibleAssets)}
+          onUploadObject={(file) => {
+            const asset = selectedKakaoEligibleAssets[kakaoBatchPreviewAssetIndex] ?? selectedKakaoEligibleAssets[0];
+            if (asset) kakaoObjects.uploadObject(asset.id, file);
+          }}
         />
       )}
 

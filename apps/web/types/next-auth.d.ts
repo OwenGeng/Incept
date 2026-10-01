@@ -1,13 +1,12 @@
 import NextAuth from "next-auth";
 
-// Canonical role set for InterSight
-// - admin:           full access to everything (owen.geng@moloco.com, hardcoded)
-// - moloco_nbs:      Supply SMB + AI Insights + Leads
+// Canonical application role set
+// - admin:           full access; default for authenticated @moloco.com users
+// - moloco_nbs:      explicitly assigned NBS-scoped role
 // - moloco_ctv:      CTV + AI Insights
-// - moloco_growth:   Supply SMB + AI Insights
-// - moloco_gtm:      Supply SMB + AI Insights
-// - moloco_supply:   Supply SMB + AI Insights
-// - agency:          Supply SMB (routing-scoped) + own Leads only
+// - moloco_growth:   Growth-scoped access
+// - moloco_gtm:      GTM-scoped access
+// - agency:          routing-scoped agency access
 // - user:            legacy alias for moloco_nbs (backward-compatible)
 export type UserRole =
   | "admin"
@@ -15,7 +14,6 @@ export type UserRole =
   | "moloco_ctv"
   | "moloco_growth"
   | "moloco_gtm"
-  | "moloco_supply"
   | "agency"
   | "user";
 

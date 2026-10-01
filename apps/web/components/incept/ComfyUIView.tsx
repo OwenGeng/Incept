@@ -39,7 +39,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import type { AssetSummary, JobSummary } from "@incept/shared";
+import type { AssetSummary, JobSummary } from "@linglonglab/shared";
 import { AppHeader } from "@/components/ui/app-header";
 import { AppSidebar } from "@/components/ui/app-sidebar";
 import { Badge } from "@/components/ui/badge";
@@ -293,18 +293,23 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
     let live = true;
     listStudioWorkflowOutputs(activeWorkflow.workflow_id, activeWorkflow.workspace_id).then((items) => { if (live) setWorkflowOutputs(items); }).catch(() => { if (live) setWorkflowOutputs([]); });
     return () => { live = false; };
+  // The scalar identity fields are intentional; depending on the full object
+  // would refetch when unrelated local workflow state changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkflow?.workflow_id, activeWorkflow?.revision, activeWorkflow?.workspace_id]);
   useEffect(() => {
     if (!activeWorkflow) { setWorkflowLineage(null); return; }
     let live = true;
     getStudioWorkflowLineage(activeWorkflow.workflow_id, activeWorkflow.workspace_id).then((lineage) => { if (live) setWorkflowLineage(lineage); }).catch(() => { if (live) setWorkflowLineage(null); });
     return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkflow?.workflow_id, activeWorkflow?.revision, activeWorkflow?.workspace_id]);
   useEffect(() => {
     if (!activeWorkflow) { setWorkflowRevisions([]); return; }
     let live = true;
     listStudioWorkflowRevisions(activeWorkflow.workflow_id, activeWorkflow.workspace_id).then((items) => { if (live) setWorkflowRevisions(items); }).catch(() => { if (live) setWorkflowRevisions([]); });
     return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkflow?.workflow_id, activeWorkflow?.revision, activeWorkflow?.workspace_id]);
   useEffect(() => {
     if (!activeRunId) return;
@@ -336,7 +341,7 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
     const refresh = () => { if (!stopped) void load(); };
     ["run.running", "run.succeeded", "run.failed", "run.cancelled", "node.running", "node.succeeded", "node.failed", "node.blocked", "node.approved"].forEach((eventName) => events.addEventListener(eventName, refresh));
     return () => { stopped = true; events.close(); if (retryTimer !== null) window.clearTimeout(retryTimer); };
-  }, [activeRunId, activeWorkspaceId, activeWorkflow]);
+  }, [activeRunId, activeWorkspaceId, activeWorkflow, setNodes]);
   const chooseTemplate = async (next: WorkflowTemplate) => {
     setSaving(true);
     try { const workflow = await createStudioWorkflow(activeWorkspaceId, next); setWorkflows((items) => [workflow, ...items]); openWorkflow(workflow); }
@@ -353,7 +358,7 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
   const importWorkflow = async (file: File) => {
     try {
       const parsed = JSON.parse(await file.text()) as { format?: string; workflow?: { title?: string; template?: WorkflowTemplate; graph?: StudioWorkflowGraph } };
-      if (parsed.format !== "incept-workflow.v1" || !parsed.workflow?.template || !parsed.workflow.graph) throw new Error("Choose an Incept workflow export (.incept-workflow.json).");
+      if (parsed.format !== "incept-workflow.v1" || !parsed.workflow?.template || !parsed.workflow.graph) throw new Error("Choose a LinglongLab workflow export (.incept-workflow.json).");
       setSaving(true);
       const created = await createStudioWorkflow(activeWorkspaceId, parsed.workflow.template, `${parsed.workflow.title?.trim() || "Imported workflow"} (imported)`);
       const imported = await updateStudioWorkflow(created, parsed.workflow.graph, created.title);
@@ -361,10 +366,10 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
     } catch (error) { setRunNotice(error instanceof Error ? error.message : "Could not import workflow."); }
     finally { setSaving(false); if (importInputRef.current) importInputRef.current.value = ""; }
   };
-  const checkpoint = () => {
+  const checkpoint = useCallback(() => {
     historyRef.current = [...historyRef.current.slice(-39), { nodes, edges, selectedNode }];
     redoRef.current = [];
-  };
+  }, [edges, nodes, selectedNode]);
   const undoGraph = () => {
     const previous = historyRef.current.pop();
     if (!previous) { setRunNotice("Nothing to undo."); return; }
@@ -446,6 +451,9 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  // The command functions intentionally close over the same graph snapshot
+  // listed here; the listener is replaced whenever that snapshot changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNode, nodes, edges]);
   const handleNodesChange = useCallback((changes: NodeChange<Node<WorkflowNodeData>>[]) => {
     onNodesChange(changes);
@@ -455,7 +463,7 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
     if (changes.some((change) => change.type === "remove")) checkpoint();
     onEdgesChange(changes);
     if (changes.some((change) => change.type !== "select")) setDirty(true);
-  }, [onEdgesChange, edges, nodes, selectedNode]);
+  }, [checkpoint, onEdgesChange]);
   const onConnect = useCallback((connection: Connection) => {
     const source = nodes.find((node) => node.id === connection.source);
     const target = nodes.find((node) => node.id === connection.target);
@@ -467,7 +475,7 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
     if (output.value_type !== input.value_type) { setRunNotice(`${target.data.title} expects ${input.value_type}; ${source.data.title} provides ${output.value_type}.`); return; }
     if (!input.multiple && edges.some((edge) => edge.target === target.id && (edge.targetHandle ?? input.id) === input.id)) { setRunNotice(`${target.data.title} accepts only one connection on ${input.id}.`); return; }
     checkpoint(); setEdges((items) => addEdge({ ...connection, sourceHandle: output.id, targetHandle: input.id, animated: true }, items)); setDirty(true);
-  }, [edges, nodeDefinitions, nodes, setEdges]);
+  }, [checkpoint, edges, nodeDefinitions, nodes, setEdges]);
   const saveWorkflow = async () => {
     if (!activeWorkflow) return null;
     setSaving(true);
@@ -626,7 +634,7 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
       onOpenVideoProduction();
       return;
     }
-    window.location.assign("/incept");
+    window.location.assign("/linglonglab");
   };
 
   const workflowRail = (
@@ -646,7 +654,7 @@ export function ComfyUIView({ activeWorkspaceId, liveAssets, liveJobs, onMobileM
     <div className="flex h-screen min-h-0 bg-background text-foreground">
       <AppSidebar productName="Comfy Workflow" brandTitle="Linglong" brandSubtitle="Lab" logo="/logo.png" storageKey="comfy-workflow" items={[]} isActive={() => false} user={{ email: session?.user?.email, name: session?.user?.name, image: session?.user?.image }} onSignOut={() => signOut({ callbackUrl: "/sign-in" })} content={workflowRail} expandedWidthClassName="w-72" />
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <AppHeader title="Comfy Workflow" subtitle="Node-based AI production canvas" docsHref="/docs/incept-comfyui-workflow-engine-implementation-plan" onMobileMenuOpen={onMobileMenuOpen} />
+      <AppHeader title="Comfy Workflow" subtitle="Node-based AI production canvas" docsHref="/docs/linglonglab-comfyui-workflow-engine-implementation-plan" onMobileMenuOpen={onMobileMenuOpen} />
       {openWorkflows.length > 0 && <div className="flex shrink-0 gap-1 overflow-x-auto border-b bg-card px-3 py-1.5" aria-label="Open workflows">{openWorkflows.map((workflow) => <div key={workflow.workflow_id} className={cn("group flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs", activeWorkflow?.workflow_id === workflow.workflow_id ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted hover:text-foreground")}><button type="button" className="max-w-44 truncate text-left" onClick={() => openWorkflow(workflow)}>{workflow.title}</button><button type="button" aria-label={`Close ${workflow.title}`} className="rounded p-0.5 opacity-60 hover:bg-background/15 hover:opacity-100" onClick={() => closeWorkflowTab(workflow.workflow_id)}><X className="size-3" /></button></div>)}</div>}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <section className="relative min-w-0 flex-1">

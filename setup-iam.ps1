@@ -1,5 +1,5 @@
 # =============================================================================
-# InterSight -- Grant IAM roles to Service Account (run once)
+# LinglongLab -- Grant IAM roles to Service Account (run once)
 # Usage: .\setup-iam.ps1 your-sa@ads-bpd-guard-sandbox.iam.gserviceaccount.com
 # =============================================================================
 
@@ -30,7 +30,7 @@ Write-Host ""
 Grant $PROJECT_ID "roles/bigquery.dataEditor"
 Grant $PROJECT_ID "roles/bigquery.jobUser"
 
-# ads-bpd-guard-china: read Supply SMB data
+# ads-bpd-guard-china: read application data
 Grant $DATA_PROJECT "roles/bigquery.dataViewer"
 Grant $DATA_PROJECT "roles/bigquery.jobUser"
 

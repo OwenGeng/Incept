@@ -20,6 +20,7 @@ from app.incept.models import (
     VideoProductionProviderSelection,
 )
 from app.incept.config import Settings
+from app.incept.datetime_utils import utcnow_naive
 from app.incept import db as incept_db
 from app.incept.video_production_capabilities import (
     configured_video_production_capabilities,
@@ -341,8 +342,8 @@ def test_restart_marks_interrupted_production_job_retryable_without_selecting_ou
         tool_id="video-production-keyframe",
         title="Interrupted visual-development frame",
         output_asset_ids=[],
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=utcnow_naive(),
+        updated_at=utcnow_naive(),
     )
     JOBS[job.job_id] = job
     monkeypatch.setattr("app.incept.video_production_store.upsert_job", lambda _job: None)
@@ -444,7 +445,7 @@ def test_script_checkpoint_restore_creates_a_new_draft_and_revokes_approval() ->
         saved.script.raw_script = "Later baseline"
         saved.script.revision = 5
         saved.script.status = "locked"
-        saved.storyboard_approved_at = datetime.utcnow()
+        saved.storyboard_approved_at = utcnow_naive()
         saved.storyboard_approved_revision = saved.state_revision
         restored = restore_video_production_script_revision(
             saved.production_id,

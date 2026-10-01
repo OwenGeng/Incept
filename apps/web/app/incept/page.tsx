@@ -1,5 +1,5 @@
-import { AppShell } from "@/components/incept/AppShell";
+import { redirect } from "next/navigation";
 
-export default function InceptPage() {
-  return <AppShell />;
+export default function LegacyInceptPage() {
+  redirect("/linglonglab");
 }

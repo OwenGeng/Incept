@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useSession } from "next-auth/react";
 import { ImageIcon, Sparkles, Library, ArrowRight, Zap } from "lucide-react";
-import type { AssetSummary, CreativeThreadSummary, JobSummary } from "@incept/shared";
+import type { AssetSummary, CreativeThreadSummary, JobSummary } from "@linglonglab/shared";
 import type { AppView } from "./Sidebar";
 import { cn } from "@/lib/utils";
 
