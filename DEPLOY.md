@@ -67,7 +67,7 @@ pnpm lint:web
 pnpm typecheck:web
 pnpm --dir apps/video-vue typecheck
 pnpm --dir apps/video-vue check:i18n
-apps/api/.venv/bin/python -m pytest apps/api/tests -q
+PYTHONPATH=apps/api apps/api/.venv/bin/python -m pytest apps/api/tests -q
 pnpm build:web
 docker build --platform linux/amd64 -f Dockerfile.nbs-api -t incept-api:preflight .
 docker build --platform linux/amd64 \

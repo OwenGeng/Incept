@@ -25,6 +25,7 @@ jobs:
           cache-dependency-path: apps/api/requirements.txt
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/video-vue install --frozen-lockfile
       - run: python -m pip install -r apps/api/requirements.txt pytest pip-audit
       - run: pnpm preflight
       - run: pnpm release:validate -- releases/fixtures/approved-image-video-manifest.json
