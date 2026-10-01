@@ -1,0 +1,19 @@
+{
+  "release_id": "linglong-image-video-v0.9.0",
+  "kind": "baseline",
+  "note": "Retroactive release ID for the image-only build that was live on Cloud Run before the manifest-gated release process. It was deployed from the mutable :latest tag and carries no approval records. Recorded only so later manifests can name it as rollout.rollback_release_id.",
+  "recorded_on": "2026-10-01",
+  "products": { "image": true, "video": false, "gaming_playable": false },
+  "images": {
+    "api": {
+      "tag": "linglong-image-video-v0.9.0",
+      "digest": "sha256:693ef1934ddae7ecc91fa92e785f0a7cf2b45ce36b8c8e3855b02aeaf59f3f95",
+      "cloud_run_revision": "incept-api-00073-jt5"
+    },
+    "web": {
+      "tag": "linglong-image-video-v0.9.0",
+      "digest": "sha256:a8dd6d86418ec8c77f112877774c85b406437c04265cdd0332739db192733fed",
+      "cloud_run_revision": "incept-web-00055-82t"
+    }
+  }
+}
