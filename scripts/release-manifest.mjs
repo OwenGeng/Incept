@@ -97,7 +97,7 @@ function assertCheckout(manifest, manifestPath) {
   if (currentCommit === manifest.source_commit) {
     fail("manifest must be committed as the release-record commit before deploying");
   }
-  const changedPaths = git("diff", "--name-only", `${manifest.source_commit}..${currentCommit}`)
+  const changedPaths = git("diff", "--name-only", "--relative", `${manifest.source_commit}..${currentCommit}`)
     .split("\n")
     .filter(Boolean);
   const relativeManifestPath = manifestPath.replace(`${root}/`, "");
