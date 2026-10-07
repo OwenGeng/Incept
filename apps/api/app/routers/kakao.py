@@ -50,6 +50,8 @@ MAIN_COPY_SIZE, SUB_COPY_SIZE, APP_COPY_SIZE, ADDITIONAL_INFO_SIZE = 46, 38, 29,
 GACHA_INFO = "확률형 아이템 포함"
 APP_TERMS = ("앱", "app", "App", "APP")
 BANNED_PATTERN = re.compile(r"\^\^|:D|ð|☞|☑|♨|[\U0001F300-\U0001FAFF☀-➿]")
+# The UI pre-fills "APP_NAME ..." defaults; never let one reach Kakao review.
+PLACEHOLDER_PATTERN = re.compile(r"APP_NAME", re.IGNORECASE)
 
 Template = Literal[
     "APP_DOWNLOAD_ONE_LINE_COPY_THUMBNAIL",
@@ -193,6 +195,8 @@ def validate_copy(body: ComposeBizboardRequest) -> list[str]:
     for label, text in (("Main copy", main), ("Sub copy", sub), ("App download copy", app), ("Additional info", info)):
         if text and BANNED_PATTERN.search(text):
             errors.append(f"{label} contains emoji or special characters Kakao does not allow.")
+        if text and PLACEHOLDER_PATTERN.search(text):
+            errors.append(f"{label} still contains the APP_NAME placeholder. Replace it with the real app name.")
     return errors
 
 

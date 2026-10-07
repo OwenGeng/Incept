@@ -116,6 +116,8 @@ def test_gacha_adds_mandatory_notice():
         ("APP_DOWNLOAD_TWO_LINE_COPY_THUMBNAIL", {"subCopy": "새로운 모험이 시작됩니다"}, "cannot be the same"),
         ("TWO_LINE_COPY_THUMBNAIL", {"subCopy": ""}, "Sub copy is required"),
         ("TWO_LINE_COPY_THUMBNAIL", {"mainCopy": "지금 바로 ☞ 확인"}, "special characters"),
+        ("APP_DOWNLOAD_ONE_LINE_COPY_THUMBNAIL", {"mainCopy": "APP_NAME 출시"}, "APP_NAME placeholder"),
+        ("APP_DOWNLOAD_ONE_LINE_COPY_THUMBNAIL", {"appCopy": "app_name 앱에서 확인"}, "APP_NAME placeholder"),
     ],
 )
 def test_rejects_copy_that_breaks_kakao_rules(client, template, overrides, message):

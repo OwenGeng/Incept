@@ -33,6 +33,7 @@ const MIN_COPY_WIDTH = 240;
 const ARROW_GAP_AND_WIDTH = 9 + 10;
 const APP_TERMS = ["앱", "app", "App", "APP"];
 const BANNED = /\^\^|:D|ð|☞|☑|♨|[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
+const PLACEHOLDER = /APP_NAME/i; // pre-filled defaults must be replaced before submitting
 const FONT_FAMILY = "Pretendard";
 const FONT_BASE = "/Pretendard";
 
@@ -148,6 +149,7 @@ export async function validateKakaoBizboardInputs(p: KakaoCompositeParams): Prom
   const fields: [string, string][] = [["Main copy", main], ["Sub copy", sub], ["App download copy", app], ["Additional info", info]];
   for (const [label, text] of fields) {
     if (text && BANNED.test(text)) errors.push(`${label} contains emoji or special characters Kakao does not allow.`);
+    if (text && PLACEHOLDER.test(text)) errors.push(`${label} still contains the APP_NAME placeholder. Replace it with the real app name.`);
   }
 
   return { errors, mainCopyWidthPx: mainWidth, mainCopyMaxWidthPx: maxWidth };
