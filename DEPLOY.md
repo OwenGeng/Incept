@@ -57,7 +57,25 @@ The API runtime service account requires:
 - `roles/storage.objectUser` on the asset/video bucket
 - `roles/secretmanager.secretAccessor` on each configured secret
 
-`deploy.sh` applies these bindings idempotently where the deployer has permission.
+By default `deploy.sh` does not change IAM. It only reads the current policies and
+fails before building if the runtime account cannot read a configured secret. A
+missing `serviceUsageConsumer`, `aiplatform.user`, `cloudsql.client`, or bucket role
+only produces a warning. An IAM admin grants any missing role; for a new secret that
+means `roles/secretmanager.secretAccessor` for the runtime account. An admin can also
+run `GRANT_IAM=true ./deploy.sh ...` to apply the bindings.
+
+Adding or rotating a secret value needs only `roles/secretmanager.secretVersionAdder`:
+
+```bash
+printf '%s' "$VALUE" | gcloud secrets versions add <secret-name> --data-file=- --project=ads-bpd-guard-sandbox
+```
+
+Each add creates a new numbered version. `.env.deploy` pins a version number, and a
+running revision keeps using the version it was deployed with. To rotate a value,
+add a version, update the matching `*_SECRET_VERSION` in `.env.deploy`, and deploy.
+
+The first deploy that moves a value from a plain environment variable to a secret
+removes the plain variable in the same update (`--remove-env-vars`).
 
 ## Verification before creating a release
 

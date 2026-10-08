@@ -80,7 +80,7 @@ def test_vue_settings_and_built_in_nodes_are_server_managed(tmp_path, monkeypatc
 
     language_models = api.get("/video-legacy/api/ai/models", headers=headers()).json()["data"]
     model_ids = {item["modelId"] for item in language_models}
-    assert {"gemini-3.8-flash", "gemini-3.1-pro-preview", "gpt-6-sol"} <= model_ids
+    assert {"gemini-3.8-flash", "gemini-3.1-pro-preview", "gpt-6.1-sol"} <= model_ids
     assert "claude-opus-5-5" not in model_ids
     assert "gemini-3.1-flash-lite" not in model_ids
     assert "gemini-3.6-flash" not in model_ids
@@ -107,16 +107,22 @@ def test_vue_settings_and_built_in_nodes_are_server_managed(tmp_path, monkeypatc
     assert transcript["author"] == "LinglongLab"
 
 
-def test_claude_sonnet_5_is_listed_only_when_anthropic_key_is_configured(tmp_path, monkeypatch):
+def test_claude_sonnet_5_5_is_listed_only_when_anthropic_key_is_configured(tmp_path, monkeypatch):
     from app.incept.config import get_settings
 
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    get_settings.cache_clear()
+    api = client(tmp_path, monkeypatch)
+    models = api.get("/video-legacy/api/ai/models", headers=headers()).json()["data"]
+    assert all(item["providerId"] != "anthropic" for item in models)
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-5")
     get_settings.cache_clear()
     try:
         api = client(tmp_path, monkeypatch)
         models = api.get("/video-legacy/api/ai/models", headers=headers()).json()["data"]
-        claude = next(item for item in models if item["modelId"] == "claude-sonnet-5")
+        claude = next(item for item in models if item["modelId"] == "claude-sonnet-5-5")
         assert claude["providerId"] == "anthropic"
         assert claude["protocol"] == "anthropic-messages"
     finally:
@@ -139,7 +145,7 @@ def test_claude_generation_uses_direct_anthropic_api(tmp_path, monkeypatch):
             self.messages = FakeMessages()
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
-    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
     monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
     get_settings.cache_clear()
     try:
@@ -149,7 +155,7 @@ def test_claude_generation_uses_direct_anthropic_api(tmp_path, monkeypatch):
             headers=headers(),
             json={
                 "providerId": "anthropic",
-                "modelId": "claude-sonnet-5",
+                "modelId": "claude-sonnet-5-5",
                 "context": {
                     "systemPrompt": "You are a video producer.",
                     "messages": [{"role": "user", "content": "Create a shot list."}],
@@ -159,7 +165,7 @@ def test_claude_generation_uses_direct_anthropic_api(tmp_path, monkeypatch):
         assert response.status_code == 200
         assert "direct anthropic response" in response.text
         assert captured["api_key"] == "test-anthropic-key"
-        assert captured["model"] == "claude-sonnet-5"
+        assert captured["model"] == "claude-sonnet-5-5"
         assert captured["system"] == "You are a video producer."
         assert captured["messages"] == [{"role": "user", "content": [{"type": "text", "text": "Create a shot list."}]}]
     finally:

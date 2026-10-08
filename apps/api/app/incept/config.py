@@ -27,7 +27,7 @@ class Settings(BaseModel):
     bigquery_table_prefix: str = Field(default="ll_")
 
     openai_api_key: str | None = Field(default=None)
-    openai_text_model: str = Field(default="gpt-6-sol")
+    openai_text_model: str = Field(default="gpt-6.1-sol")
 
     default_image_provider: str = Field(default="gemini")
     openai_image_model: str = Field(default="gpt-image-2.5-flare")
@@ -61,7 +61,7 @@ class Settings(BaseModel):
     # Claude uses Anthropic's first-party API. Keep it hidden from the model
     # picker until a server-side key is configured.
     anthropic_api_key: str | None = Field(default=None)
-    anthropic_model: str = Field(default="claude-sonnet-5")
+    anthropic_model: str = Field(default="claude-sonnet-5-5")
     studio_user_budget_usd: float = Field(default=500.0)
     veo_fast_estimated_cost_per_second_usd: float = Field(default=0.08)
     # Gemini text pricing is deployment-owned. Keep the default at zero rather
@@ -129,7 +129,7 @@ def get_settings() -> Settings:
         bigquery_dataset=os.getenv("BIGQUERY_DATASET", "Incept"),
         bigquery_table_prefix=os.getenv("BIGQUERY_TABLE_PREFIX", "ll_"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
-        openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-6-sol"),
+        openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-6.1-sol"),
         default_image_provider=os.getenv("DEFAULT_IMAGE_PROVIDER", "gemini"),
         openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare"),
         openai_tts_model=os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts-2025-12-15"),
@@ -152,7 +152,7 @@ def get_settings() -> Settings:
         vertex_veo_location=os.getenv("VERTEX_VEO_LOCATION") or "global",
         vertex_veo_model=os.getenv("VERTEX_VEO_MODEL", ""),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
-        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"),
         studio_user_budget_usd=float(os.getenv("STUDIO_USER_BUDGET_USD", "500")),
         veo_fast_estimated_cost_per_second_usd=float(os.getenv("VEO_FAST_ESTIMATED_COST_PER_SECOND_USD", "0.08")),
         studio_copilot_estimated_cost_per_1k_tokens_usd=float(os.getenv("STUDIO_COPILOT_ESTIMATED_COST_PER_1K_TOKENS_USD", "0")),

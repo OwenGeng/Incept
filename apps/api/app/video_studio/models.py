@@ -158,6 +158,7 @@ class AgentConversation(BaseModel):
     provider_id: str | None = Field(default=None, max_length=96)
     model_id: str | None = Field(default=None, max_length=256)
     messages: list[AgentMessage] = Field(default_factory=list, max_length=1_000)
+    research_history: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
