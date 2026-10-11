@@ -53,4 +53,20 @@ jobs:
       - run: pnpm --dir apps/video-vue audit --prod --audit-level high
       - run: pip-audit -r apps/api/requirements.txt
       - run: docker build --platform linux/amd64 -f Dockerfile.nbs-api -t incept-api:preflight .
+      - name: Verify native host starts and shuts down in production image
+        run: |
+          docker run --rm -i incept-api:preflight python - <<'PY'
+          from app.video_studio.native_host import NativeHostManager
+
+          host = NativeHostManager()
+          try:
+              endpoint = host._start()
+              process = host._process
+              assert endpoint.pid == process.pid and process.poll() is None
+              assert host._start() == endpoint, "Readiness must reuse the same private host"
+          finally:
+              host.shutdown()
+          assert process.poll() is not None, "Shutdown must reap the native child"
+          print("Production native host readiness, reuse and shutdown passed")
+          PY
       - run: docker build --platform linux/amd64 --build-arg INCEPT_ENABLE_GAMING_PLAYABLE=false -f Dockerfile.web -t incept-web:preflight .
