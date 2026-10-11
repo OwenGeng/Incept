@@ -14,6 +14,7 @@ from app.incept.postgres import connection_pool, postgres_enabled
 TextEncoding = Literal['utf-8', 'utf-8-bom', 'utf-16le', 'utf-16be']
 MAX_TEXT_BYTES = 5 * 1024 * 1024
 _locks = [threading.RLock() for _ in range(64)]
+_held_locks = threading.local()
 
 
 class DocumentConflict(ValueError):
@@ -23,15 +24,27 @@ class DocumentConflict(ValueError):
 @contextmanager
 def document_lock(path: Path) -> Iterator[None]:
     digest = hashlib.sha256(str(path.resolve()).encode()).digest()
+    held = getattr(_held_locks, 'paths', None)
+    if held is None:
+        held = _held_locks.paths = set()
+    if digest in held:
+        # A new pooled connection would wait on our own outer transaction's
+        # advisory lock. Reuse that transaction for exact-path thread reentry.
+        yield
+        return
     with _locks[digest[0] % len(_locks)]:
-        if postgres_enabled():
-            # Transaction-scoped lock also serializes cooperating Cloud Run
-            # instances. No table or infrastructure migration is necessary.
-            with connection_pool().connection() as connection:
-                connection.execute('SELECT pg_advisory_xact_lock(%s)', (int.from_bytes(digest[:8], signed=True),))
+        held.add(digest)
+        try:
+            if postgres_enabled():
+                # Transaction-scoped lock serializes cooperating Cloud Run
+                # instances. Distinct paths still acquire distinct locks.
+                with connection_pool().connection() as connection:
+                    connection.execute('SELECT pg_advisory_xact_lock(%s)', (int.from_bytes(digest[:8], signed=True),))
+                    yield
+            else:
                 yield
-        else:
-            yield
+        finally:
+            held.remove(digest)
 
 
 def text_snapshot(path: Path, max_bytes: int = MAX_TEXT_BYTES) -> dict[str, str]:

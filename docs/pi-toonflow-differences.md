@@ -1,13 +1,15 @@
 # LinglongLab versus local Toonflow Agent
 
-Compared against local Toonflow commit `72a895c26aab3f54c5a914517615362208fa6008`.
+Current native-host branch vendors Toonflow commit `acdf33ce4ec0c33dac3bccf2d6d7c03f4d2f6807`.
+The capability completion figures below describe the preserved earlier baseline;
+see [native host architecture and acceptance](toonflow-native-host.md) for this migration.
 Both use the actual Pi `0.85.1` SDK. This is not complete desktop backend parity.
 
 | Area | Toonflow | LinglongLab |
 | --- | --- | --- |
-| Reasoning/tool loop, compaction, retry | Pi SDK | Same SDK; no Python loop/fallback |
+| Reasoning/tool loop, compaction, retry | Native Toonflow host and Pi SDK | Vendored native host lifecycle and same SDK; no Python loop/fallback |
 | Conversation context | SDK journal and tree | SDK journal and tree; UI JSON maps to SDK entry IDs, not context replay |
-| HTTP host | TypeScript/Bun server | FastAPI plus private Node SDK process per attempt |
+| HTTP host | Express/TypeScript/Bun server | Existing FastAPI service plus one private long-lived TypeScript native Agent host per API worker |
 | Model transport | Configured TS provider protocols | Native Pi OpenAI/Anthropic; Enterprise Gemini uses existing Python transport, not Python orchestration |
 | Session storage | Workspace-local journals | Private journals plus authenticated database snapshots for Cloud Run restarts |
 | Tools | Desktop workspace/canvas/media, questions, delegation, memory | Scoped document/canvas/media/export tools, safe processing, questions, delegation, memory and configured A2A |
@@ -56,7 +58,8 @@ boundaries, and framework replacement alone would not preserve upstream behavior
 If ongoing upstream compatibility becomes the priority, retain more of
 Toonflow's TypeScript Agent host and let it call FastAPI's authenticated business
 APIs. That reduces duplicated host behavior without rewriting existing business
-services. It is an architectural recommendation, not a migration performed here.
+services. This recommendation is implemented on `toonflow-native-host`; the scoped
+model, resource, permission and storage adapters remain product-specific.
 
 A separate Express/Bun container is a routine Cloud Run deployment. The work is
 adapting the original local host for user isolation, durable journals/assets,

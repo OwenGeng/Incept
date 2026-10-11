@@ -5,6 +5,7 @@ The retired JSON-agent loop is not imported or used as a fallback.
 """
 import base64
 import copy
+import hashlib
 import json
 import os
 import time
@@ -72,6 +73,71 @@ def _child_session(email,project_id,parent,directory,args):
     child_id=file.removeprefix('agent/').removesuffix('.json')
     with document_lock(store._conversation_path(email,project_id,child_id)):
         return _child_session_locked(email,project_id,parent,directory,args)
+
+
+def _parent_report(email, project_id, conversation, payload):
+    """Persist a direct child's explicit report without changing parent Pi context."""
+    import re
+    args = payload.get('arguments', {})
+    file = f'agent/{conversation.id}.json'
+    parent_file = conversation.parent_file
+    if not parent_file or not re.fullmatch(r'agent/[a-f0-9]{32}\.json', parent_file):
+        raise ValueError('Only an owned child conversation can report to its parent')
+    if payload.get('conversationFile') != file or args.get('file') != file or args.get('parentFile') != parent_file:
+        raise ValueError('Report conversation ownership does not match')
+    owned = store.get_conversation(email, project_id, conversation.id)
+    if owned.parent_file != parent_file:
+        raise ValueError('Report parent ownership does not match')
+    store.get_conversation(email, project_id, parent_file.removeprefix('agent/').removesuffix('.json'))
+    report_id, name, content = args.get('id'), args.get('name'), args.get('content')
+    if not isinstance(report_id, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', report_id):
+        raise ValueError('Invalid report identity')
+    if not isinstance(name, str) or not name.strip() or len(name) > 128:
+        raise ValueError('Invalid report name')
+    if not isinstance(content, str) or not content.strip() or len(content.encode('utf-8')) > 65536:
+        raise ValueError('Report content must contain at most 64 KiB')
+    report = {'id': report_id, 'file': file, 'parentFile': parent_file, 'name': name, 'content': content}
+    path = store._project_root(email, project_id) / '.agent' / 'children' / f'{conversation.id}.json'
+    with document_lock(path):
+        saved = store._read_json(path, {})
+        if saved.get('parentFile', parent_file) != parent_file or saved.get('file', file) != file:
+            raise ValueError('Stored report owner does not match')
+        reports = saved.get('reports', [])
+        previous = next((item for item in reports if item.get('id') == report_id), None)
+        if previous and previous != report:
+            raise ValueError('Report identity is already bound to different content')
+        if not previous:
+            if len(reports) >= 1000: raise ValueError('Child report storage limit reached')
+            store._write_json(path, {**saved, 'file': file, 'parentFile': parent_file, 'reports': [*reports, report]})
+    return {'id': report_id}
+
+
+def _stored_parent_reports(email, project_id, conversation):
+    """Return authenticated native custom messages, never a replay of UI text."""
+    import re
+    parent_file = f'agent/{conversation.id}.json'
+    reports, identities, total_bytes = [], set(), 0
+    for child in store.list_conversations(email, project_id):
+        if child.parent_file != parent_file: continue
+        file = f'agent/{child.id}.json'
+        path = store._project_root(email, project_id) / '.agent' / 'children' / f'{child.id}.json'
+        with document_lock(path):
+            saved = store._read_json(path, {})
+        if saved.get('parentFile') != parent_file or saved.get('file') != file: continue
+        for report in saved.get('reports', []):
+            if not isinstance(report, dict) or report.get('parentFile') != parent_file or report.get('file') != file: continue
+            report_id, name, content = report.get('id'), report.get('name'), report.get('content')
+            if not isinstance(report_id, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', report_id): continue
+            if not isinstance(name, str) or not name.strip() or len(name) > 128: continue
+            if not isinstance(content, str) or not content.strip() or len(content.encode('utf-8')) > 65536: continue
+            if report_id in identities: continue
+            identities.add(report_id)
+            item = {'id': report_id, 'file': file, 'parentFile': parent_file, 'name': name, 'content': content}
+            total_bytes += len(json.dumps(item, ensure_ascii=False).encode('utf-8'))
+            if len(reports) >= 1000 or total_bytes > 4 * 1024 * 1024:
+                raise ValueError('Stored child reports exceed the native host context transfer budget')
+            reports.append(item)
+    return reports
 
 
 def _child_session_locked(email,project_id,parent,directory,args):
@@ -251,6 +317,7 @@ def run_agent(*, email, project_id, prompt, conversation_id, agent_id=None, asse
                 + moloco_ctv_instructions() + '\nCurrent selected media coverage: ' + json.dumps(manifest, ensure_ascii=False)
                 + '\n' + settings.agent_system_prompt + '\n' + business.context())
             config = {'cwd': str(store.assets_root(email, project_id)), 'sessionDir': str(directory),
+                'callbackScope':hashlib.sha256((email.strip().lower() or 'local').encode('utf-8')).hexdigest(),
                 'sessionFile': session_file, 'prompt': prompt + ('\n\nCurrent selected attachment text:\n' + text_parts if text_parts else ''),
                 'systemPrompt': system, 'model': {'provider': model['providerId'], 'id': model['modelId'],
                     # Local operating limits, not guessed provider model specifications.
@@ -259,6 +326,9 @@ def run_agent(*, email, project_id, prompt, conversation_id, agent_id=None, asse
                     'reasoning':conversation.thinking_level!='off'},
                 'apiKey': api_key, 'images': images, 'tools': tools,
                 'thinkingLevel':conversation.thinking_level,'conversationFile':f'agent/{conversation.id}.json',
+                'parentFile':conversation.parent_file,
+                'nativeMemoryEnabled':business.resource_read('memory','user')['enabled'],
+                'nativeParentReports':_stored_parent_reports(email,project_id,conversation),
                 'deletedEntryIds': conversation.pi_deleted_entries}
             team=business.resource_read('team')
             config['teamAgents']=(json.loads(team['content'] or '{}').get('agents',[]) if team['enabled'] else [])
@@ -279,6 +349,10 @@ def run_agent(*, email, project_id, prompt, conversation_id, agent_id=None, asse
                 if name=='subAgentSession':
                     return _child_session(email,project_id,conversation,directory,payload['arguments'])
                 check_scope()
+                if name=='nativeParentReport':
+                    path=store._project_root(email,project_id)/'.agent'/'children'/f'{conversation.id}.json'
+                    with document_lock(path),scoped.mutation():
+                        return _parent_report(email,project_id,conversation,payload)
                 if name not in allowed_names:
                     raise ValueError('Tool is unavailable for the current turn')
                 args = payload['arguments']
@@ -305,11 +379,15 @@ def run_agent(*, email, project_id, prompt, conversation_id, agent_id=None, asse
                     check_cancel=check_scope, mutation_lock=scoped.mutation)
             def runtime_progress(event):
                 control.check()
+                # Native SDK session acknowledgments contain a journal identity,
+                # while the authenticated host owns the durable run identity.
+                event={**event,'runId':conversation.run_id}
                 if event.get('type')=='subAgent':
                     agent={**event['agent'],'runId':conversation.run_id}
                     event={**event,'agent':agent}
                     conversation.sub_agents=[a for a in conversation.sub_agents if a['file']!=agent['file']]+[agent]
                 if event.get('type')=='subAgentEvent' and journal:
+                    event={**event,'event':{**event['event'],'runId':conversation.run_id}}
                     child_id=event['file'].removeprefix('agent/').removesuffix('.json')
                     child_journal=RunJournal(email,project_id,child_id,conversation.run_id)
                     try: child_journal.state()

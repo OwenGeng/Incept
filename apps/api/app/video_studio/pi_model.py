@@ -4,6 +4,8 @@ OpenAI/Anthropic use Pi's native transports. Deployment-owned Gemini model,
 project and location are unchanged. Only native SDK messages cross this bridge.
 """
 import base64
+import os
+import threading
 import time
 import uuid
 
@@ -12,6 +14,10 @@ from google.genai import types
 
 from app.incept.config import get_settings
 from app.routers.video_runtime import configured_text_models
+
+# Production callbacks already share the native host's 30-worker budget. This
+# extra bound also covers a client.close implementation that does not return.
+_WATCHER_SLOTS = threading.BoundedSemaphore(30)
 
 
 def gemini_contents(context: dict, media_parts: list) -> list:
@@ -58,7 +64,38 @@ def model_response(payload: dict, media_parts=None, emit=None, check_cancel=None
     if reasoning and reasoning != 'off':
         if reasoning not in {'low','medium','high'}: raise ValueError('Unsupported thinking level')
         config.thinking_config=types.ThinkingConfig(thinking_level=reasoning.upper(),include_thoughts=False)
-    client = genai.Client(enterprise=True, project=settings.gcp_project_id, location=settings.gcp_location)
+    timeout_seconds = int(os.getenv('VIDEO_AGENT_MODEL_TIMEOUT_SECONDS', '120'))
+    if not 1 <= timeout_seconds <= 900:
+        raise ValueError('VIDEO_AGENT_MODEL_TIMEOUT_SECONDS must be between 1 and 900')
+    if check_cancel: check_cancel()
+    client = genai.Client(enterprise=True, project=settings.gcp_project_id, location=settings.gcp_location,
+        http_options=types.HttpOptions(timeout=timeout_seconds * 1000))
+    stopped, close_lock = threading.Event(), threading.Lock()
+    closed, cancellation = False, []
+    def close_client():
+        nonlocal closed
+        with close_lock:
+            if closed: return
+            closed = True
+        client.close()
+    watcher = None
+    if check_cancel:
+        if not _WATCHER_SLOTS.acquire(blocking=False):
+            close_client()
+            raise ValueError('Model cancellation monitor capacity exhausted; wait for pending requests to close')
+        def watch_cancel():
+            try:
+                while not stopped.wait(.1):
+                    try: check_cancel()
+                    except Exception as error:
+                        cancellation.append(error)
+                        try: close_client()
+                        except Exception: pass
+                        return
+            finally:
+                _WATCHER_SLOTS.release()
+        watcher = threading.Thread(target=watch_cancel, daemon=True, name='linglonglab-model-cancellation')
+        watcher.start()
     responses=[]
     try:
         contents=gemini_contents(context, media_parts or [])
@@ -72,8 +109,16 @@ def model_response(payload: dict, media_parts=None, emit=None, check_cancel=None
                             emit({'type':'text_delta','delta':part.text})
         else:
             responses.append(client.models.generate_content(model=model['id'],contents=contents,config=config))
+        if cancellation: raise cancellation[0]
+        if check_cancel: check_cancel()
+    except Exception:
+        if cancellation: raise cancellation[0]
+        if check_cancel: check_cancel()
+        raise
     finally:
-        client.close()
+        stopped.set()
+        close_client()
+        if watcher: watcher.join(timeout=1)
     blocks = []
     for response in responses:
         for candidate in (response.candidates or [])[:1]:

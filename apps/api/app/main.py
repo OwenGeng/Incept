@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.video_studio.mcp import configured_video_studio_mcp_app
+from app.video_studio.native_host import shutdown_host
 from app.core.config import settings
 from app.routers import (
     admin,
@@ -40,7 +41,10 @@ def _remove_retired_release_routes(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    try:
+        yield
+    finally:
+        shutdown_host()
 
 
 def create_app() -> FastAPI:

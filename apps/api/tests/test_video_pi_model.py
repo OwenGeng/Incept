@@ -55,7 +55,8 @@ def test_enterprise_transport_keeps_deployment_config_native_calls_and_usage(mon
     result = model_response({'model': {'provider': 'google-vertex-ai', 'id': 'owner-model', 'api': 'openai-completions', 'maxTokens': 2048},
         'context': {'systemPrompt': 'Current system', 'messages': [{'role': 'user', 'content': 'Hello'}],
             'tools': [{'name': 'getCanvas', 'description': 'Read canvas', 'parameters': {'type': 'object', 'properties': {}}}]}})
-    assert seen['client'] == {'enterprise': True, 'project': 'owner-project', 'location': 'owner-region'}
+    assert seen['client']['http_options'].timeout == 120000
+    assert {key:value for key,value in seen['client'].items() if key!='http_options'} == {'enterprise': True, 'project': 'owner-project', 'location': 'owner-region'}
     assert seen['model'] == 'owner-model' and seen['closed']
     assert result['stopReason'] == ('length' if capped else 'toolUse')
     assert result['content'][1]['thoughtSignature'] == 'b3JpZ2luYWw='
@@ -99,3 +100,67 @@ def test_streaming_emits_visible_deltas_before_completion_and_native_thinking(mo
     assert result['content']==[{'type':'text','text':'Hello world'}]
     assert seen['config'].thinking_config.thinking_level==types.ThinkingLevel.HIGH
     assert seen['config'].thinking_config.include_thoughts is False
+
+
+@pytest.mark.parametrize('timeout', ['1','120','900'])
+def test_enterprise_timeout_is_milliseconds_and_keeps_owner_endpoint(monkeypatch, timeout):
+    from types import SimpleNamespace
+    from app.video_studio import pi_model
+    from google.genai import types
+    monkeypatch.setenv('VIDEO_AGENT_MODEL_TIMEOUT_SECONDS',timeout)
+    monkeypatch.setattr(pi_model,'configured_text_models',lambda:[{'providerId':'google-vertex-ai','modelId':'owner-model'}])
+    monkeypatch.setattr(pi_model,'get_settings',lambda:SimpleNamespace(gcp_project_id='owner-project',gcp_location='owner-region'))
+    seen=[]
+    response=types.GenerateContentResponse(candidates=[types.Candidate(content=types.Content(parts=[types.Part(text='Bounded response')]))])
+    def client(**kwargs):
+        seen.append(kwargs)
+        return SimpleNamespace(models=SimpleNamespace(generate_content=lambda **kw:response),close=lambda:None)
+    monkeypatch.setattr(pi_model.genai,'Client',client)
+    pi_model.model_response({'model':{'provider':'google-vertex-ai','id':'owner-model','api':'openai-completions','maxTokens':10},'context':{}})
+    assert seen[0]['http_options'].timeout==int(timeout)*1000
+    assert seen[0]['project']=='owner-project' and seen[0]['location']=='owner-region'
+
+
+@pytest.mark.parametrize('timeout',['0','901','bad'])
+def test_invalid_enterprise_timeout_rejects_before_request(monkeypatch,timeout):
+    from types import SimpleNamespace
+    from app.video_studio import pi_model
+    monkeypatch.setenv('VIDEO_AGENT_MODEL_TIMEOUT_SECONDS',timeout)
+    monkeypatch.setattr(pi_model,'configured_text_models',lambda:[{'providerId':'google-vertex-ai','modelId':'owner-model'}])
+    monkeypatch.setattr(pi_model,'get_settings',lambda:SimpleNamespace(gcp_project_id='owner-project',gcp_location='owner-region'))
+    monkeypatch.setattr(pi_model.genai,'Client',lambda **kwargs:pytest.fail('No provider request with invalid timeout'))
+    with pytest.raises(ValueError):
+        pi_model.model_response({'model':{'provider':'google-vertex-ai','id':'owner-model','maxTokens':10},'context':{}})
+
+
+@pytest.mark.parametrize('streaming',[False,True])
+def test_enterprise_cancel_closes_blocked_client_and_stops_monitor(monkeypatch,streaming):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+    from app.video_studio import pi_model
+    from app.video_studio.agent_turns import AgentCancelled
+    entered,closed,cancel=threading.Event(),threading.Event(),threading.Event()
+    closes=[]
+    monkeypatch.setattr(pi_model,'configured_text_models',lambda:[{'providerId':'google-vertex-ai','modelId':'owner-model'}])
+    monkeypatch.setattr(pi_model,'get_settings',lambda:SimpleNamespace(gcp_project_id='owner-project',gcp_location='owner-region'))
+    def blocked(**kwargs):
+        entered.set()
+        assert closed.wait(5),'Cancellation must close the blocked provider client'
+        raise OSError('Client stream closed')
+    def stream(**kwargs):
+        blocked(**kwargs)
+        yield None
+    def close():
+        closes.append(True);closed.set()
+    monkeypatch.setattr(pi_model.genai,'Client',lambda **kwargs:SimpleNamespace(models=SimpleNamespace(generate_content=blocked,generate_content_stream=stream),close=close))
+    def check():
+        if cancel.is_set():raise AgentCancelled('cancelled owner')
+    payload={'model':{'provider':'google-vertex-ai','id':'owner-model','api':'openai-completions','maxTokens':10},'context':{}}
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future=pool.submit(pi_model.model_response,payload,emit=(lambda event:pytest.fail('No cancelled output')) if streaming else None,check_cancel=check)
+        assert entered.wait(5)
+        cancel.set()
+        with pytest.raises(AgentCancelled,match='cancelled owner'):future.result(timeout=5)
+    assert closes==[True]
+    assert not any(t.name=='linglonglab-model-cancellation' for t in threading.enumerate())

@@ -45,6 +45,7 @@
               <attachmentList v-if="item.attachments?.length" :attachments="item.attachments" :directory="directory" />
               <el-input v-if="item.role === 'user' && editingId === item.id" v-model="editingText" type="textarea" :autosize="{ minRows: 2, maxRows: 10 }" :disabled="locked" aria-label="编辑消息" @keydown.esc.prevent="cancelEdit" />
               <div v-else-if="item.role === 'user'" class="messageText">{{ item.content }}</div>
+              <div v-if="item.pendingInstruction" class="messageError" role="status" data-no-translate>{{ t('执行已中断；如需继续，请重新发送这条指令', 'Interrupted; resend this instruction to continue.') }}</div>
               <div v-if="item.error" class="messageError" role="alert">{{ item.error }}</div>
             </div>
           </template>
@@ -57,10 +58,11 @@
           <template v-else>
             <el-button v-if="item.role === 'assistant' && item.error" text size="small" :disabled="locked || remoteRunning" @click="retryMessage(item)">重试上一条消息</el-button>
             <el-button v-if="item.content" class="messageAction" text circle aria-label="复制消息" title="复制消息" @click="copyMessage(item.content)"><icon-copy :size="14" /></el-button>
-            <template v-if="item.role === 'user'">
+            <el-button v-if="item.pendingInstruction" text size="small" :disabled="locked || remoteRunning" @click="fillPrompt(item.content)" data-no-translate>{{ t('填入输入框', 'Copy to message') }}</el-button>
+            <template v-if="item.role === 'user' && !item.pendingInstruction">
               <el-button class="messageAction" text circle :disabled="locked || remoteRunning" aria-label="编辑消息" title="编辑消息" @click="editMessage(item)"><icon-pencil :size="14" /></el-button>
             </template>
-            <el-button v-if="!item.report" class="messageAction" text circle :loading="deletingId === item.id" :disabled="locked || remoteRunning" aria-label="删除消息" title="删除消息" @click="deleteMessage(item)"><icon-trash v-if="deletingId !== item.id" :size="14" /></el-button>
+            <el-button v-if="!item.report && !item.pendingInstruction" class="messageAction" text circle :loading="deletingId === item.id" :disabled="locked || remoteRunning" aria-label="删除消息" title="删除消息" @click="deleteMessage(item)"><icon-trash v-if="deletingId !== item.id" :size="14" /></el-button>
           </template>
         </div>
       </div>
@@ -290,7 +292,7 @@ function applyEvent(event: AgentEvent) {
     case "progress": progress.value = event.content; break;
     case "session":
       remoteRunning.value = true;
-      currentRunId.value = event.runId;
+      if (event.runId) currentRunId.value = event.runId;
       if (directory.value && event.runId) activeRun = { directory: directory.value, sessionFile: event.file, runId: event.runId };
       emit("session", event.file); break;
     case "stats": stats.value = event.stats; contextUsage.value = event.contextUsage; break;
@@ -299,6 +301,7 @@ function applyEvent(event: AgentEvent) {
 }
 
 function receiveEvent(event: AgentEvent) {
+  if (!eventCursor(lastSequence, event.sequence).accept) return;
   if (event.type === "done" || event.type === "error") {
     remoteRunning.value = false;
     compacting.value = false;
@@ -307,6 +310,21 @@ function receiveEvent(event: AgentEvent) {
   applyEvent(event);
 }
 
+function beginDelegatedRun() {
+  if (!canApplyDelegatedSnapshot(true, busy.value, !!controller)) return false;
+  if (parentObserved.value && remoteRunning.value) return true;
+  parentObserved.value = true;
+  remoteRunning.value = true;
+  lastSequence = 0;
+  currentRunId.value = undefined;
+  activeRun = undefined;
+  return true;
+}
+function receiveDelegatedEvent(event: AgentEvent) {
+  if (!canApplyDelegatedSnapshot(parentObserved.value, busy.value, !!controller)) return false;
+  receiveEvent(event);
+  return true;
+}
 function finishDelegatedRun() {
   if (!canApplyDelegatedSnapshot(parentObserved.value, busy.value, !!controller)) return false;
   receiveEvent({ type: "done" });
@@ -339,7 +357,7 @@ function applySnapshot(session: AgentConversation) {
   return true;
 }
 function releaseSnapshotLoading() { snapshotLoading.value = false; }
-defineExpose({ receiveEvent, finishDelegatedRun, applySnapshot, releaseSnapshotLoading });
+defineExpose({ receiveEvent, beginDelegatedRun, receiveDelegatedEvent, finishDelegatedRun, applySnapshot, releaseSnapshotLoading });
 
 async function selectSkill(name: string) {
   const instance = sender;
@@ -539,6 +557,7 @@ async function sendMessage(source?: AgentMessage, researchResume?: { id: string;
   let requestRun: AgentRunScope | undefined;
   const canvasContext = createCanvasContext?.();
   controller = requestController;
+  if (!remoteRunning.value) { currentRunId.value = undefined; activeRun = undefined; }
   busy.value = true;
   compacting.value = false;
   progress.value = "正在准备请求…";
@@ -582,10 +601,10 @@ async function sendMessage(source?: AgentMessage, researchResume?: { id: string;
       switch (event.type) {
         case "session":
           if (!researchResume) researchQuestion.value = null;
-          requestRun = { directory: requestDirectory, sessionFile: event.file, runId: event.runId };
+          requestRun = { directory: requestDirectory, sessionFile: event.file, runId: event.runId ?? requestRun?.runId ?? currentRunId.value };
           activeRun = requestRun;
           remoteRunning.value = true;
-          currentRunId.value = event.runId;
+          currentRunId.value = requestRun.runId;
           applyEvent(event);
           break;
         case "accepted":
@@ -733,7 +752,8 @@ watch(senderElement, (element, _previous, onCleanup) => {
 
 async function sendInstruction(prompt: string) {
   const scope = activeRun ?? (directory.value && props.sessionFile ? { directory: directory.value, sessionFile: props.sessionFile, runId: currentRunId.value } : undefined);
-  if (!scope || !prompt || controlling.value || props.disabled) return;
+  if (!prompt || controlling.value || props.disabled) return;
+  if (!scope?.runId) { ElMessage.info(t("正在建立会话，请稍后提交追加指令", "Starting this run; send the instruction again when it is ready.")); return; }
   if (draftAttachments.value.length) { ElMessage.warning(t("追加指令请使用文字，素材可在本次执行结束后发送", "Use text for live instructions; send attachments after this run.")); return; }
   controlling.value = true;
   try {

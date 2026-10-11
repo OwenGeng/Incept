@@ -1,0 +1,112 @@
+{
+  "repository": "https://github.com/HBAI-Ltd/Toonflow-app",
+  "commit": "acdf33ce4ec0c33dac3bccf2d6d7c03f4d2f6807",
+  "modules": [
+    {
+      "source": "apps/server/src/agent/runtime/index.ts",
+      "sha256": "a1377e09f0705971d8c9ff137bc4d32098865b054dcbd9db7e52f6ced60943a5",
+      "vendored": "upstream/runtime/index.ts",
+      "adaptations": "Mechanical import rewrites and the explicitly listed re-export module-link rewrite; executable lifecycle body unchanged.",
+      "bodySha256": "d15ca96ededa117758c2dc02ff12bf6ae1360acab2417ddb1d50b0a83929c179",
+      "vendoredBodySha256": "4ef9f48aba84917d696f913618303189f46657bea0480ad7ffd224bc9b5c6801",
+      "moduleLinkRewrites": [
+        {
+          "from": "export * from \"@/agent/runtime/sessions\";",
+          "to": "export * from \"../../sessionsBoundary.ts\";"
+        }
+      ]
+    },
+    {
+      "source": "apps/server/src/agent/runtime/sessions.ts",
+      "sha256": "941f732617cb296cc8e4f6c8b11c381fd40bb75490a732e384b51c537eb35fc9",
+      "vendored": "upstream/runtime/sessions.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "671681904e8358cb6469fbb4bb1bd6dd4f59053eb3b90cc4fc47ff46b3532d09",
+      "vendoredBodySha256": "671681904e8358cb6469fbb4bb1bd6dd4f59053eb3b90cc4fc47ff46b3532d09",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/runtime/delegation.ts",
+      "sha256": "1cfa311286969285ba3a893b4c0853c555a570da4f2be8c317b5145d21af102f",
+      "vendored": "upstream/runtime/delegation.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "14d4f3fa8652bdb98082accec48e3841fe041493d555e0fd9f32b05ec667266b",
+      "vendoredBodySha256": "14d4f3fa8652bdb98082accec48e3841fe041493d555e0fd9f32b05ec667266b",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/runtime/resources.ts",
+      "sha256": "36129d07ac15b84ada8836ce576da2dfe7b609bda0ab4960688b0b16f83a1b83",
+      "vendored": "upstream/runtime/resources.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "fe19ead6add2ec7b70a839ec26c1650aa84b2a2802b23df02470d2c64485381c",
+      "vendoredBodySha256": "fe19ead6add2ec7b70a839ec26c1650aa84b2a2802b23df02470d2c64485381c",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/runtime/model.ts",
+      "sha256": "111f781a564c8bbf71614f5d361ae4fa31dc6177045e4ae825833581be434bb4",
+      "vendored": "upstream/runtime/model.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "fa7fb16d89b12bab10351612bd08f6d33c22393115587c69512c6a4251884638",
+      "vendoredBodySha256": "fa7fb16d89b12bab10351612bd08f6d33c22393115587c69512c6a4251884638",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/runtime/subAgent.ts",
+      "sha256": "18c965d8f2d8d72409daec765952b49f26926ca3d7f944086d269d7c473a27b8",
+      "vendored": "upstream/runtime/subAgent.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "5ad3e72c08b359c89dc6d42f52b0f0fd4ba21b37306acefc3fb1d444f9a88aca",
+      "vendoredBodySha256": "5ad3e72c08b359c89dc6d42f52b0f0fd4ba21b37306acefc3fb1d444f9a88aca",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/runtime/types.ts",
+      "sha256": "00a52fc742bbf500ebaa91782815a41fb013dd586f2e665b66f76d0b84973bd3",
+      "vendored": "upstream/runtime/types.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "5ca17e1d8d32af6b38ec7c88c00bb40972e363d56f4e1782f658f0bb4fb65943",
+      "vendoredBodySha256": "5ca17e1d8d32af6b38ec7c88c00bb40972e363d56f4e1782f658f0bb4fb65943",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/runtime/prompt.ts",
+      "sha256": "a33f278ce9fb554f777bb813e7a6d6331490291921cf65dedeb610092662a009",
+      "vendored": "upstream/runtime/prompt.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "cf9ba135fe420b57a3a8c1a22109e97fb03b2ca499e815595c0e9e2ad67aae27",
+      "vendoredBodySha256": "cf9ba135fe420b57a3a8c1a22109e97fb03b2ca499e815595c0e9e2ad67aae27",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/tools/subAgent.ts",
+      "sha256": "84ccdb8836d7f5334b34cb2fa309fe3c57d69ccb2c3704bb27f29bd270dcea16",
+      "vendored": "upstream/tools/subAgent.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "ca08fde8ab6913b9c98a607b56921898bcf7dfdd31c904d0ba830b6a8ade38c9",
+      "vendoredBodySha256": "ca08fde8ab6913b9c98a607b56921898bcf7dfdd31c904d0ba830b6a8ade38c9",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/tools/report.ts",
+      "sha256": "01d1630b1766af227a6b97333f60dd1b9a373eef7b5d6a255007dac510ba0332",
+      "vendored": "upstream/tools/report.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "c00cad65daad16dc415c36c83c6e34cba83dc78a8b9c9e0bd52cc5a8f17707a6",
+      "vendoredBodySha256": "c00cad65daad16dc415c36c83c6e34cba83dc78a8b9c9e0bd52cc5a8f17707a6",
+      "moduleLinkRewrites": []
+    },
+    {
+      "source": "apps/server/src/agent/tools/memory.ts",
+      "sha256": "030e4bd6de53af9ccc5c9946c7a4b9abc2234fba66cffe16b461fd9cc591db96",
+      "vendored": "upstream/tools/memory.ts",
+      "adaptations": "Import-only rewrites to authenticated host adapters; lifecycle body unchanged.",
+      "bodySha256": "0393f8da3c89c91b938f8bbf73f81f5d88431d8e939227930d4abb09bb96efab",
+      "vendoredBodySha256": "0393f8da3c89c91b938f8bbf73f81f5d88431d8e939227930d4abb09bb96efab",
+      "moduleLinkRewrites": []
+    }
+  ],
+  "sourceBaseline": "provenance-sources.json",
+  "bodyHashNormalization": "Remove top-level import statements with /^\\s*import\\b[\\s\\S]*?;/gm; collapse whitespace and trim. Compare vendor after only explicitly listed moduleLinkRewrites are reversed."
+}

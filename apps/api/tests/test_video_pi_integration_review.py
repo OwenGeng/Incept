@@ -398,8 +398,11 @@ def test_deleted_child_turn_and_tool_receipt_stay_deleted_when_parent_resumes_sd
     for marker in (removed_user, removed_reply, removed_receipt):
         assert marker not in json.dumps(resumed_contexts)
     assert running_snapshots
+    # The original native lifecycle also checkpoints running state after the
+    # SDK has physically redacted the journal; those later markers may clear.
+    assert running_snapshots[0].pi_deleted_entries == deleted_ids
     for snapshot in running_snapshots:
-        assert snapshot.pi_deleted_entries == deleted_ids
+        assert snapshot.pi_deleted_entries in (deleted_ids, [])
         assert all(m.pi_entry_id not in deleted_ids for m in snapshot.messages)
         assert all(removed_user not in m.content and removed_reply not in m.content for m in snapshot.messages)
     latest = store.get_conversation(EMAIL, project.id, child_id)

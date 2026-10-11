@@ -21,5 +21,26 @@ test('production parent updates both the live child state and canonical child co
   assert.match(parent, /view.applySnapshot\(session\)/);
   const child = readFileSync(new URL('./conversation.vue', import.meta.url), 'utf8');
   assert.match(child, /canApplyDelegatedSnapshot\(parentObserved.value, busy.value, !!controller\)/);
-  assert.match(child, /defineExpose\(\{ receiveEvent, finishDelegatedRun, applySnapshot, releaseSnapshotLoading \}\)/);
+  assert.match(child, /defineExpose\(\{ receiveEvent, beginDelegatedRun, receiveDelegatedEvent, finishDelegatedRun, applySnapshot, releaseSnapshotLoading \}\)/);
+});
+
+
+test('native parent broadcasts use the delegated event gate for live views and buffered events', () => {
+  const parent = readFileSync(new URL('./index.vue', import.meta.url), 'utf8');
+  assert.match(parent, /deliverEvent\(child, event.event, true\)/);
+  assert.match(parent, /events.push\(\{ event, delegated \}\)/);
+  assert.match(parent, /if \(delegated\) view.receiveDelegatedEvent\(event\)/);
+  const child = readFileSync(new URL('./conversation.vue', import.meta.url), 'utf8');
+  assert.match(child, /function receiveDelegatedEvent\(event: AgentEvent\) \{\s+if \(!canApplyDelegatedSnapshot\(parentObserved.value, busy.value, !!controller\)\) return false/);
+});
+
+
+test('an idle canonical child can be continued through its native parent without reopening or losing direct-run ownership', () => {
+  const parent = readFileSync(new URL('./index.vue', import.meta.url), 'utf8');
+  assert.match(parent, /if \(event.agent.status === "running"\)/);
+  assert.match(parent, /view.beginDelegatedRun\(\)/);
+  const child = readFileSync(new URL('./conversation.vue', import.meta.url), 'utf8');
+  assert.match(child, /function beginDelegatedRun\(\) \{\s+if \(!canApplyDelegatedSnapshot\(true, busy.value, !!controller\)\) return false/);
+  assert.equal(canApplyDelegatedSnapshot(true, false, false), true);
+  assert.equal(canApplyDelegatedSnapshot(true, true, true), false);
 });

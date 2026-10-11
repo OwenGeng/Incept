@@ -13,3 +13,7 @@ export function runEventURL(scope: { directory: string; sessionFile: string; run
 export function costLabel(cost: number | null | undefined, language: string) {
   return typeof cost === 'number' && Number.isFinite(cost) ? `$${cost.toFixed(4)}` : language === 'en' ? 'Price unknown' : '价格未知';
 }
+
+export function isConversationFile(file: string) {
+  return /^agent\/[a-f0-9]{32}\.json$/.test(file) || /^[\w-]+\.jsonl$/.test(file);
+}

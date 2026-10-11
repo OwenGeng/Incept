@@ -11,7 +11,7 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.18.1 --activate
 COPY apps/video-vue/ ./apps/video-vue/
 RUN pnpm --dir apps/video-vue install --frozen-lockfile --ignore-scripts --prod --filter @linglonglab/video-agent-runtime...
-RUN node --experimental-strip-types --input-type=module -e 'import("./apps/video-vue/apps/agentRuntime/src/runtime.ts")'
+RUN node --experimental-strip-types --input-type=module -e 'import("./apps/video-vue/apps/agentRuntime/src/nativeRuntime.ts")'
 
 # This named build context keeps Creative Core versioned with the deployed
 # renderer without copying a developer's home directory into the repo.

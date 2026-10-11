@@ -1,0 +1,84 @@
+# Native host acceptance record
+
+Branch `toonflow-native-host`; upstream source pin
+`acdf33ce4ec0c33dac3bccf2d6d7c03f4d2f6807`. This is a code and local acceptance
+record, not a production deployment or five-human-user trial.
+
+## Verified boundaries
+
+- Five distinct test accounts execute real native/Pi sessions concurrently in
+  one host PID/generation. Identical tool-call IDs still produce only each
+  account's authorized workspace receipt, context and event stream.
+- Cancelling one account preserves the other four and the shared process.
+  A sixth active parent is refused explicitly; callback IDs cannot cross runs,
+  be replayed, or deliver late results after termination.
+- The actual SDK resumes after host exit and local journal/cache removal using
+  durable snapshots, preserving prior SDK entry IDs. Crash recovery does not
+  automatically replay model calls or uncertain paid operations.
+- Native child work retains its SDK journal across parent continuation and
+  independent user turns; busy children reject competing parent continuation.
+  Deleted user turns, receipts, compactions and original child task metadata
+  remain deleted. Late cancelled results cannot become successful reports.
+- Explicit native reports persist and refresh without changing the parent's
+  committed SDK source. A later parent fork imports each report once through
+  Pi's native custom-message API. Reports cannot change ownership or content
+  under an existing report ID.
+- Vendored source hashes, retained original source bytes and import/re-export
+  transformations are verified automatically. Lifecycle bodies remain pinned
+  upstream code; scoped adapters replace desktop authority.
+
+## Validation evidence
+
+Final frozen-source results: **558 API tests, 51 runtime tests and 75 frontend
+tests passed**, with zero failures, errors or skips. Active hosted Agent and
+workspace-lock line coverage is **89%** (new native host: 87%, enterprise
+transport: 96%, document locks: 93%). The independent overall coverage gate
+also passed at 89%. Browser checks passed
+question refresh/answer, child stop/continuation, report exact-once reload,
+steering, normal follow-up completion, interrupted follow-up preservation and
+resend, memory/skill save and reload, thinking selection, five-identity project
+isolation and canonical conversation deletion.
+[Detailed browser record](native-toonflow-frontend-acceptance.md),
+[completed native report](acceptance/toonflow-native-host/native-report-completed.jpg),
+[retained interrupted instruction](acceptance/toonflow-native-host/queued-stop-retained-labelled.jpg). The required gates reject failed, errored or skipped cases. Active
+coverage includes the new native host rather than excluding its branches.
+All 25 Vue workspace/runtime type checks, Next.js types and lint, translation
+checks, frozen-lockfile installation, Vue build/static sync, Next.js production
+build, preflight and release-fixture validation passed. Test reports were
+validated with the repository checker rather than relying only on exit codes.
+
+A clean temporary production-only dependency deployment also imported the
+native SDK and host successfully, without relying on development packages.
+This is a host-platform dependency check, not a Linux container build.
+
+Production dependency audits passed their configured high/critical threshold.
+The root JavaScript audit reported two moderate advisories, the Vue workspace
+one low advisory, and the Python audit no known advisories. These summaries do
+not claim zero dependency risk.
+
+## Cross-review fixes
+
+Fresh cross-review closed credential redaction at terminal/checkpoint/child/report
+boundaries; disabled memory and native revision/CAS compatibility; bounded fair
+callback production and cancellation-driven enterprise client closure; report
+mutation/cancellation races; and PostgreSQL exact-path nested advisory-lock
+reentry. Meaningful regressions include a real four-child model barrier, twenty
+repeated cancellations while another owner still progresses, queue-stop-refresh
+receipts, report idempotency, and PostgreSQL connection/transaction isolation.
+PostgreSQL lock tests use a simulated pool; deployed PostgreSQL acceptance is
+not claimed.
+
+## Unfinished release gates
+
+The unified image build could not pass locally: Docker Hub's configured Python
+base-image fetch timed out during TLS negotiation; a separate native Node stage
+also could not download pnpm from the configured npm registry inside Docker.
+A repeated base-image pull made no progress and was stopped. No dependency,
+model, region, API endpoint or global network setting was changed to hide this.
+The branch's GitHub workflow includes both frozen builds and the unified image
+build; its actual result must be checked independently of local test results.
+
+Real-provider quality, actual paid generation, final exported-media quality and
+deployed Cloud Run restart/resource/quota behavior have not been exercised.
+Those require authorized release acceptance. No production service or history
+was changed and no deployment was performed.

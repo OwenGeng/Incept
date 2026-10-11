@@ -44,6 +44,7 @@ import agentMenu from "./menu.vue";
 import resourcePanel from "./resourcePanel.vue";
 import conversation from "./conversation.vue";
 import { t } from "@/i18n";
+import { isConversationFile } from "./runtimeControls";
 import { isDelegationTerminal } from "./delegatedLifecycle";
 
 const visible = defineModel<boolean>({ default: false });
@@ -68,7 +69,7 @@ const initialized = ref(false);
 let requestId = 0;
 let nextConversationKey = 0;
 const conversationRefs = new Map<number, InstanceType<typeof conversation>>();
-const pendingEvents = new Map<number, AgentEvent[]>();
+const pendingEvents = new Map<number, { event: AgentEvent; delegated: boolean }[]>();
 const refreshingChildren = new Map<number, Promise<void>>();
 
 function showConversation(session: AgentConversation | null, activate = true) {
@@ -88,16 +89,22 @@ function setConversationRef(item: OpenConversation, instance: Element | Componen
   if (!instance) { conversationRefs.delete(item.key); return; }
   const view = instance as InstanceType<typeof conversation>;
   conversationRefs.set(item.key, view);
-  for (const event of pendingEvents.get(item.key) ?? []) view.receiveEvent(event);
+  for (const { event, delegated } of pendingEvents.get(item.key) ?? []) {
+    if (delegated) view.receiveDelegatedEvent(event);
+    else view.receiveEvent(event);
+  }
   pendingEvents.delete(item.key);
 }
 
-function deliverEvent(item: OpenConversation, event: AgentEvent) {
+function deliverEvent(item: OpenConversation, event: AgentEvent, delegated = false) {
   const view = conversationRefs.get(item.key);
-  if (view) view.receiveEvent(event);
+  if (view) {
+    if (delegated) view.receiveDelegatedEvent(event);
+    else view.receiveEvent(event);
+  }
   else {
     const events = pendingEvents.get(item.key) ?? [];
-    events.push(event);
+    events.push({ event, delegated });
     pendingEvents.set(item.key, events);
   }
 }
@@ -111,6 +118,14 @@ function receiveAgentEvent(event: AgentEvent) {
     else parent.subAgents.push(event.agent);
     if (event.agent.status === "running" && !conversations.value.some(item => item.file === event.agent.file)) {
       showConversation({ ...event.agent, parentFile: parent.file, messages: [], running: true, parentObserved: true }, false);
+    }
+    if (event.agent.status === "running") {
+      const child = conversations.value.find(item => item.file === event.agent.file);
+      const view = child && conversationRefs.get(child.key);
+      if (child?.session && (!view || view.beginDelegatedRun())) {
+        child.session.parentObserved = true;
+        child.session.running = true;
+      }
     }
     if (isDelegationTerminal(event.agent.status)) {
       const child = conversations.value.find(item => item.file === event.agent.file);
@@ -129,9 +144,9 @@ function receiveAgentEvent(event: AgentEvent) {
     const child = conversations.value.find(item => item.file === event.file);
     if (event.event.type === "error") {
       const agent = conversations.value.find(item => item.file === child?.parentFile)?.subAgents.find(agent => agent.file === event.file);
-      if (agent?.status === "running") Object.assign(agent, { status: "cancelled", result: event.event.message });
+      if (agent?.status === "running") Object.assign(agent, { status: "error", result: event.event.message });
     }
-    if (child) deliverEvent(child, event.event);
+    if (child) deliverEvent(child, event.event, true);
     return;
   }
   if (event.type === "report") {
@@ -304,7 +319,7 @@ async function renameConversation(file: string, value: string) {
 async function removeConversation(file: string) {
   const directory = workspaceStore.project?.directory;
   if (!directory || loading.value || historyLoading.value || history.value.length <= 1 || !history.value.some(item => item.file === file)) return;
-  if (!/^[\w-]+\.jsonl$/.test(file)) return ElMessage.error("对话文件名无效");
+  if (!isConversationFile(file)) return ElMessage.error("对话文件名无效");
   const currentRequest = ++requestId;
   loading.value = true;
   try {

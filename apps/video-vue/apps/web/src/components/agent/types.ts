@@ -17,6 +17,9 @@ export type AgentMessage = {
   parts?: AgentMessagePart[];
   streaming?: boolean;
   error?: string;
+  pendingInstruction?: boolean;
+  controlId?: string;
+  instructionType?: "steer" | "followUp";
   report?: { file: string; name: string };
 };
 
