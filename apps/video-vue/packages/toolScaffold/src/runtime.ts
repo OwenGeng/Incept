@@ -64,6 +64,7 @@ export interface CanvasInfo {
 }
 
 export interface CanvasContext extends CanvasInfo {
+  prepare?(): Promise<void>;
   getNodeLabel?(nodeId: string): string | undefined;
   call(request: CanvasToolCall, signal?: AbortSignal): Promise<unknown>;
 }

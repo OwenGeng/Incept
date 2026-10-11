@@ -2,20 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import shutil
 import uuid
 import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from app.services.auth import require_internal_key
-from app.video_studio import store
-from app.video_studio.agent import run_agent
+from app.video_studio import store, pi_http
+from app.video_studio.pi_runs import RunJournal, control_target, answer as answer_pi_question
+from app.video_studio.pi_capabilities import validate_thinking
+from app.video_studio.pi_agent import select_model
+from app.video_studio.pi_agent import run_agent
+from app.video_studio.agent_turns import AgentBusy, prepare_turn, cancel_turn, agent_error_message
+from app.video_studio.workspace_documents import document_lock
+from app.video_studio.workspace_uploads import write_stream
 from app.video_studio.render import export_project, probe_asset
 from app.video_studio.jobs import (
     cancel_export_job,
@@ -300,16 +308,10 @@ async def upload_asset(
         filename = Path(file.filename or "upload.bin").name
         relative = "/".join(part for part in [path.strip("/"), filename] if part)
         target = store.safe_asset_path(root, relative)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
-        total = 0
-        with temporary.open("wb") as output:
+        async def chunks():
             while chunk := await file.read(1024 * 1024):
-                total += len(chunk)
-                if total > 500 * 1024 * 1024:
-                    raise HTTPException(status_code=413, detail="Asset exceeds the 500 MB limit")
-                output.write(chunk)
-        temporary.replace(target)
+                yield chunk
+        await write_stream(target, chunks())
         return AssetEntry(
             path=target.relative_to(root).as_posix(),
             name=target.name,
@@ -318,6 +320,8 @@ async def upload_asset(
             modified_at=datetime.now(timezone.utc),
             mime_type=file.content_type or store.asset_mime_type(target),
         )
+    except OverflowError as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
     except HTTPException:
         raise
     except (FileNotFoundError, FileExistsError, ValueError) as error:
@@ -470,9 +474,14 @@ def rename_conversation(
     email: str = Depends(current_user),
 ) -> AgentConversation:
     try:
-        conversation = store.get_conversation(email, project_id, conversation_id)
-        conversation.name = body.name.strip()
-        return store.save_conversation(email, project_id, conversation)
+        with document_lock(store._conversation_path(email, project_id, conversation_id)):
+            conversation = store.get_conversation(email, project_id, conversation_id)
+            if conversation.run_status == "running":
+                raise HTTPException(status_code=409, detail="会话仍在处理中，请先停止或等待完成再修改。")
+            conversation.name = body.name.strip()
+            if not conversation.name:
+                raise ValueError("对话名称不能为空")
+            return store.save_conversation(email, project_id, conversation)
     except (FileNotFoundError, ValueError) as error:
         raise _translate_file_error(error) from error
 
@@ -487,55 +496,121 @@ def delete_conversation(
     email: str = Depends(current_user),
 ) -> None:
     try:
-        store.delete_conversation(email, project_id, conversation_id)
+        with document_lock(store._conversation_path(email, project_id, conversation_id)):
+            conversation = store.get_conversation(email, project_id, conversation_id)
+            if conversation.run_status == "running":
+                raise HTTPException(status_code=409, detail="会话仍在处理中，请先停止或等待完成再删除。")
+            store.delete_conversation(email, project_id, conversation_id)
     except (FileNotFoundError, ValueError) as error:
         raise _translate_file_error(error) from error
+
+
+class AgentCancelRequest(BaseModel):
+    run_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+@router.post("/projects/{project_id}/conversations/{conversation_id}/cancel", status_code=204)
+def cancel_conversation_run(project_id: str, conversation_id: str, body: AgentCancelRequest,
+                            email: str = Depends(current_user)) -> None:
+    try:
+        store.get_project(email, project_id)
+        value=store.get_conversation(email,project_id,conversation_id)
+        journal,child_file=control_target(email,project_id,value)
+        if child_file and value.run_id==body.run_id:
+            journal.abort_child(child_file)
+        else: cancel_turn(email, project_id, conversation_id, body.run_id)
+    except (FileNotFoundError, ValueError) as error:
+        raise _translate_file_error(error) from error
+
+
+class AgentControlRequest(AgentCancelRequest):
+    action: str
+    prompt: str = Field(min_length=1,max_length=20000)
+
+
+@router.get('/projects/{project_id}/conversations/{conversation_id}/events')
+async def conversation_events(project_id:str,conversation_id:str,request:Request,
+                              run_id:str=Query(),after:int=Query(default=0,ge=0),email:str=Depends(current_user)):
+    try:
+        value=store.get_conversation(email,project_id,conversation_id)
+        if value.run_id!=run_id: raise ValueError('Run identity changed; reload the conversation')
+        journal=RunJournal(email,project_id,conversation_id,run_id)
+        journal.state()
+    except (ValueError,FileNotFoundError) as error: raise _translate_file_error(error) from error
+    return StreamingResponse(pi_http.events(journal,request,after,replay=True),media_type='application/x-ndjson',
+        headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
+
+def _enqueue_instruction(email,project_id,value,action,prompt):
+    journal,child_file=control_target(email,project_id,value)
+    return journal.enqueue(action,prompt,child_file)
+
+
+@router.post('/projects/{project_id}/conversations/{conversation_id}/control')
+def conversation_control(project_id:str,conversation_id:str,body:AgentControlRequest,email:str=Depends(current_user)):
+    try:
+        value=store.get_conversation(email,project_id,conversation_id)
+        if value.run_id!=body.run_id or value.run_status!='running': raise ValueError('Run identity changed or run ended')
+        command=_enqueue_instruction(email,project_id,value,body.action,body.prompt)
+        return {'accepted':True,'controlId':command['controlId']}
+    except (ValueError,FileNotFoundError) as error: raise _translate_file_error(error) from error
+
+
+@router.post('/projects/{project_id}/conversations/{conversation_id}/answer')
+def conversation_answer(project_id:str,conversation_id:str,body:dict,email:str=Depends(current_user)):
+    try:
+        value=store.get_conversation(email,project_id,conversation_id)
+        return answer_pi_question(email,project_id,body.get('callId'),{**body,'sessionFile':f'agent/{value.id}.json','runId':value.run_id})
+    except (ValueError,FileNotFoundError) as error: raise _translate_file_error(error) from error
 
 
 @router.post("/projects/{project_id}/agent")
 async def agent(
     project_id: str,
     body: AgentRequest,
+    request: Request,
     email: str = Depends(current_user),
 ) -> StreamingResponse:
-    async def events():
-        yield json.dumps({"type": "status", "status": "thinking"}, ensure_ascii=False) + "\n"
-        try:
-            conversation, canvas, message = await asyncio.to_thread(
-                run_agent,
-                email=email,
-                project_id=project_id,
-                prompt=body.prompt,
-                conversation_id=body.conversation_id,
-                agent_id=body.agent_id,
-                asset_paths=body.asset_paths,
-            )
-            yield json.dumps(
-                {
-                    "type": "canvas",
-                    "canvas": canvas.model_dump(mode="json"),
-                },
-                ensure_ascii=False,
-            ) + "\n"
-            yield json.dumps(
-                {
-                    "type": "message",
-                    "conversation_id": conversation.id,
-                    "message": message,
-                },
-                ensure_ascii=False,
-            ) + "\n"
-            yield json.dumps({"type": "done"}, ensure_ascii=False) + "\n"
-        except Exception as error:
-            yield json.dumps(
-                {"type": "error", "message": str(error)}, ensure_ascii=False
-            ) + "\n"
+    try:
+        project = store.get_project(email, project_id)
+        target_canvas_id = project.active_canvas_id
+        initial_canvas = store.get_project_canvas(email, project_id, target_canvas_id).model_copy(deep=True)
+        if body.conversation_id:
+            value=store.get_conversation(email,project_id,body.conversation_id)
+            if value.run_status=='running':
+                try: command=_enqueue_instruction(email,project_id,value,body.streaming_behavior,body.prompt)
+                except FileNotFoundError as error: raise AgentBusy('该会话仍在处理中，请先停止或等待完成。') from error
+                async def accepted():
+                    yield json.dumps({'type':'accepted','controlId':command['controlId']})+'\n'
+                    yield json.dumps({'type':'done'})+'\n'
+                return StreamingResponse(accepted(),media_type='application/x-ndjson')
+        validate_thinking(select_model(None,None),body.thinking_level)
+        prepared = await asyncio.to_thread(prepare_turn, email=email, project_id=project_id,
+            prompt=body.prompt, conversation_id=body.conversation_id, asset_paths=body.asset_paths,
+            research_question_id=body.research_question_id)
+    except AgentBusy as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (ValueError, FileNotFoundError) as error:
+        raise _translate_file_error(error) from error
+    journal=RunJournal(email,project_id,prepared.id,prepared.run_id)
+    journal.create()
+    journal.emit({'type':'session','conversation_id':prepared.id,'run_id':prepared.run_id,'file':f'agent/{prepared.id}.json','runId':prepared.run_id})
+    journal.emit({'type':'userMessage','id':prepared.messages[-1].id,'content':prepared.messages[-1].content})
+    loop=asyncio.get_running_loop()
+    async def worker():
+        return await asyncio.to_thread(run_agent,email=email,project_id=project_id,prompt=prepared.messages[-1].content,
+            conversation_id=prepared.id,agent_id=body.agent_id,asset_paths=body.asset_paths,
+            prepared_conversation=prepared,canvas_document=initial_canvas,canvas_id=target_canvas_id,
+            progress=journal.emit,thinking_level=body.thinking_level,journal=journal,
+            invoke_async=lambda coro:asyncio.run_coroutine_threadsafe(coro,loop).result(timeout=120))
+    def finalized(result):
+        conversation,canvas,message=result
+        if canvas!=initial_canvas:
+            yield {'type':'canvas','canvas_id':target_canvas_id,'canvas':canvas.model_dump(mode='json')}
+        yield {'type':'message','conversation_id':conversation.id,'message':message}
+    pi_http.launch(journal,worker,finalized)
+    return StreamingResponse(pi_http.events(journal,request),media_type='application/x-ndjson',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
 
-    return StreamingResponse(
-        events(),
-        media_type="application/x-ndjson",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 @router.get("/projects/{project_id}/ffmpeg/probe")

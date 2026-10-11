@@ -1,4 +1,21 @@
 export const uiPhraseEntries = [
+  // Application chrome for the restored document/image workspace; never
+  // translate user-authored document contents or customer file names here.
+  ["排列", "Arrange"], ["水平排列", "Arrange horizontally"],
+  ["垂直排列", "Arrange vertically"], ["网格排列", "Arrange in a grid"],
+  ["重新载入", "Reload"], ["单窗", "Single pane"],
+  ["左右分屏", "Side-by-side"], ["上下分屏", "Stacked panes"],
+  ["上窗", "Top pane"], ["下窗", "Bottom pane"],
+  ["左窗", "Left pane"], ["右窗", "Right pane"],
+  ["/ 12 个标签", "/ 12 tabs"],
+  ["已检查", "Inspected"], ["个文件，", "files;"],
+  ["个文件匹配。", "files matched."], ["处）", "matches)"],
+  ["画笔 / 文字标记", "Brush / text annotation"],
+  ["宫格切分", "Grid split"], ["局部重绘", "Inpaint selection"],
+  ["绘制工具", "Drawing tool"], ["画笔", "Brush"],
+  ["橡皮擦", "Eraser"], ["文字", "Text"], ["矩形", "Rectangle"],
+  ["标记颜色", "Annotation color"], ["画笔大小（像素）", "Brush size (pixels)"],
+  ["清空标记", "Clear annotations"],
   // Home, workspace navigation and shared actions.
   ["工作目录校验失败", "Workspace validation failed"],
   ["创建项目失败", "Could not create the project"],
@@ -784,6 +801,9 @@ export const nodeUiPhraseEntries = [
 ] as const;
 
 export const dynamicUiTranslations: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^已检查\s*(\d+)\s*个文件，\s*(\d+)\s*个文件匹配。$/u, "Inspected $1 files; $2 files matched."],
+  [/^（\s*(\d+)\s*处）$/u, "($1 matches)"],
+  [/^(\d+)\s*\/\s*12\s*个标签$/u, "$1 / 12 tabs"],
   [/^最近打开\s+(.+)$/u, "Last opened $1"],
   [/^打开项目\s+(.+)$/u, "Open project $1"],
   [/^重命名项目\s+(.+)$/u, "Rename project $1"],

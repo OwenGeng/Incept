@@ -24,6 +24,7 @@
                   <div class="itemAction">
                     <icon-check v-if="activeCanvasId === canvas.id" class="selectedIcon" :size="18" aria-hidden="true" />
                     <el-button class="iconButton renameButton" text :icon="IconEdit" :disabled="busy || editingId !== null" :aria-label="`编辑 ${canvas.name}`" title="编辑" @click="editCanvas(canvas)" />
+                    <el-button class="iconButton" text :icon="IconCopyPlus" :disabled="busy || editingId !== null" :aria-label="`复制 ${canvas.name}`" title="创建独立副本" @click="duplicateCanvas(canvas)" />
                     <el-button class="iconButton deleteButton" text type="danger" :icon="IconTrash" :disabled="busy || editingId !== null || canvases.length <= 1" :aria-label="`删除 ${canvas.name}`" :title="canvases.length <= 1 ? '至少保留一个画布' : '删除画布'" @click="removeCanvas(canvas)" />
                   </div>
                 </template>
@@ -43,7 +44,7 @@ import axios from "axios";
 import { computed, inject, nextTick, ref, shallowRef, watch, type ShallowRef } from "vue";
 import { Panel, useVueFlow, type FlowExportObject } from "@vue-flow/core";
 import { ElMessage, ElMessageBox, type InputInstance } from "element-plus";
-import { IconEdit, IconCheck, IconChevronDown, IconPlus, IconTrash } from "@tabler/icons-vue";
+import { IconEdit, IconCheck, IconChevronDown, IconPlus, IconTrash, IconCopyPlus } from "@tabler/icons-vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { getCanvasAssetDirectories, isCanvasFile } from "@/pages/workspace/canvasFile";
@@ -205,6 +206,49 @@ async function handleSwitchCanvas(canvasId: string) {
     await switchCanvas(canvasId);
   } catch (err) {
     if (props.directory === directory) ElMessage.error(errorMessage(err, "切换画布失败"));
+  }
+}
+
+async function duplicateCanvas(canvas: Canvas) {
+  if (busy.value || editingId.value !== null || !props.directory) return;
+  const directory = props.directory;
+  const source = canvas.id;
+  busy.value = true;
+  try {
+    let duplicate: Canvas | undefined;
+    await props.flushSave(async () => {
+      checkCanvasDirectory(directory);
+      const files = useWorkspaceFiles(directory);
+      const { entries } = await files.list();
+      const names = new Set(entries.map(entry => entry.name.toLowerCase()));
+      // Keep even long source names within the existing filename limit.
+      const base = canvas.name.slice(0, 100);
+      for (let index = 1; index <= 1000; index++) {
+        checkCanvasDirectory(directory);
+        const name = `${base} - 副本${index === 1 ? "" : ` ${index}`}`;
+        const target = `${name}.json`;
+        if (names.has(target.toLowerCase())) continue;
+        try {
+          await files.copy(source, target);
+          duplicate = { id: target, name };
+          break;
+        } catch (error) {
+          if (!axios.isAxiosError(error) || error.response?.status !== 409) throw error;
+          names.add(target.toLowerCase());
+        }
+      }
+      if (!duplicate) throw new Error("无法找到空闲副本名称，请先重命名画布");
+    });
+    checkCanvasDirectory(directory);
+    if (!duplicate) throw new Error("创建画布副本失败");
+    canvases.value = [...canvases.value, duplicate];
+    // applyCanvas reloads the server-produced IDs and isolated asset paths.
+    await applyCanvas(duplicate.id, directory);
+    canvasListVisible.value = false;
+  } catch (error) {
+    if (props.directory === directory) ElMessage.error(errorMessage(error, "创建画布副本失败"));
+  } finally {
+    if (props.directory === directory) busy.value = false;
   }
 }
 

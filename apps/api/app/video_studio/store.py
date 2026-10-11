@@ -252,6 +252,7 @@ def delete_project(email: str, project_id: str) -> None:
         project_root = _project_root(email, project_id)
         if _read_json(project_root / "project.json", None) is None:
             raise FileNotFoundError(project_id)
+        metadata_repository.delete_prefix(f'pi-sessions/{_user_key(email)}/{project_id}')
         project_key = project_root.resolve().relative_to(_root()).as_posix()
         metadata_repository.delete_prefix(project_key)
         shutil.rmtree(project_root, ignore_errors=True)
@@ -306,7 +307,8 @@ def import_project_archive(email: str, source: Path) -> ProjectDetail:
 
 
 def save_canvas(email: str, project_id: str, canvas: CanvasDocument) -> CanvasDocument:
-    with _lock:
+    from .workspace_documents import document_lock
+    with document_lock(_project_root(email, project_id) / 'project.json'), _lock:
         project_root = _project_root(email, project_id)
         metadata = _read_json(project_root / "project.json", None)
         if metadata is None:
@@ -364,8 +366,9 @@ def create_canvas(email: str, project_id: str, body: CanvasCreate) -> ProjectDet
         return get_project(email, project_id)
 
 
-def save_project_canvas(email: str, project_id: str, canvas_id: str, canvas: CanvasDocument) -> CanvasDocument:
-    with _lock:
+def save_project_canvas(email: str, project_id: str, canvas_id: str, canvas: CanvasDocument, *, expected_canvas: CanvasDocument | None = None) -> CanvasDocument:
+    from .workspace_documents import DocumentConflict, document_lock
+    with document_lock(_project_root(email, project_id) / 'project.json'), _lock:
         project_root = _project_root(email, project_id)
         metadata = _read_json(project_root / "project.json", None)
         if metadata is None:
@@ -373,6 +376,8 @@ def save_project_canvas(email: str, project_id: str, canvas_id: str, canvas: Can
         metadata, canvases = _ensure_canvas_manifest(project_root, metadata)
         if not any(item.id == canvas_id for item in canvases):
             raise FileNotFoundError(canvas_id)
+        if expected_canvas is not None and get_project_canvas(email, project_id, canvas_id) != expected_canvas:
+            raise DocumentConflict('画布已被其他编辑器修改；Agent 未覆盖，请重新发送本轮指令。')
         saved = canvas.model_copy(update={"updated_at": datetime.now(timezone.utc)})
         _write_json(_canvas_path(project_root, canvas_id), saved.model_dump(mode="json"))
         if metadata["active_canvas_id"] == canvas_id:
@@ -507,8 +512,8 @@ _BUILTIN_SKILLS = [
     SkillDefinition(
         id="ctv-reference-research",
         name="CTV reference research",
-        description="Build a small, traceable reference set before selecting a video direction.",
-        instructions="""Confirm the product, market, delivery surface and conversion goal. Search YouTube, Meta Ads Library or Instagram, and TikTok first; use other sources only for a documented gap. Start with five samples total, not five per platform. Use video_transcript_fetch for public YouTube or Bilibili speech/captions when needed; a transcript supports spoken wording only and never proves frames or other visual content. For every factual finding, record an exact claim-level excerpt with record_claim_evidence before synthesis. Save the result to research/video-sample-table.md with direct URL, access date, platform and format, observable hook, product proof, CTA, public signals, CTV-fit notes, and what may be abstracted without copying. A search title or snippet is discovery evidence only: never claim a first-two-second hook or frame-level observation unless the media or screenshots were actually attached and inspected. Do not combine unlike platform metrics into a cross-platform performance ranking. Stop at five when they support a clear decision; expand only for a documented decision gap or an explicit full-audit request.""",
+        description="On request: research competitor videos and traceable references. Optional, not a prerequisite for a proposal.",
+        instructions="""Run only when the user selects this skill or explicitly requests competitor/video-reference research in the current turn. Never activate just because a client URL or CTV proposal is mentioned. Do not ask an automatic research-consent question. Research is optional: if a source fails or a sample cannot be verified, exclude that item, disclose partial coverage and continue delivering usable findings and preliminary directions. Asset collection is a separate Asset Library function, not a mandatory research step. Confirm the product, market, delivery surface and conversion goal. Search YouTube, Meta Ads Library or Instagram, and TikTok first; use other sources only for a documented gap. Start with five samples total, not five per platform. Use video_transcript_fetch for public YouTube or Bilibili speech/captions when needed; a transcript supports spoken wording only and never proves frames or other visual content. For every factual finding, record an exact claim-level excerpt with record_claim_evidence before synthesis. Save the result to research/video-sample-table.md with direct URL, access date, platform and format, observable hook, product proof, CTA, public signals, CTV-fit notes, and what may be abstracted without copying. A search title or snippet is discovery evidence only: never claim a first-two-second hook or frame-level observation unless the media or screenshots were actually attached and inspected. Do not combine unlike platform metrics into a cross-platform performance ranking. Stop at five when they support a clear decision; expand only for a documented decision gap or an explicit full-audit request.""",
         builtin=True,
         order=3,
     ),
@@ -524,7 +529,7 @@ _BUILTIN_SKILLS = [
         id="ctv-creative-strategy",
         name="CTV creative strategy",
         description="Turn approved research and first-party product facts into a production-ready creative system.",
-        instructions="""Read research/video-sample-table.md and intake/brand-product-asset-manifest.md before proposing a direction. Convert observations into reusable mechanisms, never a competitor's wording, visual identity, shot sequence, music or unsupported claim. Save recurring hooks, proof patterns, format distribution, unresolved objections and evidence-backed recommendations to research/creative-synthesis.md. Recommend distinct jobs for a 16:9 CTV master, 6/15-second proof cutdowns and creator-native variants; use narrative only when a real human tension adds value. Before scripts, storyboards or generation nodes, write production/approved-brief.md with target, verified facts and URLs, tension, promise, visible proof, 0-2 second opening, structure, CTA, exclusions and variants. If the hook, authoritative claim sources, producible proof, large-screen readability, CTA, rights status or approval is missing, stop and ask for it instead of starting generation.""",
+        instructions="""Read available research/video-sample-table.md and intake/brand-product-asset-manifest.md before proposing a direction. For a website-only preliminary proposal, verified first-party facts are sufficient; disclose missing reference samples and unresolved campaign constraints. A full competitor/reference audit requires the sample table. Convert observations into reusable mechanisms, never a competitor's wording, visual identity, shot sequence, music or unsupported claim. Save recurring hooks, proof patterns, format distribution, unresolved objections and evidence-backed recommendations to research/creative-synthesis.md. Recommend distinct jobs for a 16:9 CTV master, 6/15-second proof cutdowns and creator-native variants; use narrative only when a real human tension adds value. Before scripts, storyboards or generation nodes, write production/approved-brief.md with target, verified facts and URLs, tension, promise, visible proof, 0-2 second opening, structure, CTA, exclusions and variants. If the hook, authoritative claim sources, producible proof, large-screen readability, CTA, rights status or approval is missing, stop and ask for it instead of starting generation. A saved brief is a draft until the user explicitly approves it.""",
         builtin=True,
         order=5,
     ),
@@ -627,6 +632,13 @@ def list_conversations(email: str, project_id: str) -> list[AgentConversation]:
     if not (project_root / "project.json").is_file():
         raise FileNotFoundError(project_id)
     root = project_root / "conversations"
+    prefix = root.resolve().relative_to(_root()).as_posix()
+    for path_key, value in metadata_repository.list_prefix(prefix):
+        relative = Path(path_key).relative_to(prefix)
+        if len(relative.parts) == 1 and relative.suffix == '.json' and _PROJECT_ID.fullmatch(relative.stem):
+            # Restore the listing cache on fresh Cloud Run instances as well as
+            # direct get_conversation, which already reads authoritative DB data.
+            _read_json(root / relative.name, value)
     if not root.exists():
         return []
     conversations = [
@@ -659,6 +671,10 @@ def delete_conversation(email: str, project_id: str, conversation_id: str) -> No
         path = _conversation_path(email, project_id, conversation_id)
         if not path.is_file():
             raise FileNotFoundError(conversation_id)
+        metadata_repository.delete_prefix(f'pi-sessions/{_user_key(email)}/{project_id}/{conversation_id}')
+        session_dir = _project_root(email, project_id) / '.agent' / 'pi' / conversation_id
+        if session_dir.is_dir():
+            shutil.rmtree(session_dir)
         _delete_json(path)
 
 

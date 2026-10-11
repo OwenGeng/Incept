@@ -79,7 +79,7 @@ for (const component of [
 </script>
 
 <script setup lang="ts">
-const props = defineProps<{ tool: ToolCall; directory?: string }>();
+const props = defineProps<{ tool: ToolCall; directory?: string; sessionFile?: string; runId?: string }>();
 const title = computed(() => props.tool.question?.title || (typeof props.tool.args?.title === "string" ? props.tool.args.title.trim() : "") || "请确认");
 const selected = ref("");
 const text = ref("");
@@ -147,11 +147,13 @@ async function submitAnswer(skip: boolean) {
     const response = await axios.post("/api/agent/answer", {
       directory: props.directory,
       callId,
+      sessionFile: props.sessionFile,
+      runId: props.runId,
       ...(skip ? { skipped: true } : formRules.value.length ? { values: formApi.value!.formData() } : { answer: value }),
     }, { headers: { "x-linglonglabVideo-workspace": "1" } });
     if (response.data.code !== 200) throw new Error(response.data.message || "提交回答失败");
-    submittedAnswer.value = response.data.data.answer;
-    submittedSkipped.value = response.data.data.skipped === true;
+    submittedAnswer.value = response.data.data?.answer ?? (skip ? "已跳过" : value || JSON.stringify(formApi.value?.formData()));
+    submittedSkipped.value = skip || response.data.data?.skipped === true;
   } catch (error) {
     const message = axios.isAxiosError(error) ? error.response?.data?.message : undefined;
     ElMessage.error(message || (error instanceof Error ? error.message : "提交回答失败"));

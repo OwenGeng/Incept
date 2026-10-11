@@ -150,10 +150,8 @@ class VertexImageApiAdapter:
         *,
         cfg: ProviderConfig,
         inp: ImageGenerationInput,
-        timeout_s: float,  # noqa: ARG002 - bounded by the owning worker
+        timeout_s: float,
     ) -> ImageGenerationResult:
-        if inp.images:
-            raise RuntimeError("The Video workspace image task currently supports text-to-image only")
         if not cfg.project_id or not cfg.location:
             raise RuntimeError("Vertex image generation requires configured project and location values")
         if not inp.model:
@@ -164,12 +162,26 @@ class VertexImageApiAdapter:
         except ImportError as exc:  # pragma: no cover - deployment dependency check
             raise RuntimeError("google-genai must be installed to enable Vertex AI generation") from exc
 
-        client = genai.Client(enterprise=True, project=cfg.project_id, location=cfg.location)
+        client = genai.Client(enterprise=True, project=cfg.project_id, location=cfg.location, http_options={'timeout': max(1, int(timeout_s * 1000))})
 
         def call() -> list[ImageItem]:
+            contents: Any = inp.prompt[:4000]
+            if inp.images:
+                if len(inp.images) > 4:
+                    raise ValueError("Image editing supports at most four references")
+                parts = []
+                for image in inp.images:
+                    reference = _decode_data_image(image)
+                    if reference is None:
+                        raise ValueError("Image references must be inline data images")
+                    raw, mime_type = reference
+                    if not mime_type.startswith("image/") or len(raw) > 25 * 1024 * 1024:
+                        raise ValueError("Invalid or oversized image reference")
+                    parts.append(genai_types.Part.from_bytes(data=raw, mime_type=mime_type))
+                contents = [*parts, inp.prompt[:4000]]
             response = client.models.generate_content(
                 model=inp.model,
-                contents=inp.prompt[:4000],
+                contents=contents,
                 config=genai_types.GenerateContentConfig(
                     candidateCount=1,
                     responseModalities=[genai_types.Modality.TEXT, genai_types.Modality.IMAGE],

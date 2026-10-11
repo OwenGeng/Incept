@@ -32,7 +32,11 @@
   },
   "pnpm": {
     "overrides": {
-      "@earendil-works/pi-ai@0.85.1>@aws-sdk/client-bedrock-runtime": "-"
+      "@earendil-works/pi-ai@0.85.1>@aws-sdk/client-bedrock-runtime": "-",
+      "@earendil-works/pi-coding-agent@0.85.1>undici": "8.10.2",
+      "@google/genai>@modelcontextprotocol/sdk": "1.31.0",
+      "source-map-js": "1.2.2",
+      "hono": "4.13.7"
     }
   }
 }

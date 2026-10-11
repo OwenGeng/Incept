@@ -5,6 +5,7 @@
       <el-button class="toolbarButton" text :icon="IconFolderPlus" title="新建文件夹" aria-label="新建文件夹" :disabled="newFolderParent !== undefined" @click="startFolder" />
       <el-button class="toolbarButton" text :icon="IconX" title="关闭素材库" aria-label="关闭素材库" @click="visible = false" />
     </div>
+    <el-button v-if="directory" class="websiteButton" text bg data-no-translate @click="websiteVisible = true">{{ t('网站素材采集 · 图片 / 视频 / Logo', 'Website asset collection · Images / Videos / Logos') }}</el-button>
     <el-scrollbar class="libraryScroll" maxHeight="min(440px, calc(100dvh - 198px))">
       <el-tree ref="assetTree" class="assetTree" :data="displayEntries" nodeKey="path" :props="{ label: 'name' }" :currentNodeKey="folder === '.' ? undefined : folder" :filterNodeMethod="filterEntry" defaultExpandAll highlightCurrent emptyText="" @nodeClick="selectFolder">
         <template #default="{ data }">
@@ -37,6 +38,7 @@
   </el-card>
 
   <assetMenu v-if="visible && directory" ref="assetMenuRef" :entries="entries" :directory="directory" @changed="refreshAssets" />
+  <websiteAssets v-if="directory" v-model="websiteVisible" :directory="directory" @changed="refreshAssets()" />
 
   <el-image-viewer v-if="previewAsset?.kind === 'image'" :urlList="[previewAsset.url]" teleported @close="previewAsset = undefined" />
 
@@ -93,6 +95,8 @@ import type { NodeOutput } from "@linglonglab/video-nodes-scaffold/values";
 import { startAssetDrag } from "../canvasDrop";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import assetMenu from "./assetMenu.vue";
+import websiteAssets from "./websiteAssets.vue";
+import { t } from "@/i18n";
 
 type AssetEntry = { name: string; path: string; type: "file" | "directory"; children?: AssetEntry[]; draft?: boolean };
 type AssetOutput = { label: string; output: NodeOutput };
@@ -100,6 +104,7 @@ type AssetOutput = { label: string; output: NodeOutput };
 const props = defineProps<{ directory?: string }>();
 const visible = defineModel<boolean>({ default: false });
 const saveVisible = ref(false);
+const websiteVisible = ref(false);
 const saving = ref(false);
 const entries = ref<AssetEntry[]>([]);
 const folder = ref(".");
@@ -119,7 +124,11 @@ const assetMenuRef = ref<InstanceType<typeof assetMenu>>();
 const previewAsset = ref<{ name: string; url: string; kind: "image" | "audio" | "video" }>();
 const previewError = ref("");
 let loadRequest = 0;
-onBeforeUnmount(() => { loadRequest++; });
+function refreshWebsiteImports(event: Event) {
+  if ((event as CustomEvent<{ directory: string }>).detail.directory === props.directory && visible.value) void refreshAssets();
+}
+window.addEventListener("linglonglabVideo:assets-updated", refreshWebsiteImports);
+onBeforeUnmount(() => { loadRequest++; window.removeEventListener("linglonglabVideo:assets-updated", refreshWebsiteImports); });
 
 function assetUrl(path: string) {
   return `/api/assets/read?directory=${encodeURIComponent(props.directory ?? '')}&path=${encodeURIComponent(path)}`;
@@ -321,6 +330,7 @@ defineExpose({ openSave });
 .assetLibrary {
   width: min(320px, calc(100vw - 30px));
   max-height: calc(100dvh - 140px);
+  .websiteButton { width: 100%; margin: 0 0 8px; }
 
   :deep(.el-card__body) {
     display: flex;

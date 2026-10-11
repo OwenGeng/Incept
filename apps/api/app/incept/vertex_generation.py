@@ -15,8 +15,8 @@ from app.incept.models import Asset
 from app.incept.store import _guess_content_type, read_asset_bytes
 
 
-def _text_part(value: str) -> genai_types.Part:
-    return genai_types.Part(text=value[:12000])
+def _text_part(value: str, limit: int = 12000) -> genai_types.Part:
+    return genai_types.Part(text=value[:limit])
 
 
 def _extract_text_response(response) -> str:
@@ -36,6 +36,8 @@ def _call_multimodal_text_model(
     parts: list[genai_types.Part],
     model_id: str | None = None,
     json_response: bool = False,
+    response_json_schema: dict[str, object] | None = None,
+    prompt_char_limit: int = 12000,
 ) -> str:
     """Call the configured Vertex text model through runtime ADC."""
     settings = get_settings()
@@ -46,10 +48,12 @@ def _call_multimodal_text_model(
     )
     request: dict[str, object] = {
         "model": (model_id or settings.vertex_gemini_model).strip(),
-        "contents": [genai_types.Content(role="user", parts=[_text_part(prompt), *parts])],
+        "contents": [genai_types.Content(role="user", parts=[_text_part(prompt, prompt_char_limit), *parts])],
     }
     if json_response:
-        request["config"] = genai_types.GenerateContentConfig(response_mime_type="application/json")
+        request["config"] = genai_types.GenerateContentConfig(
+            response_mime_type="application/json", response_json_schema=response_json_schema,
+        )
     response = client.models.generate_content(**request)
     text = _extract_text_response(response)
     if not text:

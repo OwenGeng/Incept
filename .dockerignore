@@ -21,6 +21,7 @@ sql/
 
 # Already-compiled artifacts — Docker builds fresh
 node_modules/
+**/node_modules/
 apps/web/node_modules/
 apps/web/.next/
 apps/api/__pycache__/

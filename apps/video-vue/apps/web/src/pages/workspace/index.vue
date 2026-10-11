@@ -174,9 +174,9 @@ function readDocumentNode(directory: string, canvasPath: string, nodeId: string)
   return canvasPanelRef.value.readDocumentNode(directory, canvasPath, nodeId);
 }
 
-function saveDocumentNode(directory: string, canvasPath: string, nodeId: string, handleId: string, text: string) {
+function saveDocumentNode(directory: string, canvasPath: string, nodeId: string, handleId: string, text: string, expectedText?: string) {
   if (!canvasPanelRef.value) throw new Error("画布尚未就绪");
-  return canvasPanelRef.value.saveDocumentNode(directory, canvasPath, nodeId, handleId, text);
+  return canvasPanelRef.value.saveDocumentNode(directory, canvasPath, nodeId, handleId, text, expectedText);
 }
 </script>
 

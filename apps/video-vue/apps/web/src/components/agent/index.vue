@@ -16,7 +16,7 @@
       @rename="renameConversation"
       @remove="removeConversation"
       @close="visible = false">
-      <template #actions><slot name="menuActions" /></template>
+      <template #actions><resourcePanel /><slot name="menuActions" /></template>
     </agentMenu>
     <conversation
       v-for="item in conversations"
@@ -41,8 +41,10 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import type { AgentConversation, AgentHistory } from "./types";
 import type { AgentEvent, AgentSubAgent } from "@linglonglab/video-runtime-types/agent/types";
 import agentMenu from "./menu.vue";
+import resourcePanel from "./resourcePanel.vue";
 import conversation from "./conversation.vue";
 import { t } from "@/i18n";
+import { isDelegationTerminal } from "./delegatedLifecycle";
 
 const visible = defineModel<boolean>({ default: false });
 type OpenConversation = { key: number; name: string; file?: string; parentFile?: string; subAgents: AgentSubAgent[]; session: AgentConversation | null };
@@ -67,6 +69,7 @@ let requestId = 0;
 let nextConversationKey = 0;
 const conversationRefs = new Map<number, InstanceType<typeof conversation>>();
 const pendingEvents = new Map<number, AgentEvent[]>();
+const refreshingChildren = new Map<number, Promise<void>>();
 
 function showConversation(session: AgentConversation | null, activate = true) {
   const existing = session && conversations.value.find(item => item.file === session.file);
@@ -107,7 +110,18 @@ function receiveAgentEvent(event: AgentEvent) {
     if (current) Object.assign(current, event.agent);
     else parent.subAgents.push(event.agent);
     if (event.agent.status === "running" && !conversations.value.some(item => item.file === event.agent.file)) {
-      showConversation({ ...event.agent, parentFile: parent.file, messages: [], running: true }, false);
+      showConversation({ ...event.agent, parentFile: parent.file, messages: [], running: true, parentObserved: true }, false);
+    }
+    if (isDelegationTerminal(event.agent.status)) {
+      const child = conversations.value.find(item => item.file === event.agent.file);
+      if (child?.session?.parentObserved) {
+        const view = conversationRefs.get(child.key);
+        if (!view || view.finishDelegatedRun()) {
+          if (!view) deliverEvent(child, { type: "done" });
+          child.session.running = false;
+          void refreshDelegatedConversation(child);
+        }
+      }
     }
     return;
   }
@@ -210,12 +224,40 @@ async function loadHistory(openLatest = false) {
   }
 }
 
+function refreshDelegatedConversation(item: OpenConversation) {
+  const directory = workspaceStore.project?.directory;
+  if (!directory || !item.file || !item.session?.parentObserved || item.session.running) return Promise.resolve();
+  const pending = refreshingChildren.get(item.key);
+  if (pending) return pending;
+  const refresh = (async () => {
+    try {
+      const session = await readConversation(directory, item.file!);
+      if (workspaceStore.project?.directory !== directory || !conversations.value.includes(item)) return;
+      const view = conversationRefs.get(item.key);
+      if (view && !view.applySnapshot(session)) return;
+      item.session = session;
+      item.name = session.name;
+      item.parentFile = session.parentFile;
+      item.subAgents = session.subAgents ?? [];
+      pendingEvents.delete(item.key);
+    } catch (error) {
+      if (workspaceStore.project?.directory === directory) ElMessage.error(error instanceof Error ? error.message : t("读取子会话失败，请重新选择", "Failed to reload child conversation. Select it again."));
+    } finally {
+      refreshingChildren.delete(item.key);
+      conversationRefs.get(item.key)?.releaseSnapshotLoading();
+    }
+  })();
+  refreshingChildren.set(item.key, refresh);
+  return refresh;
+}
+
 async function selectConversation(file: string) {
   const directory = workspaceStore.project?.directory;
   if (!directory || loading.value || historyLoading.value || file === sessionFile.value) return;
   const existing = conversations.value.find(item => item.file === file);
   if (existing) {
     conversationKey.value = existing.key;
+    if (existing.session?.parentObserved) await refreshDelegatedConversation(existing);
     return;
   }
   const currentRequest = ++requestId;
@@ -289,6 +331,7 @@ watch(() => workspaceStore.project?.directory, directory => {
   conversations.value = [];
   conversationRefs.clear();
   pendingEvents.clear();
+  refreshingChildren.clear();
   initialized.value = false;
   loading.value = false;
   historyLoading.value = false;

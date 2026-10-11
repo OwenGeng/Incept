@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import mimetypes
 import shutil
 import time
 import uuid
+import threading
+import hashlib
 from datetime import timezone
 from pathlib import Path
 from typing import Any
@@ -25,10 +28,23 @@ from app.routers.video_runtime import (
     validate_media_model,
 )
 from app.services.auth import require_internal_key
-from app.video_studio import store
-from app.video_studio.agent import run_agent
+from app.video_studio import store, pi_http
+from app.video_studio.pi_runs import RunJournal, control_target, answer as answer_pi_question
+from app.video_studio.pi_capabilities import capabilities, validate_thinking
+from app.video_studio.pi_business import BusinessTools
+from app.video_studio.pi_agent import run_agent
+from app.video_studio.agent_turns import AgentBusy, prepare_turn, cancel_turn, agent_error_message
 from app.video_studio.media_jobs import cancel_media_job, create_media_job, ensure_media_job_running
 from app.video_studio.models import AgentConversation, CanvasDocument, MediaJobCreate, Position, ProjectCreate, ProjectUpdate, VideoEdge, VideoNode
+from app.video_studio.workspace_documents import DocumentConflict, TextEncoding, text_snapshot, write_document, document_lock, MAX_TEXT_BYTES
+from app.video_studio.workspace_uploads import read_bounded, write_stream
+from app.video_studio.workspace_copy import copy_workspace_file
+from app.video_studio.image_edits import MaskedEditRequest, masked_image_edit
+from app.video_studio.website_assets import (
+    WebsiteDiscoverRequest, WebsiteImportRequest, discover_website_assets,
+    import_website_assets, list_website_assets,
+)
+from app.video_studio.creative_specs import moloco_ctv_profile, validate_moloco_ctv_video
 
 
 router = APIRouter(
@@ -75,15 +91,7 @@ def _workspace_path(email: str, directory: str, path: str, *, allow_root: bool =
 
 
 def _write_bytes(target: Path, payload: bytes, *, exclusive: bool = False) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if exclusive and target.exists():
-        raise FileExistsError(target.name)
-    temporary = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
-    try:
-        temporary.write_bytes(payload)
-        temporary.replace(target)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_document(target, payload, exclusive=exclusive)
 
 
 def _legacy_canvas() -> dict[str, Any]:
@@ -107,7 +115,8 @@ _VUE_NODE_TYPES = {
 _FASTAPI_NODE_TYPES = {value: f"remote-{key}" for key, value in _VUE_NODE_TYPES.items()}
 
 
-def _sync_vue_canvas(email: str, project_id: str, payload: bytes) -> None:
+def _vue_canvas_document(payload: bytes) -> CanvasDocument | None:
+    """Decode a Vue snapshot without selecting a project or writing its canvas."""
     try:
         value = json.loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -118,8 +127,9 @@ def _sync_vue_canvas(email: str, project_id: str, payload: bytes) -> None:
     for item in (value.get("nodes") if isinstance(value.get("nodes"), list) else []):
         if not isinstance(item, dict) or not item.get("id"):
             continue
-        vue_type = str(item.get("type") or "").removeprefix("remote-")
-        node_type = _VUE_NODE_TYPES.get(vue_type)
+        original_type = str(item.get("type") or "")
+        vue_type = original_type.removeprefix("remote-")
+        node_type = _VUE_NODE_TYPES.get(vue_type, original_type)
         if not node_type:
             continue
         position = item.get("position") if isinstance(item.get("position"), dict) else {}
@@ -128,6 +138,8 @@ def _sync_vue_canvas(email: str, project_id: str, payload: bytes) -> None:
             type=node_type,
             position=Position(x=float(position.get("x") or 0), y=float(position.get("y") or 0)),
             data=item.get("data") if isinstance(item.get("data"), dict) else {},
+            vue_type=original_type,
+            vue_attributes={key: value for key, value in item.items() if key not in {"id", "type", "position", "data"}},
         ))
     node_ids = {node.id for node in nodes}
     edges: list[VideoEdge] = []
@@ -143,17 +155,29 @@ def _sync_vue_canvas(email: str, project_id: str, payload: bytes) -> None:
             target=target,
             source_handle=item.get("sourceHandle"),
             target_handle=item.get("targetHandle"),
+            vue_attributes={key: value for key, value in item.items() if key not in {"id", "source", "target"}},
         ))
     viewport = value.get("viewport") if isinstance(value.get("viewport"), dict) else {"x": 0, "y": 0, "zoom": 1}
-    store.save_canvas(email, project_id, CanvasDocument(nodes=nodes, edges=edges, viewport=viewport))
+    return CanvasDocument(nodes=nodes, edges=edges, viewport=viewport)
+
+
+def _sync_vue_canvas(email: str, project_id: str, payload: bytes, *, canvas_id: str | None = None) -> None:
+    canvas = _vue_canvas_document(payload)
+    if canvas is None:
+        return
+    if canvas_id is None:
+        store.save_canvas(email, project_id, canvas)
+    else:
+        store.save_project_canvas(email, project_id, canvas_id, canvas)
 
 
 def _vue_canvas_snapshot(canvas: CanvasDocument) -> dict[str, Any]:
     return {
         "nodes": [
             {
+                **node.vue_attributes,
                 "id": node.id,
-                "type": _FASTAPI_NODE_TYPES.get(node.type, "remote-textNode"),
+                "type": node.vue_type or _FASTAPI_NODE_TYPES.get(node.type, node.type),
                 "position": node.position.model_dump(),
                 "data": node.data,
             }
@@ -161,11 +185,12 @@ def _vue_canvas_snapshot(canvas: CanvasDocument) -> dict[str, Any]:
         ],
         "edges": [
             {
+                **edge.vue_attributes,
                 "id": edge.id,
                 "source": edge.source,
                 "target": edge.target,
-                "sourceHandle": edge.source_handle,
-                "targetHandle": edge.target_handle,
+                **({"sourceHandle": edge.source_handle} if edge.source_handle is not None or "sourceHandle" in edge.vue_attributes else {}),
+                **({"targetHandle": edge.target_handle} if edge.target_handle is not None or "targetHandle" in edge.vue_attributes else {}),
             }
             for edge in canvas.edges
         ],
@@ -284,12 +309,16 @@ def read_workspace_file(
     request: Request,
     directory: str = Query(),
     path: str = Query(),
+    snapshot: bool = Query(default=False),
+    maxBytes: int = Query(default=5 * 1024 * 1024, ge=1, le=5 * 1024 * 1024),
     email: str = Depends(current_user),
 ):
     try:
         target = _workspace_path(email, directory, path)
         if not target.is_file():
             raise FileNotFoundError(path)
+        if snapshot:
+            return success(text_snapshot(target, maxBytes))
         range_header = request.headers.get("range")
         if not range_header:
             return FileResponse(target, media_type=store.asset_mime_type(target))
@@ -307,6 +336,8 @@ def read_workspace_file(
             media_type=store.asset_mime_type(target),
             headers={"Content-Range": f"bytes 0-{end}/{size}", "Accept-Ranges": "bytes"},
         )
+    except OverflowError as error:
+        raise HTTPException(status_code=413, detail={"message": str(error)}) from error
     except (FileNotFoundError, ValueError) as error:
         raise fail(error) from error
 
@@ -317,17 +348,25 @@ async def write_workspace_file(
     directory: str = Query(),
     path: str = Query(),
     exclusive: bool = Query(default=False),
+    expectedRevision: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$"),
+    encoding: TextEncoding | None = Query(default=None),
     email: str = Depends(current_user),
 ) -> dict[str, Any]:
     try:
-        payload = await request.body()
-        if len(payload) > 500 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail={"message": "文件不能超过 500 MB"})
         target = _workspace_path(email, directory, path)
-        _write_bytes(target, payload, exclusive=exclusive)
-        if path.lower().endswith(".json"):
-            _sync_vue_canvas(email, _project_id(directory), payload)
-        return success()
+        revision = None
+        if expectedRevision or encoding:
+            payload = await read_bounded(request.stream(), MAX_TEXT_BYTES)
+            revision = write_document(target, payload, exclusive=exclusive, expected_revision=expectedRevision, encoding=encoding)
+        else:
+            await write_stream(target, request.stream(), exclusive=exclusive)
+        if path.lower().endswith(".json") and target.stat().st_size <= MAX_TEXT_BYTES:
+            _sync_vue_canvas(email, _project_id(directory), target.read_bytes())
+        return success({"revision": revision} if expectedRevision else None)
+    except DocumentConflict as error:
+        raise HTTPException(status_code=409, detail={"code": "ESTALE", "message": str(error)}) from error
+    except OverflowError as error:
+        raise HTTPException(status_code=413, detail={"message": str(error)}) from error
     except HTTPException:
         raise
     except (FileExistsError, FileNotFoundError, ValueError) as error:
@@ -357,6 +396,15 @@ def rename_workspace_file(body: WorkspaceRenameFile, email: str = Depends(curren
             raise FileExistsError(body.target)
         target.parent.mkdir(parents=True, exist_ok=True)
         source.rename(target)
+        return success()
+    except (FileExistsError, FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
+
+
+@router.post("/workspaces/files/copy")
+def copy_workspace_entry(body: WorkspaceRenameFile, email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        copy_workspace_file(_workspace_root(email, body.directory), body.path, body.target)
         return success()
     except (FileExistsError, FileNotFoundError, ValueError) as error:
         raise fail(error) from error
@@ -411,6 +459,50 @@ def _asset_entries(root: Path, current: Path) -> list[dict[str, Any]]:
 def list_asset_library(directory: str = Query(), email: str = Depends(current_user)) -> dict[str, Any]:
     root = _asset_library_root(email, directory)
     return success({"entries": _asset_entries(root, root)})
+
+
+@router.get("/assets/creative-profile")
+def creative_profile(email: str = Depends(current_user)) -> dict[str, Any]:
+    return success(moloco_ctv_profile())
+
+
+class CreativeCheckRequest(BaseModel):
+    directory: str
+    path: str = Field(min_length=1, max_length=1000)
+
+
+@router.post("/assets/creative-check")
+def check_creative_video(body: CreativeCheckRequest, email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        return success(validate_moloco_ctv_video(email, _project_id(body.directory), body.path))
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
+
+
+@router.get("/assets/website")
+def website_asset_catalog(directory: str = Query(), offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200), email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        assets = list_website_assets(email, _project_id(directory))
+        return success({"assets": assets[offset:offset + limit], "total": len(assets)})
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
+
+
+@router.post("/assets/website/discover")
+def discover_client_assets(body: WebsiteDiscoverRequest, email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        return success(discover_website_assets(email, _project_id(body.directory), body.url))
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
+
+
+@router.post("/assets/website/import")
+def import_client_assets(body: WebsiteImportRequest, email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        return success(import_website_assets(email, _project_id(body.directory), body.asset_ids))
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
 
 
 @router.get("/assets/read")
@@ -942,6 +1034,15 @@ async def generate_managed_media(body: dict[str, Any], email: str = Depends(curr
     return success([{"path": relative, "mimeType": result.mime_type, "mediaType": media_type}])
 
 
+@router.post("/ai/media/inpaint")
+async def inpaint_managed_image(body: MaskedEditRequest, email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        root = _workspace_root(email, body.directory)
+        return success([await masked_image_edit(root, body)])
+    except (FileNotFoundError, ValueError) as error:
+        raise fail(error) from error
+
+
 def _media_job_request(body: dict[str, Any]) -> tuple[str, MediaJobCreate]:
     project_id = _project_id(str(body.get("directory") or ""))
     first = body.get("firstFrame")
@@ -995,13 +1096,13 @@ async def cancel_legacy_media_job(job_id: str, directory: str = Query(), email: 
 
 
 def _conversation_file(value: AgentConversation) -> str:
-    return f"{value.id}.jsonl"
+    return f"agent/{value.id}.json"
 
 
 def _conversation_id(session_file: str | None) -> str | None:
     if not session_file:
         return None
-    value = session_file.removesuffix(".jsonl")
+    value = session_file.removeprefix('agent/').removesuffix('.json').removesuffix(".jsonl")
     return _project_id(value)
 
 
@@ -1021,14 +1122,25 @@ def _legacy_conversation(value: AgentConversation) -> dict[str, Any]:
                 "entryId": message.id if message.role == "user" else None,
                 "role": message.role,
                 "content": message.content,
-                "parts": [{"id": message.id, "type": "text", "content": message.content}] if message.role == "assistant" else [],
+                "attachments": message.attachments,
+                "replyTo": next((item.id for item in reversed(value.messages[:index]) if item.role == 'user'), None) if message.role == 'assistant' else None,
+                "parts": message.parts or ([{"id": message.id, "type": "text", "content": message.content}] if message.role == "assistant" else []),
+                "report": message.report,
             }
-            for message in value.messages
+            for index, message in enumerate(value.messages)
         ],
         "providerId": selected_model["providerId"],
         "modelId": selected_model["modelId"],
-        "subAgents": [],
-        "running": False,
+        "subAgents": value.sub_agents,
+        "thinkingLevel": value.thinking_level,
+        "stats": value.stats,
+        "contextUsage": value.context_usage,
+        "parentFile": value.parent_file,
+        "running": value.run_status == 'running',
+        "runId": value.run_id,
+        "runStatus": value.run_status,
+        "runError": value.run_error,
+        "researchQuestion": value.research_question,
     }
 
 
@@ -1072,42 +1184,90 @@ def get_agent_conversation(
     sessionFile: str = Query(),
     email: str = Depends(current_user),
 ) -> dict[str, Any]:
-    value = store.get_conversation(email, _project_id(directory), _conversation_id(sessionFile) or "")
-    return success(_legacy_conversation(value))
+    try: value = store.get_conversation(email, _project_id(directory), _conversation_id(sessionFile) or "")
+    except (FileNotFoundError,ValueError) as error: raise fail(error) from error
+    base=_legacy_conversation(value)
+    if value.run_id:
+        try:
+            base=pi_http.project_snapshot(RunJournal(email,_project_id(directory),value.id,value.run_id),base)
+        except FileNotFoundError:
+            pass
+    return success(base)
 
 
 @router.patch("/agent/rename")
 def rename_agent_conversation(body: dict[str, Any], email: str = Depends(current_user)) -> dict[str, Any]:
-    project_id = _project_id(str(body.get("directory") or ""))
-    conversation_id = _conversation_id(str(body.get("sessionFile") or "")) or ""
-    value = store.get_conversation(email, project_id, conversation_id)
-    value.name = str(body.get("name") or "").strip()[:120]
-    if not value.name:
-        raise HTTPException(status_code=400, detail={"message": "对话名称不能为空"})
-    store.save_conversation(email, project_id, value)
-    return success({"name": value.name})
+    try:
+        project_id = _project_id(str(body.get("directory") or ""))
+        conversation_id = _conversation_id(str(body.get("sessionFile") or "")) or ""
+        name = str(body.get("name") or "").strip()[:120]
+        if not name:
+            raise ValueError("对话名称不能为空")
+        with document_lock(store._conversation_path(email, project_id, conversation_id)):
+            value = store.get_conversation(email, project_id, conversation_id)
+            if value.run_status == "running":
+                raise HTTPException(status_code=409, detail={"message": "会话仍在处理中，请先停止或等待完成再修改。"})
+            value.name = name
+            store.save_conversation(email, project_id, value)
+        return success({"name": value.name})
+    except (ValueError, FileNotFoundError) as error:
+        raise fail(error) from error
 
 
 @router.delete("/agent/message")
 def delete_agent_message(body: dict[str, Any], email: str = Depends(current_user)) -> dict[str, Any]:
-    project_id = _project_id(str(body.get("directory") or ""))
-    conversation_id = _conversation_id(str(body.get("sessionFile") or "")) or ""
-    value = store.get_conversation(email, project_id, conversation_id)
-    ids = {str(item) for item in body.get("entryIds") or []}
-    reply_to = body.get("replyTo")
-    if reply_to:
-        ids.add(str(reply_to))
-    value.messages = [message for message in value.messages if message.id not in ids]
-    store.save_conversation(email, project_id, value)
-    return success(_legacy_conversation(value))
+    try:
+        project_id = _project_id(str(body.get("directory") or ""))
+        conversation_id = _conversation_id(str(body.get("sessionFile") or "")) or ""
+        entry_ids = body.get("entryIds") or []
+        if not isinstance(entry_ids, list) or not all(isinstance(item, str) and item for item in entry_ids):
+            raise ValueError("消息 ID 必须为非空字符串数组")
+        ids = set(entry_ids)
+        reply_to = body.get("replyTo")
+        if reply_to:
+            if not isinstance(reply_to, str):
+                raise ValueError("原消息 ID 无效")
+            ids.add(reply_to)
+        with document_lock(store._conversation_path(email, project_id, conversation_id)):
+            value = store.get_conversation(email, project_id, conversation_id)
+            if value.run_status == "running":
+                raise HTTPException(status_code=409, detail={"message": "会话仍在处理中，请先停止或等待完成再删除消息。"})
+            if not ids.issubset({message.id for message in value.messages}):
+                raise ValueError("消息已不存在，请重新载入会话")
+            retained = []
+            last_user_id = None
+            for message in value.messages:
+                if message.role == "user":
+                    last_user_id = message.id
+                if message.id not in ids and not (message.role == "assistant" and last_user_id in ids):
+                    retained.append(message)
+            if ids:
+                value.pi_deleted_entries.extend(message.pi_entry_id for message in value.messages
+                    if message not in retained and message.pi_entry_id)
+                value.messages = retained
+                value.task_state = {}
+                value.research_history = []
+                value.research_question = None
+                value.research_decisions = []
+                store.save_conversation(email, project_id, value)
+        return success(_legacy_conversation(value))
+    except (ValueError, FileNotFoundError) as error:
+        raise fail(error) from error
 
 
 @router.delete("/agent/conversation")
 def delete_agent_conversation(body: dict[str, Any], email: str = Depends(current_user)) -> dict[str, Any]:
-    project_id = _project_id(str(body.get("directory") or ""))
-    conversation_id = _conversation_id(str(body.get("sessionFile") or "")) or ""
-    store.delete_conversation(email, project_id, conversation_id)
-    return success()
+    try:
+        project_id = _project_id(str(body.get("directory") or ""))
+        conversation_id = _conversation_id(str(body.get("sessionFile") or "")) or ""
+        with document_lock(store._conversation_path(email, project_id, conversation_id)):
+            value = store.get_conversation(email, project_id, conversation_id)
+            if value.run_status == "running":
+                raise HTTPException(status_code=409, detail={"message": "会话仍在处理中，请先停止或等待完成再删除。"})
+            store.delete_conversation(email, project_id, conversation_id)
+        return success()
+    except (ValueError, FileNotFoundError) as error:
+        raise fail(error) from error
 
 
 @router.post("/agent/canvasResult")
@@ -1116,40 +1276,189 @@ def accept_canvas_result() -> dict[str, Any]:
 
 
 @router.post("/agent/answer")
-def accept_agent_answer() -> dict[str, Any]:
-    return success()
+def accept_agent_answer(body: dict[str, Any], email: str = Depends(current_user)) -> dict[str, Any]:
+    from app.video_studio.reference_research import answer_research_question
+    try:
+        if body.get('answer') is not None or body.get('values') is not None or not body.get('sessionFile'):
+            return success(answer_pi_question(email,_project_id(str(body.get('directory') or '')),str(body.get('callId') or ''),body))
+        # A current Pi question also accepts a skip with conversation identity.
+        question_path=store._project_root(email,_project_id(str(body.get('directory') or '')))/'.agent'/'questions'/f"{body.get('callId','')}.json"
+        if re.fullmatch(r'[a-f0-9]{32}',str(body.get('callId',''))) and store._read_json(question_path,None):
+            return success(answer_pi_question(email,_project_id(str(body.get('directory') or '')),body['callId'],body))
+        if body.get('cancelled'):
+            raise ValueError('关闭或取消不会自动同意调研；问题仍等待明确选择。')
+        skipped = body.get('skipped') is True
+        return success(answer_research_question(email=email, project_id=_project_id(str(body.get('directory') or '')),
+            conversation_id=_conversation_id(str(body.get('sessionFile') or '')) or '',
+            question_id=str(body.get('callId') or ''), choice='off' if skipped else str(body.get('choice') or ''), skipped=skipped,
+            notes=body.get('notes', '')))
+    except (ValueError, FileNotFoundError) as error:
+        raise fail(error) from error
 
 
 @router.post("/agent")
-async def legacy_agent(body: dict[str, Any], email: str = Depends(current_user)) -> StreamingResponse:
+async def legacy_agent(body: dict[str, Any], request: Request, email: str = Depends(current_user)) -> StreamingResponse:
     project_id = _project_id(str(body.get("directory") or ""))
     prompt = str(body.get("prompt") or "").strip()
-    if not prompt:
-        raise HTTPException(status_code=400, detail={"message": "请输入消息"})
     session_file = body.get("sessionFile")
     conversation_id = _conversation_id(str(session_file)) if session_file else None
     attachments = body.get("attachments") if isinstance(body.get("attachments"), list) else []
     asset_paths = [str(item.get("path")) for item in attachments if isinstance(item, dict) and item.get("path")]
+    if not prompt and asset_paths:
+        prompt = '请分析我上传的客户素材，说明可用于视频制作的内容与限制；不要自动生成或修改画布。'
+    if not prompt:
+        raise HTTPException(status_code=400, detail={"message": "请输入消息或添加附件"})
+    canvas_context = body.get('canvas') if isinstance(body.get('canvas'), dict) else {}
+    canvas_name = str(canvas_context.get('id') or '')
+    canvas_document = None
+    canvas_revision = None
+    canvas_path = None
+    if canvas_name:
+        canvas_path = _workspace_path(email, project_id, canvas_name)
+        if not canvas_path.is_file():
+            raise HTTPException(status_code=404, detail={'message':'目标画布不存在，请重新打开画布。'})
+        if canvas_path.stat().st_size > MAX_TEXT_BYTES:
+            raise HTTPException(status_code=413, detail={'message':'画布文件不能超过 5 MiB，请精简后重新发送。'})
+        with canvas_path.open('rb') as source:
+            payload = source.read(MAX_TEXT_BYTES + 1)
+        if len(payload) > MAX_TEXT_BYTES:
+            raise HTTPException(status_code=413, detail={'message':'画布文件不能超过 5 MiB，请精简后重新发送。'})
+        canvas_document = _vue_canvas_document(payload)
+        if canvas_document is None:
+            raise HTTPException(status_code=400, detail={'message':'目标文件不是有效画布。'})
+        canvas_revision = hashlib.sha256(payload).hexdigest()
+    if conversation_id:
+        try: existing=store.get_conversation(email,project_id,conversation_id)
+        except (FileNotFoundError,ValueError) as error: raise fail(error) from error
+        if existing.run_status=='running':
+            journal,child_file=control_target(email,project_id,existing)
+            try:
+                journal.enqueue(body.get('streamingBehavior','steer'),prompt,child_file)
+            except FileNotFoundError as error:
+                raise HTTPException(status_code=409,detail={'message':'该会话仍在处理中，请先停止或等待完成。'}) from error
+            except ValueError as error:
+                raise fail(error) from error
+            async def accepted():
+                yield json.dumps({'type':'accepted'})+'\n'
+                yield json.dumps({'type':'done'})+'\n'
+            return StreamingResponse(accepted(),media_type='application/x-ndjson')
+    selected=next((m for m in configured_text_models() if m['providerId']==body.get('providerId') and m['modelId']==body.get('modelId')),None)
+    if not selected: selected=next((m for m in configured_text_models() if m.get('isDefault')),None)
+    if selected:
+        try: validate_thinking(selected,body.get('thinkingLevel') or (existing.thinking_level if conversation_id else 'off'))
+        except ValueError as error: raise fail(error) from error
+    try:
+        prepared = await asyncio.to_thread(prepare_turn, email=email, project_id=project_id, prompt=prompt,
+            conversation_id=conversation_id, asset_paths=asset_paths, resend_from=body.get('resendFrom'),
+            research_question_id=body.get('researchQuestionId'))
+        prompt = prepared.messages[-1].content  # Resume only the server-owned original task.
+    except AgentBusy as error:
+        raise HTTPException(status_code=409, detail={'message':str(error)}) from error
+    except (ValueError, FileNotFoundError) as error:
+        raise fail(error) from error
 
-    async def events():
-        user_id = uuid.uuid4().hex
-        yield json.dumps({"type": "userMessage", "id": user_id, "content": prompt}, ensure_ascii=False) + "\n"
-        try:
-            conversation, canvas, message = await asyncio.to_thread(
-                run_agent,
-                email=email,
-                project_id=project_id,
-                prompt=prompt,
-                conversation_id=conversation_id,
-                asset_paths=asset_paths,
-                provider_id=str(body.get("providerId") or "") or None,
-                model_id=str(body.get("modelId") or "") or None,
-            )
-            yield json.dumps({"type": "session", "file": _conversation_file(conversation)}, ensure_ascii=False) + "\n"
-            yield json.dumps({"type": "canvasCall", "callId": uuid.uuid4().hex, "name": "replaceCanvas", "args": _vue_canvas_snapshot(canvas)}, ensure_ascii=False) + "\n"
-            yield json.dumps({"type": "text", "blockId": uuid.uuid4().hex, "content": message, "done": True}, ensure_ascii=False) + "\n"
-            yield json.dumps({"type": "done"}, ensure_ascii=False) + "\n"
-        except Exception as error:
-            yield json.dumps({"type": "error", "message": str(error)}, ensure_ascii=False) + "\n"
+    journal=RunJournal(email,project_id,prepared.id,prepared.run_id)
+    journal.create()
+    journal.emit({'type':'session','file':_conversation_file(prepared),'runId':prepared.run_id})
+    user=prepared.messages[-1]
+    journal.emit({'type':'userMessage','id':user.id,'content':prompt,'attachments':user.attachments})
+    cancel_event=threading.Event()
+    loop=asyncio.get_running_loop()
+    committed=False
+    target_id=store.get_project(email,project_id).active_canvas_id
+    initial_canvas=canvas_document or store.get_project_canvas(email,project_id,target_id)
+    def commit(canvas,expected):
+        nonlocal committed
+        if cancel_event.is_set(): raise ValueError('已取消，不保存画布修改。')
+        if canvas_path is not None:
+            write_document(canvas_path,json.dumps({'linglonglabVideoCanvas':True,**_vue_canvas_snapshot(canvas)},ensure_ascii=False).encode(),expected_revision=canvas_revision)
+            saved=canvas
+        else:
+            saved=store.save_project_canvas(email,project_id,target_id,canvas,expected_canvas=expected)
+        committed=True
+        return saved
+    async def worker():
+        return await asyncio.to_thread(run_agent,email=email,project_id=project_id,prompt=prompt,
+            conversation_id=prepared.id,asset_paths=asset_paths,provider_id=body.get('providerId'),model_id=body.get('modelId'),
+            prepared_conversation=prepared,cancel_event=cancel_event,progress=journal.emit,
+            canvas_document=initial_canvas,canvas_commit=commit if canvas_path is not None else None,
+            thinking_level=body.get('thinkingLevel'),journal=journal,
+            invoke_async=lambda coro: asyncio.run_coroutine_threadsafe(coro,loop).result(timeout=120))
+    def finalized(result):
+        conversation,canvas,message=result
+        if canvas!=initial_canvas:
+            yield {'type':'canvasCall','callId':uuid.uuid4().hex,'name':'replaceCanvas','args':_vue_canvas_snapshot(canvas)}
+    pi_http.launch(journal,worker,finalized)
+    return StreamingResponse(pi_http.events(journal,request),media_type='application/x-ndjson',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
 
-    return StreamingResponse(events(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.post('/agent/cancel')
+def cancel_agent(body: dict[str, Any], email: str = Depends(current_user)) -> dict[str, Any]:
+    try:
+        run_id = body.get('runId')
+        if not isinstance(run_id, str) or not re.fullmatch(r'[a-f0-9]{32}', run_id):
+            raise ValueError('停止请求必须包含当前轮次的有效 runId，请重新载入会话。')
+        pid=_project_id(str(body.get('directory') or ''))
+        cid=_conversation_id(str(body.get('sessionFile') or '')) or ''
+        value=store.get_conversation(email,pid,cid)
+        journal,child_file=control_target(email,pid,value)
+        if child_file and value.run_status=='running':
+            if value.run_id!=run_id: raise ValueError('Child run identity changed')
+            journal.abort_child(child_file)
+        else:
+            cancel_turn(email,pid,cid,run_id)
+        return success()
+    except (ValueError, FileNotFoundError) as error:
+        raise fail(error) from error
+
+
+@router.get('/agent/events')
+async def observe_agent(request: Request, directory: str=Query(), sessionFile: str=Query(),
+                        runId: str=Query(), after: int=Query(default=0,ge=0), email: str=Depends(current_user)):
+    try:
+        pid=_project_id(directory)
+        value=store.get_conversation(email,pid,_conversation_id(sessionFile) or '')
+        if value.run_id!=runId: raise ValueError('Run identity changed; reload the conversation')
+        journal=RunJournal(email,pid,value.id,runId)
+        journal.state()
+    except (ValueError,FileNotFoundError) as error: raise fail(error) from error
+    return StreamingResponse(pi_http.events(journal,request,after,replay=True),media_type='application/x-ndjson',
+        headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
+
+@router.post('/agent/control')
+def control_agent(body:dict[str,Any],email:str=Depends(current_user)):
+    try:
+        pid=_project_id(str(body.get('directory') or ''))
+        value=store.get_conversation(email,pid,_conversation_id(str(body.get('sessionFile') or '')) or '')
+        if value.run_id!=body.get('runId') or value.run_status!='running': raise ValueError('Run identity changed or run ended')
+        journal,child_file=control_target(email,pid,value)
+        command=journal.enqueue(body.get('action'),body.get('prompt'),child_file)
+        return success({'accepted':True,'controlId':command['controlId']})
+    except (ValueError,FileNotFoundError) as error: raise fail(error) from error
+
+
+@router.get('/agent/capabilities')
+def agent_capabilities(email:str=Depends(current_user)):
+    return success(capabilities())
+
+
+def _resource_tools(email,pid):
+    from app.video_studio.pi_tools import CanvasTools,NODE_TYPES
+    return BusinessTools(email,pid,'',None,CanvasTools(store.get_project(email,pid).canvas,NODE_TYPES))
+
+
+@router.get('/agent/resources')
+def agent_resource(directory:str=Query(),resource:str=Query(),scope:str=Query(default='project'),email:str=Depends(current_user)):
+    try: return success(_resource_tools(email,_project_id(directory)).resource_read(resource,scope))
+    except (ValueError,FileNotFoundError) as error: raise fail(error) from error
+
+
+@router.patch('/agent/resources')
+def edit_agent_resource(body:dict[str,Any],email:str=Depends(current_user)):
+    try:
+        return success(_resource_tools(email,_project_id(str(body.get('directory') or ''))).resource_write(
+            body.get('resource'),body.get('content'),body.get('expectedRevision'),body.get('enabled',True),body.get('scope','project')))
+    except DocumentConflict as error: raise HTTPException(status_code=409,detail={'message':str(error)}) from error
+    except (ValueError,FileNotFoundError) as error: raise fail(error) from error

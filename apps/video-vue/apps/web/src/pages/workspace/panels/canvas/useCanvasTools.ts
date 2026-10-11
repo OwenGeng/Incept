@@ -3,6 +3,7 @@ import { useVueFlow, type XYPosition } from "@vue-flow/core";
 import { useNodeEvent, useNodeToolsContext, validateConnection } from "@linglonglab/video-nodes-scaffold/runtime";
 import { canvasSchemas, type CanvasContext, type CanvasToolCall } from "@linglonglab/video-tool-canvas/runtime";
 import { arrangeCanvas } from "./arrangeCanvas";
+import { createCanvasRunGuard, validateCanvasReplacement } from "./agentCanvasSafety";
 
 export function useCanvasTools(options: {
   availableNodes: Ref<{ type: string; label: string }[]>;
@@ -41,9 +42,22 @@ export function useCanvasTools(options: {
 
   return (id: string, canvasSignal: AbortSignal, workspaceSignal: AbortSignal): CanvasContext => {
     let redirected: CanvasContext | undefined;
+    let guard = createCanvasRunGuard(id, flow.toObject());
     return {
-      get id() { return redirected?.id ?? options.getCanvasBinding().id; },
+      get id() { return redirected?.id ?? id; },
       get tools() { return redirected?.tools ?? getNodeTools().tools; },
+      async prepare() {
+        if (redirected) return redirected.prepare?.();
+        canvasSignal.throwIfAborted();
+        workspaceSignal.throwIfAborted();
+        guard.assertBinding(options.getCanvasBinding().id);
+        guard.refresh(options.getCanvasBinding().id, flow.toObject());
+        await options.flushSave();
+        canvasSignal.throwIfAborted();
+        workspaceSignal.throwIfAborted();
+        guard.assertUnchanged(options.getCanvasBinding().id, flow.toObject());
+        guard.refresh(options.getCanvasBinding().id, flow.toObject());
+      },
       getNodeLabel(nodeId) {
         if (redirected) return redirected.getNodeLabel?.(nodeId);
         const node = flow.findNode(nodeId);
@@ -53,7 +67,8 @@ export function useCanvasTools(options: {
       async call(request, signal) {
         if (redirected) return redirected.call(request, signal);
         canvasSignal.throwIfAborted();
-        id = options.getCanvasBinding().id;
+        guard.assertBinding(options.getCanvasBinding().id);
+        if (request.name === "replaceCanvas") guard.assertUnchanged(options.getCanvasBinding().id, flow.toObject());
         const changesCanvas = request.name === "addCanvas" || request.name === "switchCanvas" || request.name === "renameCanvas";
         const callSignal = AbortSignal.any([workspaceSignal, ...(changesCanvas ? [] : [canvasSignal]), AbortSignal.timeout(120000), ...(signal ? [signal] : [])]);
         callSignal.throwIfAborted();
@@ -62,7 +77,9 @@ export function useCanvasTools(options: {
           return await Promise.race([
             Promise.resolve().then(async () => {
               canvasSignal.throwIfAborted();
-              let result = await execute(request, callSignal, id);
+              guard.assertBinding(options.getCanvasBinding().id);
+              if (request.name === "replaceCanvas") guard.assertUnchanged(options.getCanvasBinding().id, flow.toObject());
+              let result = await execute(request, callSignal, id, guard.original);
               callSignal.throwIfAborted();
               if (changesCanvas) {
                 const nextContext = options.resolveCanvasContext?.(String(result));
@@ -75,9 +92,13 @@ export function useCanvasTools(options: {
                 binding.signal.throwIfAborted();
                 id = binding.id;
                 canvasSignal = binding.signal;
+                guard = createCanvasRunGuard(id, flow.toObject());
                 result = await execute({ name: "getCanvas", args: {} }, callSignal, id);
               }
-              if (request.name !== "getCanvas" && request.name !== "selectNodes") await options.flushSave();
+              if (request.name !== "getCanvas" && request.name !== "selectNodes") {
+                await options.flushSave();
+                guard.refresh(options.getCanvasBinding().id, flow.toObject());
+              }
               callSignal.throwIfAborted();
               canvasSignal.throwIfAborted();
               return result;
@@ -94,20 +115,14 @@ export function useCanvasTools(options: {
       };
   };
 
-  async function execute(request: CanvasToolCall, signal: AbortSignal, canvasId: string): Promise<unknown> {
+  async function execute(request: CanvasToolCall, signal: AbortSignal, canvasId: string, original: { nodes: unknown[]; edges: unknown[] } = flow.toObject()): Promise<unknown> {
     signal.throwIfAborted();
     switch (request.name) {
       case "replaceCanvas": {
         const raw = request.args as { nodes?: unknown[]; edges?: unknown[]; viewport?: { x?: number; y?: number; zoom?: number } };
         if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) throw new Error("画布快照格式无效");
         const allowed = new Set(options.availableNodes.value.map(item => item.type));
-        const nodes = raw.nodes.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item))
-          .map(item => ({ ...item, id: String(item.id ?? ""), type: String(item.type ?? "") }))
-          .filter(item => item.id && allowed.has(item.type));
-        const nodeIds = new Set(nodes.map(item => item.id));
-        const edges = raw.edges.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item))
-          .map(item => ({ ...item, id: String(item.id ?? ""), source: String(item.source ?? ""), target: String(item.target ?? "") }))
-          .filter(item => item.id && nodeIds.has(item.source) && nodeIds.has(item.target));
+        const { nodes, edges } = validateCanvasReplacement(raw, allowed, original);
         flow.setNodes(nodes as never[]);
         flow.setEdges(edges as never[]);
         await nextTick();

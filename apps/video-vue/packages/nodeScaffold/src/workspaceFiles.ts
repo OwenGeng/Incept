@@ -7,6 +7,8 @@ export interface WorkspaceFiles {
   read(path: string): Promise<ArrayBuffer>;
   acquireUrl?(path: string, mimeType: string): { url: Promise<string>; release(): void };
   readText(path: string): Promise<string>;
+  readTextSnapshot(path: string): Promise<{ text: string; revision: string; encoding: "utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" }>;
+  writeTextSnapshot(path: string, text: string, snapshot: { revision: string; encoding: "utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" }): Promise<string>;
   readJson<T = unknown>(path: string): Promise<T>;
   write(path: string, content: string | Blob | ArrayBuffer, exclusive?: boolean): Promise<void>;
   writeJson(path: string, data: unknown, exclusive?: boolean): Promise<void>;

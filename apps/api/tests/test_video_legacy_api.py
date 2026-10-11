@@ -22,6 +22,29 @@ def headers(email: str = "local@linglonglab.internal") -> dict[str, str]:
     return {"x-user-email": email, "x-internal-api-key": settings.internal_api_key}
 
 
+def test_proposal_api_delivers_without_automatic_research_question(tmp_path, monkeypatch):
+    import json
+    from app.video_studio import pi_agent as agent
+    from test_video_pi_agent import reply
+    api = client(tmp_path, monkeypatch)
+    project_id = api.post('/video-legacy/api/workspaces/create', json={'name':'Research choice'}, headers=headers()).json()['data']['directory']
+    calls = []
+    monkeypatch.setattr(agent, 'execute_research_tool', lambda name, *a, **k: calls.append(name) or {'error':'Unavailable test website'})
+    monkeypatch.setattr(agent, 'model_response', lambda p, **k: reply(p, '官网暂不可读，请提供客户资料。'))
+    request = {'directory':project_id, 'prompt':'https://3wliners.com/ 客户CTV方案'}
+    response = api.post('/video-legacy/api/agent', json=request, headers=headers())
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert calls == []
+    session = next(event['file'] for event in events if event['type'] == 'session')
+    assert not any(event['type'] == 'researchQuestion' for event in events)
+    assert any(event['type'] == 'done' for event in events)
+    assert not any(event['type'] == 'error' for event in events)
+    restored = api.get('/video-legacy/api/agent/get', params={'directory':project_id,'sessionFile':session}, headers=headers())
+    assert restored.status_code == 200
+    assert restored.json()['data']['researchQuestion'] is None
+    assert calls == []
+
+
 def test_vue_workspace_project_and_file_compatibility(tmp_path, monkeypatch):
     api = client(tmp_path, monkeypatch)
     created = api.post(

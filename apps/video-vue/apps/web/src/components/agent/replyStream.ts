@@ -6,7 +6,7 @@ import type { AgentMessage, AgentMessagePart } from "./types";
 export async function* readAgentEvents(response: Response, signal: AbortSignal) {
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    throw new Error(error?.message || `请求失败（${response.status}）`);
+    throw new Error(error?.message || error?.detail?.message || (typeof error?.detail === 'string' ? error.detail : undefined) || `请求失败（${response.status}）`);
   }
   if (!response.body) throw new Error("未收到响应流");
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -22,8 +22,8 @@ export async function* readAgentEvents(response: Response, signal: AbortSignal) 
       for (const line of lines) {
         if (!line.trim()) continue;
         const event = JSON.parse(line) as AgentEvent;
-        if (event.type === "error") throw new Error(event.message);
-        if (event.type === "done") return;
+        if (event.type === "error") { yield event; return; }
+        if (event.type === "done" || event.type === "accepted") { yield event; return; }
         yield event;
         signal.throwIfAborted();
       }
@@ -60,7 +60,7 @@ export function createReplyStream(reply: AgentMessage) {
     if (event.type === "question") {
       const part = parts.find(part => part.type === "tool" && part.tool.id === event.toolCallId);
       if (part?.type !== "tool") throw new Error("提问缺少对应的工具调用");
-      part.tool.question = { callId: event.callId, title: event.title, question: event.question, options: event.options, fields: event.fields };
+      part.tool.question = { callId: event.callId, title: event.title, question: event.question, options: event.options, fields: event.fields, sessionFile: event.sessionFile, runId: event.runId };
       return;
     }
     if (event.type === "tool") {
@@ -118,6 +118,7 @@ export function createConversationStream(messages: Ref<AgentMessage[]>) {
 
   function begin(message: AgentMessage) {
     finish();
+    message.error = undefined;
     reply = message;
     stream = createReplyStream(message);
   }
@@ -139,7 +140,7 @@ export function createConversationStream(messages: Ref<AgentMessage[]>) {
     if (event.type === "userMessage") {
       const existing = messages.value.find(message => message.entryId === event.id)
         ?? messages.value.find(message => message.role === "user" && !message.entryId && message.content === event.content);
-      if (existing) { existing.entryId = event.id; existing.error = undefined; }
+      if (existing) { existing.entryId = event.id; existing.error = undefined; if (event.attachments) existing.attachments = event.attachments; }
       else messages.value.push({ id: event.id, entryId: event.id, role: "user", content: event.content ?? "", attachments: event.attachments });
       ensureReply(event.id);
     } else if (["text", "thinking", "tool", "question"].includes(event.type)) {

@@ -86,8 +86,13 @@ const textPath = `assets/${node.id}/content.md`;
 let textFiles: ReturnType<typeof files.getWorkspaceFiles>;
 let textLoading: Promise<void> | undefined;
 let textSaving = Promise.resolve();
+let textSnapshot: Awaited<ReturnType<typeof textFiles.readTextSnapshot>>;
 function saveText(value: string) {
-  textSaving = textSaving.catch(() => {}).then(() => textFiles.write(textPath, value));
+  textSaving = textSaving.catch(() => {}).then(async () => {
+    if (value === textSnapshot.text) return;
+    const revision = await textFiles.writeTextSnapshot(textPath, value, textSnapshot);
+    textSnapshot = { ...textSnapshot, text: value, revision };
+  });
   return textSaving;
 }
 nodeEvent.on("save", async (reason) => {
@@ -110,7 +115,8 @@ async function loadText() {
     if (!node.id || /[\\/]/.test(node.id) || node.id === "." || node.id === "..") throw new Error("节点 ID 不能作为文件夹名称");
     if (data.value.textPath !== undefined && data.value.textPath !== textPath) throw new Error("文本文件路径无效");
     textFiles = files.getWorkspaceFiles();
-    const value = data.value.textSnapshot !== undefined ? data.value.textSnapshot : data.value.textPath ? await textFiles.readText(textPath) : outputs.value.text.value;
+    const stored = data.value.textPath ? await textFiles.readTextSnapshot(textPath) : undefined;
+    const value = data.value.textSnapshot !== undefined ? data.value.textSnapshot : stored ? stored.text : outputs.value.text.value;
     if (typeof value !== "string") throw new Error("文本内容无效");
     if (!data.value.textPath) {
       for (const directory of ["assets", `assets/${node.id}`]) {
@@ -120,6 +126,7 @@ async function loadText() {
       }
       await textFiles.write(textPath, value);
     }
+    textSnapshot = stored ?? await textFiles.readTextSnapshot(textPath);
     outputs.value.text.value = value;
     data.value.textPath = textPath;
     delete data.value.textSnapshot;
@@ -193,10 +200,11 @@ const promptModel = computed({ get: () => data.value.promptModel ?? [], set: (va
 nodeTools.register({
   name: "setText",
   description: "修改此节点的文本输出",
-  parameters: z.strictObject({ text: z.string() }),
-  async execute({ text }) {
+  parameters: z.strictObject({ text: z.string(), expectedText: z.string().optional() }),
+  async execute({ text, expectedText }) {
     if (!textReady.value) throw new Error("文本尚未加载");
     if (generating.value) throw new Error("文本生成中，请稍后修改");
+    if (expectedText !== undefined && outputs.value.text.value !== expectedText) throw new Error("节点文本已变化，请下载草稿或重新载入");
     if (outputs.value.text.value === text) await saveText(text);
     else { outputs.value.text.value = text; await textSaving; }
     return { text };

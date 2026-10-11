@@ -168,6 +168,7 @@ import { getShortcutBindings, shortcutLabel, shortcutMatches, shortcutPressed } 
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import anonymousData from "@/lib/anonymousData";
 import { dropCanvasFiles, importCanvasFiles, isCanvasFileDrag } from "./canvasDrop";
+import { getClipboardNodeOwner, remapNodeOwnedPaths } from "@/pages/workspace/canvasFile";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/minimap/dist/style.css";
@@ -325,28 +326,33 @@ async function readDocumentNode(directory: string, canvasPath: string, nodeId: s
   checkDocumentDirectory(directory);
   return {
     label: typeof source.data?.label === "string" ? source.data.label : nodeId,
+    textPath,
     outputs: handles.map((handle) => {
       const output = source.data?.outputs?.[handle.id];
       return {
         id: handle.id,
         label: handle.label || handle.id,
-        text: output?.dataType === "STRING" && typeof output.value === "string" ? output.value : storedText ?? "",
+        text: storedText ?? (output?.dataType === "STRING" && typeof output.value === "string" ? output.value : ""),
       };
     }),
   };
 }
 
-async function saveDocumentNode(directory: string, canvasPath: string, nodeId: string, handleId: string, text: string) {
+async function saveDocumentNode(directory: string, canvasPath: string, nodeId: string, handleId: string, text: string, expectedText?: string) {
   checkDocumentDirectory(directory);
   await flushCanvasSave(async () => {
     const { files, canvas, node, liveNode, textPath } = await readDocumentCanvas(directory, canvasPath, nodeId);
     if (!documentHandles(liveNode ?? node).some((handle) => handle.id === handleId)) throw new Error("文本输出已删除，请重新打开节点");
+    const snapshot = textPath === undefined ? undefined : await files.readTextSnapshot(textPath);
+    const currentOutput = (liveNode ?? node).data?.outputs?.[handleId];
+    const currentText = snapshot?.text ?? (currentOutput?.dataType === "STRING" ? currentOutput.value : "");
+    if (expectedText !== undefined && currentText !== expectedText) throw new Error("节点文本已被其他编辑器或 Agent 修改；请下载草稿或重新载入");
     if (liveNode?.type === "remote-textNode") {
-      await getNodeTools().call({ nodeId, name: "node:setText", args: { text } }, canvasController.signal);
+      await getNodeTools().call({ nodeId, name: "node:setText", args: { text, expectedText } }, canvasController.signal);
       checkDocumentDirectory(directory);
     }
     if (textPath !== undefined) {
-      if (liveNode?.type !== "remote-textNode") await files.write(textPath, text);
+      if (liveNode?.type !== "remote-textNode" && snapshot) await files.writeTextSnapshot(textPath, text, snapshot);
     } else {
       const data = (node.data ??= {});
       const output = data.outputs?.[handleId];
@@ -643,7 +649,20 @@ async function pasteClipboardNode(position: { x: number; y: number }, command?: 
     if (canvasSignal.aborted) return false;
     if (!node) throw new Error("剪贴板中没有可粘贴的节点命令");
     if (!availableNodes.value.some((item) => item.type === node.type)) throw new Error("请先安装并启用对应的节点插件");
-    addNodes({ id: crypto.randomUUID(), type: node.type, data: node.data, position });
+    const id = crypto.randomUUID();
+    const owner = getClipboardNodeOwner(node);
+    let data = node.data;
+    if (owner) {
+      const files = useWorkspaceFiles(directory);
+      const { entries } = await files.list("assets").catch(error => {
+        if (error?.response?.status === 404) return { entries: [] };
+        throw error;
+      });
+      if (entries.some(entry => entry.type === "directory" && entry.name === owner)) await files.copy(`assets/${owner}`, `assets/${id}`);
+      data = remapNodeOwnedPaths(data, new Map([[owner, id]]));
+    }
+    canvasSignal.throwIfAborted();
+    addNodes({ id, type: node.type, data, position });
     return true;
   } catch (error) {
     const pasteShortcut = generalSettings.value.canvasShortcuts.paste;

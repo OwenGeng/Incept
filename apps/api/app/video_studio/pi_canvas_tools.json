@@ -1,0 +1,276 @@
+[
+  {
+    "name": "getCanvas",
+    "description": "获取当前工作区的 canvases 列表及激活画布的 id、nodes、edges、viewport、availableNodeTypes 和各节点注册的 nodeTools。操作前先查询实际节点 ID、端口和节点类型；不要通过修改画布 JSON 控制激活的画布。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "addNode",
+    "description": "在激活画布的画布坐标 position 新增节点，type 必须来自 getCanvas 的 availableNodeTypes。返回新增节点详情和注册的 nodeTools。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "position": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "type",
+        "position"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "deleteNodes",
+    "description": "从激活画布批量删除指定 nodeIds 的节点及其连接边；同一批次内的父子节点可以一起删除，任一节点校验失败则整体不执行。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "nodeIds": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "nodeIds"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "moveNodes",
+    "description": "将激活画布指定节点批量移动到各自的画布坐标 position，一次可传入多个节点，任一项校验失败则整体不执行。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "moves": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "position": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "nodeId",
+              "position"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "moves"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "renameNodes",
+    "description": "批量修改激活画布指定节点的显示名称，一次可传入多个节点，任一项校验失败则整体不执行。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "renames": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "nodeId",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "renames"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "connectNodes",
+    "description": "批量连接激活画布的输出端口 sourceHandle 和输入端口 targetHandle，一次可传入多组连接。先用 getCanvas 确认节点与端口；沿用画布和节点的连接校验，任一项校验失败则整体不执行。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "connections": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "sourceHandle": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "targetHandle": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "source",
+              "sourceHandle",
+              "target",
+              "targetHandle"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "connections"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "deleteEdges",
+    "description": "从激活画布批量删除指定 edgeIds 的连线，任一项校验失败则整体不执行。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "edgeIds": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "edgeIds"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "nodeTools",
+    "description": "调用激活画布节点注册的 node:functionName。nodeId 和 name 可从 getCanvas 或 addNode 的 nodeTools 获取，args 按该函数的 parameters 填写。新建节点可在同轮调用；不要通过修改画布 JSON 代替节点函数。 Hosted adapter exposes only the nodeTools returned by getCanvas. Writes are staged until the complete turn commits; paid generation is not exposed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "enum": [
+            "node:setText",
+            "node:setPrompt"
+          ]
+        },
+        "args": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 100000
+            },
+            "expectedText": {
+              "type": "string",
+              "maxLength": 100000
+            },
+            "prompt": {
+              "type": "string",
+              "maxLength": 20000
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "nodeId",
+        "name",
+        "args"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

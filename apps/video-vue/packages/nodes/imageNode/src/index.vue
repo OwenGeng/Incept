@@ -8,9 +8,11 @@
     @fullscreen="previewVisible = true"
     :style="{ width: previewUrl && imageWidth ? `${imageWidth + 18}px` : undefined }">
     <template #topActions>
+      <imageActions :source="outputFile" :disabled="uploading" @busy="editingBusy = $event" />
       <el-button
         :icon="IconTransfer"
         :loading="uploading"
+        :disabled="editingBusy"
         text
         title="替换图片"
         aria-label="替换图片"
@@ -51,6 +53,7 @@ import { computed, nextTick, ref } from "vue";
 import { IconPhoto, IconUpload, IconTransfer } from "@tabler/icons-vue";
 import { ElButton, ElImageViewer, ElMessage } from "element-plus";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeHandle } from "@linglonglab/video-nodes-scaffold/runtime";
+import imageActions from "@linglonglab/video-nodes-scaffold/imageActions";
 
 defineOptions({
   inheritAttrs: false,
@@ -62,6 +65,7 @@ const { node, nodeProps, outputs, nodeEvent, files, updateNodeInternals } = useN
 });
 const fileInput = ref<HTMLInputElement>();
 const uploading = ref(false);
+const editingBusy = ref(false);
 const previewVisible = ref(false);
 const imageWidth = ref(0);
 
@@ -72,10 +76,10 @@ const previewUrl = files.useFileUrl(
 );
 
 nodeEvent.on("save", () => {
-  if (uploading.value) throw new Error("图片处理中，请完成后再切换或刷新节点");
+  if (uploading.value || editingBusy.value) throw new Error("图片处理中，请完成后再切换或刷新节点");
 });
 nodeEvent.on("delete", () => {
-  if (uploading.value) throw new Error("图片上传中，请稍后删除节点");
+  if (uploading.value || editingBusy.value) throw new Error("图片处理中，请稍后删除节点");
   uploading.value = true;
   return files.removeNodeFiles().finally(() => {
     uploading.value = false;
@@ -91,7 +95,7 @@ nodeTools.register({
   }),
   async execute({ path, mimeType }, { signal }) {
     signal?.throwIfAborted();
-    if (uploading.value) throw new Error("图片处理中，请稍后重试");
+    if (uploading.value || editingBusy.value) throw new Error("图片处理中，请稍后重试");
     uploading.value = true;
     try {
       const content = await files.getWorkspaceFiles().read(path);
@@ -117,7 +121,7 @@ async function uploadImage(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = "";
-  if (!file || uploading.value) return;
+  if (!file || uploading.value || editingBusy.value) return;
   if (!file.type.startsWith("image/")) return void ElMessage.error("请选择图片文件");
   if (!file.size || file.size > 100 * 1024 * 1024) return void ElMessage.error("图片不能为空且不能超过 100 MB");
   uploading.value = true;

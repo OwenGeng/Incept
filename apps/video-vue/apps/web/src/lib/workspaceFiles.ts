@@ -3,6 +3,7 @@ import { toValue, type MaybeRefOrGetter } from "vue";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 type WorkspaceEntry = { name: string; path: string; type: "file" | "directory" };
+export type TextSnapshot = { text: string; revision: string; encoding: "utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" };
 const client = axios.create({ baseURL: "/api/workspaces/files", headers: { "x-linglonglabVideo-workspace": "1" } });
 const fileUrls = new Map<string, { directory: string; path: string; url: Promise<string>; users: number }>();
 
@@ -83,6 +84,21 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
     return JSON.parse(await readText(path));
   }
 
+  async function readTextSnapshot(path: string, signal?: AbortSignal): Promise<TextSnapshot> {
+    const { data } = await client.get<{ data: TextSnapshot }>("/read", { params: { directory: getDirectory(), path, snapshot: true }, signal });
+    return data.data;
+  }
+
+  async function writeTextSnapshot(path: string, text: string, snapshot: Pick<TextSnapshot, "revision" | "encoding">): Promise<string> {
+    const directory = getDirectory();
+    const { data } = await client.put<{ data: { revision: string } }>("/write", text, {
+      params: { directory, path, expectedRevision: snapshot.revision, encoding: snapshot.encoding },
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+    invalidateUrls(directory, path);
+    return data.data.revision;
+  }
+
   async function write(path: string, content: string | Blob | ArrayBuffer, exclusive = false, signal?: AbortSignal) {
     const directory = getDirectory();
     await client.put("/write", content, { params: { directory, path, exclusive }, signal, headers: { "Content-Type": "application/octet-stream" } });
@@ -100,6 +116,12 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
     invalidateUrls(directory, target);
   }
 
+  async function copy(path: string, target: string) {
+    const directory = getDirectory();
+    await client.post("/copy", { directory, path, target });
+    invalidateUrls(directory, target);
+  }
+
   async function remove(path: string, recursive = false) {
     const directory = getDirectory();
     await client.delete("/remove", { data: { directory, path, recursive } });
@@ -111,5 +133,5 @@ export default function useWorkspaceFiles(directory?: MaybeRefOrGetter<string | 
   }
 
   // ACT: 当前目录逐次读取；跨 await 或防抖的操作传入目录字符串，固定本次目标。
-  return { list, read, acquireUrl, readText, readJson, write, writeJson, rename, remove, mkdir };
+  return { list, read, acquireUrl, readText, readJson, readTextSnapshot, writeTextSnapshot, write, writeJson, rename, copy, remove, mkdir };
 }

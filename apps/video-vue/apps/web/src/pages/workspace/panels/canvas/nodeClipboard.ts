@@ -4,7 +4,7 @@ import { writeClipboardText } from "@/lib/clipboard";
 
 export const nodeClipboardCommand = /^linglonglabVideo:paste-node:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-type ClipboardNode = { type: string; data: Record<string, unknown> };
+type ClipboardNode = { id?: string; type: string; data: Record<string, unknown> };
 type ClipboardEntry = { command: string; directory: string; node: ClipboardNode };
 
 async function openClipboardDatabase() {
@@ -32,11 +32,11 @@ async function accessClipboard(entry?: ClipboardEntry) {
   }
 }
 
-export async function copyNodeToClipboard(node: Pick<Node, "type" | "data">, directory: string) {
+export async function copyNodeToClipboard(node: Pick<Node, "type" | "data"> & Partial<Pick<Node, "id">>, directory: string) {
   if (!node.type) throw new Error("节点类型无效");
   if (!directory) throw new Error("请先打开项目");
   const command = `linglonglabVideo:paste-node:${crypto.randomUUID()}`;
-  const snapshot: ClipboardNode = { type: node.type, data: JSON.parse(JSON.stringify(node.data ?? {})) };
+  const snapshot: ClipboardNode = { id: node.id, type: node.type, data: JSON.parse(JSON.stringify(node.data ?? {})) };
   await accessClipboard({ command, directory, node: snapshot });
   await writeClipboardText(command);
 }
@@ -51,8 +51,17 @@ export async function readClipboardNode(command: string, directory: string) {
   }
   const hasWorkspaceFile = Object.values(node.data.outputs ?? {}).some(output => isNodeOutput(output)
     && typeof output.value === "object" && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(output.value.url));
-  if (hasWorkspaceFile && entry.directory !== directory) {
+  const pending: unknown[] = [node.data];
+  let hasAssetPath = false;
+  while (pending.length) {
+    const value = pending.pop();
+    if (typeof value === "string" && /^assets[\\/]/.test(value)) hasAssetPath = true;
+    else if (value && typeof value === "object") pending.push(...Object.values(value));
+  }
+  if ((hasWorkspaceFile || hasAssetPath) && entry.directory !== directory) {
     throw new Error(entry.directory ? "此节点引用工作区文件，不能跨项目粘贴" : "节点剪贴数据缺少工作目录，请重新复制");
   }
-  return node;
+  // A source ID is only meaningful in its source project. Text snapshots and
+  // remote URL-only nodes may be pasted elsewhere without probing that project's files.
+  return entry.directory === directory ? node : { type: node.type, data: node.data };
 }

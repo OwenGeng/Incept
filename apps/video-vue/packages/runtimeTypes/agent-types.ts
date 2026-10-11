@@ -5,7 +5,9 @@ import type {
 } from "@linglonglab/video-tools-scaffold/runtime";
 
 export type AgentToolCall = ToolCall & {
-  question?: QuestionRequest & { callId: string };
+  question?: QuestionRequest & { callId: string; sessionFile?: string; runId?: string };
+  progress?: string;
+  argsText?: string;
 };
 
 export type AgentStats = {
@@ -17,6 +19,11 @@ export type AgentStats = {
     total: number;
   };
   tokensPerSecond?: number;
+  cost?: number | null;
+  elapsedMs?: number;
+  children?: { file?: string; name?: string; status?: string; tokens?: AgentStats["tokens"] | null; cost?: number | null }[] | AgentStats;
+  totals?: AgentStats;
+  budget?: { used?: number; limit?: number; remaining?: number; maxTokens?: number; maxCost?: number; maxSubAgents?: number };
 };
 
 export type AgentContext = {
@@ -40,10 +47,11 @@ export type AgentSubAgent = {
   result?: string;
   providerId?: string;
   modelId?: string;
-  thinkingLevel?: "off" | "low" | "medium" | "high";
+  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 };
 
-export type AgentEvent =
+export type AgentEvent = (
+  | { type: "researchQuestion"; question: { id: string; status: "pending" | "answered" | "consumed"; prompt: string; message_id: string; choice?: "light" | "deep" | "off"; skipped?: boolean; notes?: string } }
   | {
       type: "text" | "thinking";
       blockId: string;
@@ -52,11 +60,12 @@ export type AgentEvent =
       done?: boolean;
     }
   | { type: "compaction"; active: boolean }
+  | { type: "progress"; content: string }
   | { type: "tool"; blockId: string; tool: AgentToolCall }
   | ({ type: "canvasCall"; callId: string } & CanvasToolCall)
-  | ({ type: "question"; callId: string; toolCallId: string } & QuestionRequest)
+  | ({ type: "question"; callId: string; toolCallId: string; sessionFile?: string; runId?: string } & QuestionRequest)
   | { type: "error"; message: string }
-  | { type: "session"; file: string }
+  | { type: "session"; file: string; runId?: string }
   | {
       type: "userMessage";
       id: string;
@@ -73,6 +82,6 @@ export type AgentEvent =
       content: string;
       id: string;
     }
-  | { type: "accepted" }
+  | { type: "accepted"; streamingBehavior?: "steer" | "followUp" }
   | { type: "stats"; stats: AgentStats; contextUsage?: AgentContext }
-  | { type: "done" };
+  | { type: "done" }) & { sequence?: number };

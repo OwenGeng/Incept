@@ -19,7 +19,7 @@
                 <icon-arrow-up-right class="suggestionArrow" :size="15" aria-hidden="true" />
               </el-button>
             </div>
-            <p class="welcomeHint">点击填入提示，也可以直接输入，或粘贴图片、视频。</p>
+            <p class="welcomeHint">点击填入提示，也可以上传、拖入或粘贴客户图片和视频。</p>
           </section>
         </template>
       </chat-item>
@@ -33,13 +33,13 @@
                   <template #header>
                     <span class="reasoningHeader">
                       <icon-atom :size="14" />
-                      <span>思考</span>
-                      <span v-if="part.duration !== undefined" class="thinkingDuration">{{ part.duration.toFixed(1) }} 秒</span>
+                      <span data-no-translate>{{ t('思考', 'Thinking') }}</span>
+                      <span v-if="part.duration !== undefined" class="thinkingDuration" data-no-translate>{{ part.duration.toFixed(1) }} {{ t('秒', 's') }}</span>
                     </span>
                   </template>
                   <messageMarkdown v-if="!(part.collapsed ?? true)" :content="part.content" :streaming="!!item.streaming" />
                 </chat-reasoning>
-                <toolMessage v-else-if="part.type === 'tool'" :tool="part.tool" :directory="directory" @copy="copyMessage" />
+                <toolMessage v-else-if="part.type === 'tool'" :tool="part.tool" :directory="directory" :sessionFile="part.tool.question?.sessionFile ?? sessionFile" :runId="part.tool.question?.runId ?? currentRunId" @copy="copyMessage" />
                 <messageMarkdown v-else-if="part.type === 'text' && part.content" :content="part.content" :streaming="!!item.streaming" />
               </template>
               <attachmentList v-if="item.attachments?.length" :attachments="item.attachments" :directory="directory" />
@@ -55,6 +55,7 @@
             <el-button type="primary" size="small" :loading="busy" :disabled="locked || (!editingText.trim() && !item.attachments?.length)" @click="sendMessage(item)"><icon-arrow-up v-if="!busy" :size="14" />重发</el-button>
           </template>
           <template v-else>
+            <el-button v-if="item.role === 'assistant' && item.error" text size="small" :disabled="locked || remoteRunning" @click="retryMessage(item)">重试上一条消息</el-button>
             <el-button v-if="item.content" class="messageAction" text circle aria-label="复制消息" title="复制消息" @click="copyMessage(item.content)"><icon-copy :size="14" /></el-button>
             <template v-if="item.role === 'user'">
               <el-button class="messageAction" text circle :disabled="locked || remoteRunning" aria-label="编辑消息" title="编辑消息" @click="editMessage(item)"><icon-pencil :size="14" /></el-button>
@@ -66,9 +67,11 @@
     </chat-list>
     <div v-if="compacting" class="compactionStatus" role="status">
       <el-icon class="is-loading" aria-hidden="true"><icon-loader-2 :size="14" /></el-icon>
-      <span>正在压缩上下文…</span>
+      <span data-no-translate>{{ t('正在压缩上下文…', 'Compacting context…') }}</span>
     </div>
-    <div class="messageInput">
+    <div v-if="progress && (busy || remoteRunning)" class="compactionStatus" role="status" aria-live="polite" data-no-translate>{{ progressText(progress, interfaceLanguage) }}</div>
+    <div class="messageInput" :class="{ draggingAttachments }" @dragover="dragAttachments" @dragleave="leaveAttachments" @drop="dropAttachments">
+      <div v-if="draggingAttachments" class="attachmentDropHint" role="status">松开添加图片或视频 · 不会自动发送</div>
       <div
         class="senderResizeHandle"
         role="separator"
@@ -90,7 +93,12 @@
       <attachmentList v-if="draftAttachments.length" class="draftAttachments" :attachments="draftAttachments" :directory="directory" removable @remove="draftAttachments.splice($event, 1)" />
       <div ref="senderElement" class="senderEditor" @keydown.capture="skillMenuRef?.handleKeydown($event)"></div>
       <div class="senderActions">
-        <modelPopover v-model="selectedModel" v-model:reasoningEffort="reasoningEffort" :active="active" :disabled="disabled" />
+        <input ref="attachmentPicker" type="file" accept="image/*,video/*" multiple hidden :disabled="!canAddAttachments" @change="pickAttachments" />
+        <el-button class="uploadButton" text size="small" :disabled="!canAddAttachments" aria-label="上传素材" title="每条最多 20 个附件；图片上传限额 100 MiB，视频 450 MB（450,000,000 字节）；分析与并发限制由服务端校验" @click="attachmentPicker?.click()"><icon-paperclip :size="16" />上传素材</el-button>
+        <modelPopover v-model="selectedModel" :showReasoning="false" :active="active" :disabled="disabled" />
+        <el-select v-if="thinkingLevels.length" v-model="thinkingLevel" class="thinkingSelect" size="small" :disabled="busy || remoteRunning || disabled" :aria-label="t('思考强度', 'Thinking level')" :title="t('思考强度', 'Thinking level')">
+          <el-option v-for="level in thinkingLevels" :key="level" :value="level" :label="thinkingLabel(level)" />
+        </el-select>
         <skillMenu ref="skillMenuRef" :directory="directory" :active="active" :disabled="locked || editingId !== undefined || !directory" :query="skillQuery" :editor="senderElement" @select="selectSkill" @dismiss="skillQuery = undefined" />
         <el-popover
           v-model:visible="contextMenuVisible"
@@ -116,17 +124,31 @@
             </template>
             <span v-else class="contextHint">{{ contextUsage ? "等待下一次回复更新用量" : "尚无用量数据" }}</span>
             <div v-if="stats" class="contextStats">
-              <div class="contextHeader">对话累计用量</div>
-              <div class="contextTokens"><span>输入</span><span>{{ inputTokens.toLocaleString() }} tok</span></div>
-              <div class="contextTokens"><span>输出</span><span>{{ stats.tokens.output.toLocaleString() }} tok</span></div>
-              <div v-if="inputTokens > 0" class="contextTokens"><span>缓存命中</span><span>{{ (stats.tokens.cacheRead / inputTokens * 100).toFixed(1) }}%</span></div>
-              <div v-if="stats.tokensPerSecond !== undefined" class="contextTokens"><span>生成速度</span><span>{{ stats.tokensPerSecond.toFixed(1) }} tok/s</span></div>
+              <div class="contextHeader" data-no-translate>{{ t('对话累计用量', 'Conversation usage') }}</div>
+              <div class="contextTokens"><span data-no-translate>{{ t('输入', 'Input') }}</span><span>{{ inputTokens.toLocaleString() }} tok</span></div>
+              <div class="contextTokens"><span data-no-translate>{{ t('输出', 'Output') }}</span><span>{{ statsSummary.tokens.output.toLocaleString() }} tok</span></div>
+              <div v-if="inputTokens > 0" class="contextTokens"><span data-no-translate>{{ t('缓存命中', 'Cache hit') }}</span><span>{{ (statsSummary.tokens.cacheRead / inputTokens * 100).toFixed(1) }}%</span></div>
+              <div class="contextTokens"><span>{{ t('模型费用', 'Model cost') }}</span><span>{{ costLabel(statsSummary.cost, interfaceLanguage) }}</span></div>
+              <div v-if="statsSummary.elapsedMs !== undefined" class="contextTokens"><span>{{ t('耗时', 'Elapsed') }}</span><span>{{ (statsSummary.elapsedMs / 1000).toFixed(1) }} s</span></div>
+              <template v-if="statsSummary.children.length">
+                <div class="contextTokens"><span>{{ t('当前会话用量', 'This session tokens') }}</span><span>{{ statsSummary.ownTokens.total.toLocaleString() }} tok</span></div>
+                <div class="contextTokens"><span>{{ t('子代理用量', 'Child agent tokens') }}</span><span>{{ statsSummary.childTokens.total.toLocaleString() }} tok</span></div>
+                <div class="contextTokens"><span>{{ t('父子合计', 'Total including children') }}</span><span>{{ statsSummary.tokens.total.toLocaleString() }} tok</span></div>
+                <div v-for="(child, index) in statsSummary.children" :key="index" class="contextTokens"><span>{{ child.name || t('子代理', 'Child agent') }}</span><span>{{ child.tokens ? `${child.tokens.total.toLocaleString()} tok` : t('用量待确认', 'Usage pending') }} · {{ costLabel(child.cost, interfaceLanguage) }}</span></div>
+              </template>
+              <div v-if="statsSummary.modelBudget" class="contextTokens"><span>{{ t('模型调用预算', 'Model call budget') }}</span><span>{{ statsSummary.modelBudget.used }} / {{ statsSummary.modelBudget.limit }}</span></div>
+              <div v-if="capabilityBudget" class="contextTokens"><span>{{ t('上下文／输出预算', 'Context / output budget') }}</span><span>{{ capabilityBudget.contextTokens?.toLocaleString() ?? '—' }} / {{ capabilityBudget.outputTokens?.toLocaleString() ?? '—' }} tok</span></div>
+              <div v-if="statsSummary.tokensPerSecond !== undefined" class="contextTokens"><span data-no-translate>{{ t('生成速度', 'Generation speed') }}</span><span>{{ statsSummary.tokensPerSecond.toFixed(1) }} tok/s</span></div>
             </div>
           </div>
         </el-popover>
-        <el-button class="sendButton" type="primary" circle :disabled="!busy && (locked || editingId !== undefined)" :aria-label="busy ? '停止生成' : '发送消息'" :title="busy ? '停止生成' : '发送消息'" @click="busy ? stopMessage() : sendMessage()">
-          <icon-player-stop-filled v-if="busy" :size="14" />
-          <icon-arrow-up v-else :size="16" />
+        <el-select v-if="busy || remoteRunning" v-model="streamingBehavior" size="small" class="runningAction" :aria-label="t('追加方式', 'Instruction mode')">
+          <el-option value="steer" :label="t('立即纠正', 'Steer now')" />
+          <el-option value="followUp" :label="t('完成后继续', 'Queue next')" />
+        </el-select>
+        <el-button v-if="busy || remoteRunning" text circle :aria-label="t('停止生成', 'Stop generation')" :title="t('停止生成', 'Stop generation')" @click="stopMessage()"><icon-player-stop-filled :size="14" /></el-button>
+        <el-button class="sendButton" type="primary" circle :loading="controlling" :disabled="props.disabled || snapshotLoading || deletingId !== undefined || editingId !== undefined || controlling" :aria-label="t('发送消息', 'Send message')" :title="t('发送消息', 'Send message')" @click="sendMessage()">
+          <icon-arrow-up :size="16" />
         </el-button>
       </div>
     </div>
@@ -134,12 +156,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, reactive, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import axios from "axios";
 import {
   IconArrowUp, IconAtom, IconCopy,
   IconCircleDashed, IconPencil, IconPlayerStopFilled, IconX, IconLoader2,
-  IconTrash, IconLayoutGrid, IconMovie, IconPhoto, IconArrowUpRight, IconUsersGroup,
+  IconTrash, IconLayoutGrid, IconMovie, IconPhoto, IconArrowUpRight, IconUsersGroup, IconPaperclip,
 } from "@tabler/icons-vue";
 import { ElMessage } from "element-plus";
 import logoUrl from "@linglonglab/video-assets/logo.png";
@@ -155,13 +177,19 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { interfaceLanguage, t } from "@/i18n";
 import type { AgentAttachment, AgentConversation, AgentMessage } from "./types";
 import type { AgentEvent } from "@linglonglab/video-runtime-types/agent/types";
+import { usageSummary } from "./usageSummary";
+import { canApplyDelegatedSnapshot } from "./delegatedLifecycle";
 import { createConversationStream, readAgentEvents } from "./replyStream";
+import { selectAttachments } from "./attachmentInput";
+import { attachmentWarnings, messagePrompt, recoverDraft, resendMessageId, cancelPayload, type AgentRunScope } from "./conversationInput";
+import { progressText } from './progressLocale';
 import type { CanvasContext } from "@linglonglab/video-tool-canvas/runtime";
 import chatList from "@tdesign-vue-next/chat/es/chat-list";
 import chatItem from "@tdesign-vue-next/chat/es/chat-item";
 import chatReasoning from "@tdesign-vue-next/chat/es/chat-reasoning";
 import messageMarkdown from "@/components/messageMarkdown.vue";
 import xSender from "x-sender";
+import { costLabel, eventCursor, runEventURL, supportedThinkingLevels, type ThinkingCapability } from "./runtimeControls";
 import "tdesign-vue-next/es/style/index.css";
 import "@tdesign-vue-next/chat/es/style/index.css";
 import "x-sender/lib/XSender.css";
@@ -169,22 +197,41 @@ import "x-sender/lib/XSender.css";
 const props = defineProps<{ active: boolean; initialSession: AgentConversation | null; sessionFile?: string; disabled: boolean }>();
 const emit = defineEmits<{ session: [file: string]; sent: [prompt: string]; event: [event: AgentEvent] }>();
 const workspaceStore = useWorkspaceStore();
-const directory = workspaceStore.project?.directory;
+const directory = computed(() => workspaceStore.project?.directory);
 const draftAttachments = ref<AgentAttachment[]>([]);
 const createCanvasContext = inject<(() => CanvasContext | undefined) | undefined>("canvas", undefined);
 const messages = ref<AgentMessage[]>((props.initialSession?.messages ?? []).map(message => ({ ...message })));
+const researchQuestion = ref(props.initialSession?.researchQuestion ?? null);
+watch(() => props.initialSession?.researchQuestion, question => { researchQuestion.value = question ?? null; });
 const stream = createConversationStream(messages);
 const remoteRunning = ref(props.initialSession?.running ?? false);
+const parentObserved = ref(props.initialSession?.parentObserved ?? false);
 const stats = ref(props.initialSession?.stats);
 const contextUsage = ref(props.initialSession?.contextUsage);
 const busy = ref(false);
+const snapshotLoading = ref(false);
 const compacting = ref(false);
+const progress = ref("");
 const deletingId = ref<string>();
 const locked = computed(() => props.disabled || busy.value || deletingId.value !== undefined);
+const inputLocked = computed(() => props.disabled || snapshotLoading.value || deletingId.value !== undefined);
+const controlling = ref(false);
+const streamingBehavior = ref<"steer" | "followUp">("steer");
+const thinkingLevel = ref(props.initialSession?.thinkingLevel ?? "off");
+const capabilityModels = ref<ThinkingCapability[]>([]);
+const capabilityBudget = ref<{ modelCalls?: number; children?: number; seconds?: number; contextTokens?: number; outputTokens?: number }>();
+const statsSummary = computed(() => usageSummary(stats.value));
+const currentRunId = ref(props.initialSession?.runId);
+let lastSequence = props.initialSession?.lastSequence ?? 0;
+const canvasResults = new Map<string, { result?: unknown; error?: string }>();
 const editingId = ref<string>();
+const attachmentPicker = ref<HTMLInputElement>();
+const draggingAttachments = ref(false);
+const canAddAttachments = computed(() => props.active && !!directory.value && !locked.value && editingId.value === undefined && draftAttachments.value.length < 20);
 const editingText = ref("");
 let sender: xSender | undefined;
 let controller: AbortController | undefined;
+let activeRun: AgentRunScope | undefined;
 const senderElement = ref<HTMLElement>();
 const skillMenuRef = ref<InstanceType<typeof skillMenu>>();
 const skillQuery = ref<string>();
@@ -195,11 +242,16 @@ const pendingMessage = props.initialSession?.parentFile ? undefined : workspaceS
 const selectedModel = ref(pendingMessage?.model ?? (props.initialSession?.providerId && props.initialSession.modelId
   ? JSON.stringify([props.initialSession.providerId, props.initialSession.modelId]) : ""));
 const contextMenuVisible = ref(false);
-const reasoningEffort = ref(pendingMessage?.reasoningEffort ?? (props.initialSession?.thinkingLevel === "off" ? "" : props.initialSession?.thinkingLevel ?? ""));
 const selectedModelChoice = computed(() => modelChoices.value.find(item => item.value === selectedModel.value));
+const thinkingLevels = computed(() => supportedThinkingLevels(capabilityModels.value, selectedModelChoice.value?.providerId, selectedModelChoice.value?.modelId));
+watch(thinkingLevels, levels => { if (levels.length && !levels.includes(thinkingLevel.value)) thinkingLevel.value = levels.includes("off") ? "off" : levels[0]!; });
+function thinkingLabel(level: string) {
+  const names: Record<string, [string, string]> = { off: ["默认设置", "Default setting"], minimal: ["最少思考", "Minimal"], low: ["低强度", "Low"], medium: ["中等强度", "Medium"], high: ["高强度", "High"], xhigh: ["最高强度", "Extra high"] };
+  return names[level] ? t(...names[level]) : level;
+}
 const contextWindow = computed(() => contextUsage.value?.contextWindow ?? selectedModelChoice.value?.contextWindow ?? 262144);
 const contextPercent = computed(() => (contextUsage.value?.tokens ?? 0) / contextWindow.value * 100);
-const inputTokens = computed(() => stats.value ? stats.value.tokens.input + stats.value.tokens.cacheRead + stats.value.tokens.cacheWrite : 0);
+const inputTokens = computed(() => statsSummary.value.tokens.input + statsSummary.value.tokens.cacheRead + statsSummary.value.tokens.cacheWrite);
 const welcomeSuggestions = computed(() => interfaceLanguage.value === "en" ? [
   { label: "Build a creative canvas", description: "Turn an idea into a clear node workflow", icon: IconLayoutGrid, prompt: "Help me build a creative canvas. First confirm the nodes and workflow I need." },
   { label: "Plan a storyboard", description: "Break down the story into scenes and shots", icon: IconMovie, prompt: "Help me turn my story into a storyboard. First confirm the story, duration, and visual style." },
@@ -209,7 +261,7 @@ const welcomeSuggestions = computed(() => interfaceLanguage.value === "en" ? [
   { label: "梳理故事分镜", description: "拆解故事，安排画面与镜头", icon: IconMovie, prompt: "帮我把故事整理成分镜，先和我确认故事内容、时长和画面风格。" },
   { label: "生成图片素材", description: "为角色和场景寻找视觉方向", icon: IconPhoto, prompt: "帮我生成图片素材，先和我确认画面内容、风格和使用的模型。" },
 ]);
-watch([locked, editingId, () => props.active], ([locked, editingId, active]) => {
+watch([inputLocked, editingId, () => props.active], ([locked, editingId, active]) => {
   if (!active || locked || editingId !== undefined) sender?.disable();
   else sender?.enable();
 });
@@ -218,7 +270,13 @@ watch(() => props.active, active => {
 });
 
 function applyEvent(event: AgentEvent) {
+  const cursor = eventCursor(lastSequence, event.sequence);
+  if (!cursor.accept) return;
+  lastSequence = cursor.sequence;
+  if (event.type === "done" || event.type === "error") { remoteRunning.value = false; progress.value = ""; }
+  if (event.type === "done") window.dispatchEvent(new CustomEvent("linglonglabVideo:assets-updated", { detail: { directory: directory.value } }));
   switch (event.type) {
+    case 'researchQuestion': researchQuestion.value = event.question; break;
     case "subAgent":
     case "subAgentEvent": emit("event", event); break;
     case "report":
@@ -229,7 +287,12 @@ function applyEvent(event: AgentEvent) {
       });
       break;
     case "compaction": compacting.value = event.active; break;
-    case "session": emit("session", event.file); break;
+    case "progress": progress.value = event.content; break;
+    case "session":
+      remoteRunning.value = true;
+      currentRunId.value = event.runId;
+      if (directory.value && event.runId) activeRun = { directory: directory.value, sessionFile: event.file, runId: event.runId };
+      emit("session", event.file); break;
     case "stats": stats.value = event.stats; contextUsage.value = event.contextUsage; break;
     default: stream.receive(event);
   }
@@ -239,11 +302,44 @@ function receiveEvent(event: AgentEvent) {
   if (event.type === "done" || event.type === "error") {
     remoteRunning.value = false;
     compacting.value = false;
+    progress.value = "";
   } else if (["userMessage", "text", "thinking", "tool"].includes(event.type)) remoteRunning.value = true;
   applyEvent(event);
 }
 
-defineExpose({ receiveEvent });
+function finishDelegatedRun() {
+  if (!canApplyDelegatedSnapshot(parentObserved.value, busy.value, !!controller)) return false;
+  receiveEvent({ type: "done" });
+  snapshotLoading.value = true;
+  currentRunId.value = undefined;
+  activeRun = undefined;
+  return true;
+}
+function applySnapshot(session: AgentConversation) {
+  if (!canApplyDelegatedSnapshot(parentObserved.value, busy.value, !!controller)) return false;
+  stream.finish();
+  messages.value = session.messages.map(message => ({ ...message }));
+  stats.value = session.stats;
+  contextUsage.value = session.contextUsage;
+  researchQuestion.value = session.researchQuestion ?? null;
+  currentRunId.value = session.runId;
+  lastSequence = session.lastSequence ?? 0;
+  remoteRunning.value = !!session.running;
+  if (session.providerId && session.modelId) selectedModel.value = JSON.stringify([session.providerId, session.modelId]);
+  if (session.thinkingLevel) thinkingLevel.value = session.thinkingLevel;
+  parentObserved.value = false;
+  snapshotLoading.value = false;
+  if (session.running && directory.value) {
+    const scope = { directory: directory.value, sessionFile: session.file, runId: session.runId };
+    activeRun = scope;
+    const observer = new AbortController();
+    controller = observer;
+    void observeRun(scope, createCanvasContext?.(), observer.signal).finally(() => { if (controller === observer) controller = undefined; });
+  }
+  return true;
+}
+function releaseSnapshotLoading() { snapshotLoading.value = false; }
+defineExpose({ receiveEvent, finishDelegatedRun, applySnapshot, releaseSnapshotLoading });
 
 async function selectSkill(name: string) {
   const instance = sender;
@@ -283,24 +379,42 @@ function cancelEdit() {
   editingText.value = "";
 }
 
+async function retryMessage(item: AgentMessage) {
+  const index = messages.value.findIndex(message => message.id === item.id);
+  const source = messages.value.slice(0, index).findLast(message => message.role === "user");
+  if (!source) return;
+  if (source.entryId) { void sendMessage(source); return; }
+  // Requests rejected before acknowledgement have no persisted branch to resend.
+  draftAttachments.value = recoverDraft(draftAttachments.value, source.attachments ?? []);
+  await fillPrompt(source.content);
+  messages.value = messages.value.filter(message => message !== source && message !== item);
+  void sendMessage();
+}
+
 async function deleteMessage(item: AgentMessage) {
   if (locked.value || remoteRunning.value || item.streaming || item.report) return;
   deletingId.value = item.id;
   try {
     if (item.entryId || item.replyTo) {
-      if (!directory || !props.sessionFile) throw new Error("请重新打开对话后再删除");
+      if (!directory.value || !props.sessionFile) throw new Error("请重新打开对话后再删除");
       const { data } = await axios.delete<{ code: number; data: AgentConversation; message?: string }>("/api/agent/message", {
         data: {
-          directory, sessionFile: props.sessionFile,
+          directory: directory.value, sessionFile: props.sessionFile,
           ...(item.replyTo ? { replyTo: item.replyTo } : { entryIds: [item.entryId!] }),
         },
         headers: { "x-linglonglabVideo-workspace": "1" },
       });
       if (data.code !== 200) throw new Error(data.message || "删除消息失败");
+      if (!Array.isArray(data.data?.messages)) throw new Error("服务端未返回更新后的对话，请重新载入会话");
+      messages.value = data.data.messages.map(message => ({ ...message }));
+      researchQuestion.value = data.data.researchQuestion ?? null;
       stats.value = data.data.stats;
       contextUsage.value = data.data.contextUsage;
+    } else messages.value = messages.value.filter(message => message.id !== item.id);
+    if (editingId.value && !messages.value.some(message => message.id === editingId.value)) {
+      editingId.value = undefined;
+      editingText.value = "";
     }
-    messages.value = messages.value.filter(message => message.id !== item.id);
   } catch (error) {
     const message = axios.isAxiosError<{ message?: string }>(error) ? error.response?.data?.message : undefined;
     ElMessage.error(message || (error instanceof Error ? error.message : "删除消息失败"));
@@ -333,8 +447,27 @@ function stopSenderResize(event: PointerEvent) {
   if (senderResize?.pointerId === event.pointerId) senderResize = undefined;
 }
 
-function stopMessage() {
-  controller?.abort();
+async function cancelRun(scope: AgentRunScope | undefined) {
+  const payload = cancelPayload(scope);
+  if (!payload) throw new Error("未取得运行标识，请重新打开对话后停止生成");
+  const response = await fetch("/api/agent/cancel", {
+    method: "POST", headers: { "Content-Type": "application/json", "x-linglonglabVideo-workspace": "1" },
+    body: JSON.stringify(payload), keepalive: true,
+  });
+  if (!response.ok) throw new Error("服务端停止请求失败，请重新打开对话后重试");
+}
+
+async function stopMessage() {
+  const scope = activeRun ?? (directory.value && props.sessionFile ? { directory: directory.value, sessionFile: props.sessionFile, runId: currentRunId.value } : undefined);
+  if (!scope?.runId && controller && !remoteRunning.value) { controller.abort(); stream.finish(); progress.value = ""; return; }
+  try {
+    await cancelRun(scope);
+    controller?.abort();
+    remoteRunning.value = false;
+    stream.finish();
+    progress.value = "";
+    activeRun = undefined;
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : "停止生成失败"); }
 }
 
 async function uploadAttachments(attachments: AgentAttachment[], directory: string, signal: AbortSignal) {
@@ -357,21 +490,22 @@ async function uploadAttachments(attachments: AgentAttachment[], directory: stri
   }
 }
 
-async function sendCanvasResult(event: Extract<AgentEvent, { type: "canvasCall" }>, canvasContext: CanvasContext | undefined, signal: AbortSignal) {
-  let payload: { result?: unknown; error?: string };
-  try {
+async function sendCanvasResult(event: Extract<AgentEvent, { type: "canvasCall" }>, canvasContext: CanvasContext | undefined, signal: AbortSignal, requestDirectory: string) {
+  let payload: { result?: unknown; error?: string } = canvasResults.get(event.callId) ?? {};
+  if (!canvasResults.has(event.callId)) try {
     if (!canvasContext) throw new Error("当前页面没有激活的画布");
     const result = await canvasContext.call(event, signal);
     payload = { result: JSON.parse(JSON.stringify(result ?? null)) };
   } catch (error) {
     payload = { error: (error instanceof Error && error.message ? error.message : "画布操作失败").slice(0, 8000) };
   }
+  canvasResults.set(event.callId, payload);
   const cancelled = signal.aborted;
   if (cancelled) payload = { error: "画布操作已取消" };
   const response = await fetch("/api/agent/canvasResult", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-linglonglabVideo-workspace": "1" },
-    body: JSON.stringify({ directory, callId: event.callId, ...payload }),
+    body: JSON.stringify({ directory: requestDirectory, callId: event.callId, ...payload }),
     keepalive: cancelled,
     signal: cancelled ? AbortSignal.timeout(5000) : signal,
   });
@@ -379,27 +513,37 @@ async function sendCanvasResult(event: Extract<AgentEvent, { type: "canvasCall" 
     const error = await response.json().catch(() => null);
     throw new Error(error?.message || "画布操作结果回传失败");
   }
+
 }
 
-async function sendMessage(source?: AgentMessage) {
+
+async function sendMessage(source?: AgentMessage, researchResume?: { id: string; prompt: string }) {
   const instance = sender;
-  const prompt = (source ? editingId.value === source.id ? editingText.value : source.content : instance?.getText())?.trim() ?? "";
-  const attachments = reactive((source ? source.attachments ?? [] : draftAttachments.value).map(item => ({ ...item })));
-  if (!source && editingId.value !== undefined) return;
+  const text = researchResume?.prompt ?? ((source ? editingId.value === source.id ? editingText.value : source.content : instance?.getText())?.trim() ?? "");
+  const attachments = reactive((researchResume ? [] : source ? source.attachments ?? [] : draftAttachments.value).map(item => ({ ...item })));
+  const prompt = messagePrompt(text, attachments.length);
+  if (snapshotLoading.value || (!source && editingId.value !== undefined)) return;
   const resendIndex = source ? messages.value.findIndex(item => item.id === source.id) : -1;
   if (source && (source.role !== "user" || resendIndex < 0)) return;
-  const resendFrom = source ? source.entryId ?? messages.value.slice(resendIndex + 1).find(item => item.role === "user" && item.entryId)?.entryId : undefined;
+  const resendFrom = source ? resendMessageId(source) : undefined;
+  if (!source && (busy.value || remoteRunning.value)) { await sendInstruction(text); return; }
   if (locked.value || !instance || (!prompt && !attachments.length)) return;
   const model = selectedModelChoice.value;
-  if (!directory) return ElMessage.warning("请先打开项目");
+  const requestDirectory = directory.value;
+  if (!requestDirectory) return ElMessage.warning("请先打开项目");
   if (!model) return ElMessage.warning("请先选择模型");
+  const warnings = attachmentWarnings(model.providerId, attachments);
+  if (warnings.length) ElMessage.warning({ message: warnings.join(' '), duration: 10000 });
 
   const requestController = new AbortController();
+  let requestRun: AgentRunScope | undefined;
   const canvasContext = createCanvasContext?.();
   controller = requestController;
   busy.value = true;
   compacting.value = false;
-  instance.disable();
+  progress.value = "正在准备请求…";
+  if (source) source.error = undefined;
+  instance.enable();
   const reply = reactive<AgentMessage>({ id: crypto.randomUUID(), role: "assistant", content: "", parts: [], streaming: true });
   const userMessage = reactive<AgentMessage>({ id: crypto.randomUUID(), role: "user", content: prompt, attachments });
   let ownsStream = !remoteRunning.value;
@@ -407,43 +551,43 @@ async function sendMessage(source?: AgentMessage) {
   if (!source) {
     messages.value.push(userMessage);
     if (ownsStream) messages.value.push(reply);
-    draftAttachments.value = [];
+    if (!researchResume) draftAttachments.value = [];
   }
   let accepted = false;
   if (ownsStream) stream.begin(reply);
-  const handledCanvasCalls = new Set<string>();
-  const pendingQuestions = new Map<string, string>();
-  const activeChildFiles = new Set<string>();
+  canvasResults.clear();
+  lastSequence = 0;
   const finishStats = anonymousData.startAgent();
   try {
-    if (!source) await instance.reset();
+    if (!source && !researchResume) await instance.reset();
     requestController.signal.throwIfAborted();
-    await uploadAttachments(attachments, directory, requestController.signal);
+    await uploadAttachments(attachments, requestDirectory, requestController.signal);
+    await canvasContext?.prepare?.();
+    requestController.signal.throwIfAborted();
     const response = await fetch("/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-linglonglabVideo-workspace": "1" },
-      body: JSON.stringify({ prompt, attachments: attachments.map(({ name, path, mimeType }) => ({ name, path, mimeType })), directory, providerId: model.providerId, modelId: model.modelId, thinkingLevel: reasoningEffort.value || undefined, sessionFile: props.sessionFile, resendFrom, canvas: canvasContext ? { id: canvasContext.id, tools: canvasContext.tools } : undefined }),
+      body: JSON.stringify({ prompt, researchQuestionId: researchResume?.id, attachments: attachments.map(({ name, path, mimeType }) => ({ name, path, mimeType })), directory: requestDirectory, providerId: model.providerId, modelId: model.modelId, thinkingLevel: thinkingLevels.value.length ? thinkingLevel.value : undefined, sessionFile: props.sessionFile, resendFrom, canvas: canvasContext ? { id: canvasContext.id, tools: canvasContext.tools } : undefined }),
       signal: requestController.signal,
     });
     for await (const event of readAgentEvents(response, requestController.signal)) {
       // 子任务复用发起委派时的画布与取消通道，界面切换不改变工具执行目标。
       let toolEvent: AgentEvent = event;
-      let scope = "";
-      while (toolEvent.type === "subAgentEvent") {
-        if (toolEvent.event.type === "done" || toolEvent.event.type === "error") activeChildFiles.delete(toolEvent.file);
-        else activeChildFiles.add(toolEvent.file);
-        scope += `${toolEvent.file}/`;
-        toolEvent = toolEvent.event;
-      }
-      if (toolEvent.type === "question") pendingQuestions.set(`${scope}${toolEvent.toolCallId}`, toolEvent.callId);
-      if (toolEvent.type === "tool" && toolEvent.tool.status !== "running") pendingQuestions.delete(`${scope}${toolEvent.tool.id}`);
+      while (toolEvent.type === "subAgentEvent") toolEvent = toolEvent.event;
+
       if (toolEvent.type === "canvasCall") {
-        if (handledCanvasCalls.has(toolEvent.callId)) throw new Error("收到重复的画布调用");
-        handledCanvasCalls.add(toolEvent.callId);
-        await sendCanvasResult(toolEvent, canvasContext, requestController.signal);
+        await sendCanvasResult(toolEvent, canvasContext, requestController.signal, requestDirectory);
         continue;
       }
       switch (event.type) {
+        case "session":
+          if (!researchResume) researchQuestion.value = null;
+          requestRun = { directory: requestDirectory, sessionFile: event.file, runId: event.runId };
+          activeRun = requestRun;
+          remoteRunning.value = true;
+          currentRunId.value = event.runId;
+          applyEvent(event);
+          break;
         case "accepted":
           forwarded = true;
           if (ownsStream) {
@@ -452,11 +596,13 @@ async function sendMessage(source?: AgentMessage) {
           }
           break;
         case "userMessage":
+          if (accepted) { applyEvent(event); break; }
           if (!ownsStream) {
             messages.value.push(reply);
             stream.begin(reply);
           }
           userMessage.entryId = event.id;
+          if (event.attachments) userMessage.attachments = event.attachments;
           reply.replyTo = event.id;
           if (source && !accepted) {
             messages.value.splice(resendIndex, messages.value.length - resendIndex, userMessage, reply);
@@ -480,51 +626,80 @@ async function sendMessage(source?: AgentMessage) {
     finishStats("success");
     emit("sent", prompt || attachments[0]?.name || t("新对话", "New conversation"));
   } catch (error) {
-    finishStats(requestController.signal.aborted ? "cancelled" : "failed");
+    if (requestRun && remoteRunning.value && !requestController.signal.aborted) {
+      progress.value = t("连接中断，正在恢复…", "Connection lost, reconnecting…");
+      await observeRun(requestRun, canvasContext, requestController.signal);
+      finishStats("success");
+      return;
+    }
+    if (requestController.signal.aborted) { finishStats("cancelled"); return; }
+    finishStats("failed");
     const responseMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
     const message = requestController.signal.aborted ? "已停止生成" : responseMessage || (error instanceof Error ? error.message : "发送失败，请重试");
-    if ((source && !accepted) || !ownsStream) { userMessage.error = message; ElMessage.error(message); }
+    if ((source && !accepted) || !ownsStream) { (source ?? userMessage).error = message; ElMessage.error(message); }
     else reply.error = message;
+    if (!source && !accepted) {
+      draftAttachments.value = recoverDraft(draftAttachments.value, attachments);
+      if (!requestController.signal.aborted && !researchResume) await instance.reset({ clearHistory: false, chatNode: text.split("\n").map(text => [{ type: "Write", text }]) });
+    }
     if (ownsStream && props.initialSession?.parentFile && props.sessionFile) {
       emit("event", { type: "subAgentEvent", file: props.sessionFile, event: { type: "error", message } });
     }
   } finally {
-    for (const file of activeChildFiles) emit("event", { type: "subAgentEvent", file, event: { type: "error", message: "委派连接已结束，请重新打开子会话查看结果" } });
-    // ACT: Bun 的流断开事件可能不触发；主动结束仍在等待的提问，不依赖断开通知。
-    for (const callId of pendingQuestions.values()) {
-      void fetch("/api/agent/answer", {
-        method: "POST", headers: { "Content-Type": "application/json", "x-linglonglabVideo-workspace": "1" },
-        body: JSON.stringify({ directory, callId, cancelled: true }), keepalive: true,
-      }).catch(() => {});
-    }
-    if (ownsStream && !forwarded) stream.finish();
+    if (ownsStream && !forwarded && !remoteRunning.value) stream.finish();
     compacting.value = false;
+    progress.value = "";
     busy.value = false;
     controller = undefined;
+    if (!remoteRunning.value) activeRun = undefined;
   }
 }
 
+function addAttachments(files: File[]) {
+  if (!canAddAttachments.value) return;
+  const result = selectAttachments(files, draftAttachments.value.length);
+  for (const { file, mimeType } of result.accepted) draftAttachments.value.push({ name: file.name, path: '', mimeType, file });
+  if (result.errors.length) ElMessage.warning(result.errors.join('；'));
+}
+
+function attachWebsiteAsset(event: Event) {
+  const detail = (event as CustomEvent<{ directory: string; attachment: AgentAttachment; accepted: boolean }>).detail;
+  if (detail.accepted || detail.directory !== directory.value || !canAddAttachments.value) return;
+  if (!draftAttachments.value.some(item => item.path === detail.attachment.path)) draftAttachments.value.push(detail.attachment);
+  detail.accepted = true;
+}
+watch(() => props.active, (active, _previous, onCleanup) => {
+  if (!active) return;
+  window.addEventListener("linglonglabVideo:attach-website-asset", attachWebsiteAsset);
+  onCleanup(() => window.removeEventListener("linglonglabVideo:attach-website-asset", attachWebsiteAsset));
+}, { immediate: true });
+function pickAttachments(event: Event) {
+  const input = event.target as HTMLInputElement;
+  addAttachments(Array.from(input.files ?? []));
+  input.value = ''; // Selecting the same file again must trigger change.
+}
+function dragAttachments(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault(); event.stopPropagation();
+  event.dataTransfer.dropEffect = canAddAttachments.value ? 'copy' : 'none';
+  draggingAttachments.value = canAddAttachments.value;
+}
+function leaveAttachments(event: DragEvent) {
+  if (event.relatedTarget instanceof Node && (event.currentTarget as HTMLElement).contains(event.relatedTarget)) return;
+  draggingAttachments.value = false;
+}
+function dropAttachments(event: DragEvent) {
+  draggingAttachments.value = false;
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault(); event.stopPropagation();
+  addAttachments(Array.from(event.dataTransfer.files));
+}
 function pasteAttachments(event: ClipboardEvent) {
   const files = Array.from(event.clipboardData?.files ?? []);
   if (!files.length) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  if (locked.value || editingId.value !== undefined) return;
-  for (const file of files) {
-    if (!/^(image|video)\//.test(file.type)) {
-      ElMessage.warning("只支持图片和视频文件");
-      continue;
-    }
-    if (!file.size || file.size > 100 * 1024 * 1024) {
-      ElMessage.warning("附件不能为空且不能超过 100 MB");
-      continue;
-    }
-    if (draftAttachments.value.length >= 20) {
-      ElMessage.warning("每条消息最多添加 20 个附件");
-      break;
-    }
-    draftAttachments.value.push({ name: file.name, path: "", mimeType: file.type, file });
-  }
+  addAttachments(files);
 }
 
 watch(senderElement, (element, _previous, onCleanup) => {
@@ -537,7 +712,7 @@ watch(senderElement, (element, _previous, onCleanup) => {
     keyboardWrapFun: event => event.key === "Enter" && event.shiftKey && !event.isComposing,
   });
   sender = instance;
-  if (!props.active || locked.value || editingId.value !== undefined) instance.disable();
+  if (!props.active || inputLocked.value || editingId.value !== undefined) instance.disable();
   instance.bus.on("agentConversation", xSender.EventSet.EVENT_COMMON_SEND, () => void sendMessage());
   instance.bus.on("agentConversation", xSender.EventSet.EVENT_COMMON_CHANGE, () => {
     skillQuery.value = /^\/([^\s/]*)$/.exec(instance.getText())?.[1];
@@ -556,10 +731,88 @@ watch(senderElement, (element, _previous, onCleanup) => {
   });
 });
 
+async function sendInstruction(prompt: string) {
+  const scope = activeRun ?? (directory.value && props.sessionFile ? { directory: directory.value, sessionFile: props.sessionFile, runId: currentRunId.value } : undefined);
+  if (!scope || !prompt || controlling.value || props.disabled) return;
+  if (draftAttachments.value.length) { ElMessage.warning(t("追加指令请使用文字，素材可在本次执行结束后发送", "Use text for live instructions; send attachments after this run.")); return; }
+  controlling.value = true;
+  try {
+    const { data } = await axios.post("/api/agent/control", { ...scope, action: streamingBehavior.value, prompt }, { headers: { "x-linglonglabVideo-workspace": "1" } });
+    if (data.code !== 200) throw new Error(data.message || t("追加失败", "Instruction failed"));
+    await sender?.reset();
+    ElMessage.success(streamingBehavior.value === "steer" ? t("纠正指令已提交", "Steering instruction sent") : t("已排队，完成后继续", "Queued for the next turn"));
+  } catch (error) { ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.message || error.message : String(error)); }
+  finally { controlling.value = false; }
+}
+
+async function observeRun(scope: AgentRunScope, canvasContext: CanvasContext | undefined, signal: AbortSignal) {
+  let retries = 0;
+  while (!signal.aborted && remoteRunning.value) {
+    try {
+      const response = await fetch(runEventURL(scope, lastSequence), { headers: { "x-linglonglabVideo-workspace": "1" }, signal });
+      if (!response.ok && [400, 401, 403, 422].includes(response.status)) {
+        const failure = await response.json().catch(() => null);
+        applyEvent({ type: "error", message: failure?.message || failure?.detail?.message || t("无法恢复运行，请重新打开对话", "Unable to resume this run. Reopen the conversation.") });
+        return;
+      }
+      // Missing or terminated runs require reloading their final database snapshot.
+      if (response.status === 404 || response.status === 409 || response.status === 410) {
+        const { data } = await axios.get("/api/agent/get", { params: { directory: scope.directory, sessionFile: scope.sessionFile }, headers: { "x-linglonglabVideo-workspace": "1" }, signal });
+        if (data.code !== 200) throw new Error(data.message || "读取对话失败");
+        stream.finish();
+        messages.value = data.data.messages;
+        stats.value = data.data.stats;
+        contextUsage.value = data.data.contextUsage;
+        remoteRunning.value = !!data.data.running;
+        lastSequence = data.data.lastSequence ?? lastSequence;
+        if (!remoteRunning.value) { progress.value = ""; return; }
+        throw new Error("运行正在恢复");
+      }
+      for await (const event of readAgentEvents(response, signal)) {
+        retries = 0;
+        if (event.sequence !== undefined && event.sequence <= lastSequence) continue;
+        let toolEvent = event;
+        while (toolEvent.type === "subAgentEvent") toolEvent = toolEvent.event;
+        if (toolEvent.type === "canvasCall") {
+          await sendCanvasResult(toolEvent, canvasContext, signal, scope.directory);
+          lastSequence = Math.max(lastSequence, event.sequence ?? 0);
+        } else applyEvent(event);
+      }
+    } catch (error) {
+      if (signal.aborted) return;
+      if (axios.isAxiosError(error) && error.response && error.response.status >= 400 && error.response.status < 500) {
+        applyEvent({ type: "error", message: error.response.data?.message || error.message });
+        return;
+      }
+      progress.value = t("连接中断，正在恢复…", "Connection lost, reconnecting…");
+      await new Promise<void>(resolve => {
+        const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
+        const timer = setTimeout(finish, Math.min(10000, 1000 * 2 ** Math.min(retries++, 4)));
+        signal.addEventListener("abort", finish, { once: true });
+      });
+    }
+  }
+}
+
+onMounted(async () => {
+  void axios.get("/api/agent/capabilities", { params: { directory: directory.value }, headers: { "x-linglonglabVideo-workspace": "1" } }).then(({ data }) => {
+    capabilityModels.value = data.data?.models ?? [];
+    capabilityBudget.value = data.data?.budgets;
+  }).catch(() => { /* Sending remains available when optional capabilities cannot be read. */ });
+  if (!remoteRunning.value || !directory.value || !props.sessionFile || controller || parentObserved.value) return;
+  const scope = { directory: directory.value, sessionFile: props.sessionFile, runId: currentRunId.value };
+  activeRun = scope;
+  const observer = new AbortController();
+  controller = observer;
+  await observeRun(scope, createCanvasContext?.(), observer.signal);
+  if (controller === observer) controller = undefined;
+});
+onBeforeUnmount(() => controller?.abort());
+
 watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMessage && props.active && !locked.value && !!senderElement.value && !!createCanvasContext?.(), async ready => {
   const message = workspaceStore.pendingAgentMessage;
   const instance = sender;
-  if (!ready || !message || !instance || message.directory !== directory) return;
+  if (!ready || !message || !instance || message.directory !== directory.value) return;
   workspaceStore.pendingAgentMessage = null;
   await fillPrompt(message.prompt);
   if (sender === instance && props.active) void sendMessage();
@@ -823,6 +1076,9 @@ watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMe
       border-color: var(--el-color-primary-light-5);
     }
 
+    &.draggingAttachments { outline: 2px dashed var(--el-color-primary); outline-offset: 2px; }
+    .attachmentDropHint { padding: 8px 12px; font-size: 12px; color: var(--el-color-primary); pointer-events: none; }
+
     .senderResizeHandle {
       position: absolute;
       z-index: 12;
@@ -855,17 +1111,21 @@ watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMe
       display: flex;
       justify-content: flex-end;
       align-items: center;
-      gap: 12px;
+      gap: 6px;
+      flex-wrap: wrap;
       padding: 2px 8px 6px;
 
       > .el-button {
         margin-left: 0;
       }
 
+      .thinkingSelect { width: 102px; flex-shrink: 0; }
+      .runningAction { width: 110px; flex-shrink: 0; }
       .modelPopover {
         flex: 1;
         margin-right: auto;
       }
+      .uploadButton { flex-shrink: 0; gap: 4px; }
 
       .contextButton {
         width: 24px;

@@ -3,6 +3,32 @@ import type useWorkspaceFiles from "@/lib/workspaceFiles";
 
 type CanvasAssetNode = { id: string; data?: unknown };
 
+export function getClipboardNodeOwner(node: { id?: string; type?: string; data?: { textPath?: unknown } }) {
+  // New snapshots identify the owning node explicitly. Old text snapshots have a
+  // canonical content path; arbitrary media references do not prove ownership.
+  const legacy = /^(?:remote-)?textNode$/.test(node.type ?? "") && typeof node.data?.textPath === "string"
+    ? /^assets\/([^/]+)\/content\.md$/.exec(node.data.textPath.replaceAll("\\", "/"))?.[1] : undefined;
+  const id = node.id ?? legacy;
+  return id && !/[<>:"/\\|?*\x00-\x1f]/.test(id) && !/[. ]$/.test(id)
+    && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(id) ? id : undefined;
+}
+
+export function remapNodeOwnedPaths<T>(data: T, ids: ReadonlyMap<string, string>): T {
+  function rewrite(value: unknown): unknown {
+    if (typeof value === "string") {
+      // Only exact workspace-relative node-owned paths; never rewrite URLs or shared generated assets.
+      const path = value.replaceAll("\\", "/");
+      const match = /^assets\/([^/]+)\/(.+)$/.exec(path);
+      if (match && !match[2]!.split("/").includes("..") && ids.has(match[1]!)) return `assets/${ids.get(match[1]!)}${path.slice(7 + match[1]!.length)}`;
+      return value;
+    }
+    if (Array.isArray(value)) return value.map(rewrite);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rewrite(item)]));
+    return value;
+  }
+  return rewrite(data) as T;
+}
+
 export function getCanvasAssetDirectories(nodes: CanvasAssetNode[], retainedNodes: CanvasAssetNode[]) {
   const retained = new Set(retainedNodes.map(node => node.id.toLowerCase()));
   const pending = retainedNodes.map(node => node.data);

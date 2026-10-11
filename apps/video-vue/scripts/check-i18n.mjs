@@ -1,10 +1,11 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { withoutInlineTranslations } from './i18n-audit.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoots = [join(root, "apps/web/src"), join(root, "packages")];
-const catalogue = ["apps/web/src/i18n.ts", "apps/web/src/i18nCatalog.ts"]
+const catalogue = ["apps/web/src/i18n.ts", "apps/web/src/i18nCatalog.ts", "apps/web/src/assetUiLocale.ts"]
   .map(file => readFileSync(join(root, file), "utf8"))
   .join("\n");
 const translatedPhrases = [...catalogue.matchAll(/\[\s*["'`]([^"'`]*[\u3400-\u9fff][^"'`]*)["'`]\s*,/gu)]
@@ -28,7 +29,7 @@ for (const file of sourceRoots.flatMap(vueFiles)) {
   const template = source.match(/<template(?:\s[^>]*)?>([\s\S]*?)<\/template>/u)?.[1] ?? "";
   let inComment = false;
   template.split("\n").forEach((rawLine, index) => {
-    let line = rawLine;
+    let line = withoutInlineTranslations(rawLine);
     if (line.includes("<!--")) inComment = true;
     if (inComment) {
       if (line.includes("-->")) inComment = false;

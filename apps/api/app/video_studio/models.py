@@ -20,6 +20,9 @@ class VideoNode(BaseModel):
     type: str = Field(min_length=1, max_length=80)
     position: Position = Field(default_factory=Position)
     data: dict[str, Any] = Field(default_factory=dict)
+    # Opaque Vue Flow layout/display fields are persisted, not interpreted by the Agent.
+    vue_type: str | None = Field(default=None, max_length=80)
+    vue_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class VideoEdge(BaseModel):
@@ -28,6 +31,7 @@ class VideoEdge(BaseModel):
     target: str = Field(min_length=1, max_length=128)
     source_handle: str | None = Field(default=None, max_length=128)
     target_handle: str | None = Field(default=None, max_length=128)
+    vue_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class CanvasDocument(BaseModel):
@@ -149,6 +153,12 @@ class AgentMessage(BaseModel):
     id: str
     role: Literal["user", "assistant"]
     content: str
+    attachments: list[dict[str, str]] = Field(default_factory=list, max_length=20)
+    # Server-authored, validated draft; optional for existing conversations.
+    production_draft: dict[str, Any] | None = None
+    pi_entry_id: str | None = None  # UI identity maps to an actual SDK journal entry.
+    parts: list[dict[str, Any]] = Field(default_factory=list)
+    report: dict[str, Any] | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -157,13 +167,30 @@ class AgentConversation(BaseModel):
     name: str
     provider_id: str | None = Field(default=None, max_length=96)
     model_id: str | None = Field(default=None, max_length=256)
+    thinking_level: Literal['off', 'low', 'medium', 'high'] = 'off'
+    stats: dict[str, Any] | None = None
+    context_usage: dict[str, Any] | None = None
+    parent_file: str | None = None
+    sub_agents: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
     messages: list[AgentMessage] = Field(default_factory=list, max_length=1_000)
     research_history: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
+    task_state: dict[str, Any] = Field(default_factory=dict)
+    pi_session_file: str | None = None
+    pi_source_ids: list[str] = Field(default_factory=list)
+    pi_deleted_entries: list[str] = Field(default_factory=list)
+    research_question: dict[str, Any] | None = None
+    research_decisions: list[dict[str, Any]] = Field(default_factory=list, max_length=30)
+    run_id: str | None = None
+    run_status: Literal['idle', 'running', 'completed', 'failed', 'cancelled'] = 'idle'
+    run_error: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
 
 class AgentRequest(BaseModel):
+    thinking_level: Literal['off', 'low', 'medium', 'high'] | None = None
+    streaming_behavior: Literal['steer', 'followUp'] = 'steer'
+    research_question_id: str | None = Field(default=None, pattern=r'^[a-f0-9]{32}$')
     prompt: str = Field(min_length=1, max_length=20_000)
     conversation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     agent_id: str | None = Field(default=None, max_length=80)
@@ -219,6 +246,7 @@ class MediaJobCreate(BaseModel):
     duration: int | None = Field(default=None, ge=1, le=60)
     first_frame_path: str | None = Field(default=None, max_length=1_024)
     last_frame_path: str | None = Field(default=None, max_length=1_024)
+    input_revisions: dict[str, str] = Field(default_factory=dict, max_length=2)
     output_directory: str = Field(default="generated", min_length=1, max_length=1_024)
     resolution: str | None = Field(default=None, max_length=40)
     generate_audio: bool | None = None

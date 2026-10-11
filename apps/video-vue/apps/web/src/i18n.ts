@@ -1,6 +1,7 @@
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import { uiSettings, updateUiSettings } from "@/stores/settings";
 import { dynamicUiTranslations, extendedUiPhraseEntries, nodeUiPhraseEntries, uiPhraseEntries } from "@/i18nCatalog";
+import { assetUiEnglish } from "@/assetUiLocale";
 
 export type InterfaceLanguage = "zh-CN" | "en";
 
@@ -207,7 +208,7 @@ function translate(value: string) {
   if (shortcut) return `${leading}${phrases.get(shortcut[1]!) ?? shortcut[1]} shortcut${trailing}`;
   const shortcutConflict = source.match(/^与「(.+)」重复，请换一个快捷键。$/u);
   if (shortcutConflict) return `${leading}Conflicts with “${phrases.get(shortcutConflict[1]!) ?? shortcutConflict[1]}”. Choose a different shortcut.${trailing}`;
-  let result = source;
+  let result = assetUiEnglish(source);
   for (const [pattern, replacement] of dynamicUiTranslations) result = result.replace(pattern, replacement);
   return `${leading}${result}${trailing}`;
 }

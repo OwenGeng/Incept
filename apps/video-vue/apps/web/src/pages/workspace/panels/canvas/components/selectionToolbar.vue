@@ -1,5 +1,6 @@
 <template>
   <el-card
+    ref="toolbar"
     v-if="visible"
     class="selectionToolbar nodrag nopan nowheel"
     shadow="never"
@@ -15,17 +16,28 @@
       <el-button text :icon="IconCopyPlus" :disabled="busy || disabled" @click="operate('duplicate')">创建副本</el-button>
       <el-button text :icon="IconBoxMultiple" :disabled="busy || disabled" @click="operate('group')">打组</el-button>
       <el-button text :icon="IconDeselect" :disabled="busy || disabled || !hasGroup" @click="operate('ungroup')">解组</el-button>
+      <el-dropdown :disabled="busy || disabled || arrangementRoots.length < 2" @command="arrange">
+        <el-button text :icon="IconLayoutGrid" :disabled="busy || disabled || arrangementRoots.length < 2">排列</el-button>
+        <template #dropdown><el-dropdown-menu>
+          <el-dropdown-item command="horizontal">水平排列</el-dropdown-item>
+          <el-dropdown-item command="vertical">垂直排列</el-dropdown-item>
+          <el-dropdown-item command="grid">网格排列</el-dropdown-item>
+        </el-dropdown-menu></template>
+      </el-dropdown>
     </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { getRectOfNodes, useVueFlow, type GraphNode, type Node, type XYPosition } from "@vue-flow/core";
-import { ElButton, ElCard, ElMessage } from "element-plus";
-import { IconCopyPlus, IconBoxMultiple, IconDeselect } from "@tabler/icons-vue";
+import { ElButton, ElCard, ElDropdown, ElDropdownMenu, ElDropdownItem, ElMessage } from "element-plus";
+import { IconCopyPlus, IconBoxMultiple, IconDeselect, IconLayoutGrid } from "@tabler/icons-vue";
 import { useNodeEvent } from "@linglonglab/video-nodes-scaffold/nodeEvent";
 import { finishGroupDrag, getSelectionRoots, getSelectionTree } from "../selectionNodes";
+import { arrangeSelection, clampSelectionToolbar, type Arrangement } from "../selectionLayout";
+import { remapNodeOwnedPaths } from "@/pages/workspace/canvasFile";
+import type useWorkspaceFiles from "@/lib/workspaceFiles";
 
 const props = defineProps<{
   batchHistory: (action: () => Promise<void>) => Promise<void>;
@@ -34,14 +46,43 @@ const props = defineProps<{
 }>();
 const flow = useVueFlow();
 const busy = ref(false);
+const getFiles = inject<() => ReturnType<typeof useWorkspaceFiles>>("workspaceFiles");
+const arrangementRoots = computed(() => flow.getSelectedNodes.value.filter(node => !node.parentNode));
+const toolbar = ref<InstanceType<typeof ElCard>>();
+const toolbarSize = ref({ width: 340, height: 38 });
+let toolbarObserver: ResizeObserver | undefined;
+watch(() => toolbar.value?.$el as HTMLElement | undefined, element => {
+  toolbarObserver?.disconnect();
+  if (!element) return;
+  toolbarObserver = new ResizeObserver(([entry]) => {
+    if (entry) toolbarSize.value = { width: entry.target.getBoundingClientRect().width, height: entry.target.getBoundingClientRect().height };
+  });
+  toolbarObserver.observe(element);
+}, { flush: "post" });
+onBeforeUnmount(() => toolbarObserver?.disconnect());
 const hasGroup = computed(() => flow.getSelectedNodes.value.some(node => node.type === "canvasGroup"));
 const visible = computed(() => !props.disabled && !flow.userSelectionActive.value && flow.getSelectedNodes.value.length > 0
   && (flow.nodesSelectionActive.value || hasGroup.value));
 const toolbarStyle = computed(() => {
   const bounds = getRectOfNodes(flow.getSelectedNodes.value);
   const { x, y, zoom } = flow.viewport.value;
-  return { left: `${x + (bounds.x + bounds.width / 2) * zoom}px`, top: `${y + bounds.y * zoom - 12 - (hasGroup.value ? 30 * zoom : 0)}px` };
+  const position = clampSelectionToolbar(x + (bounds.x + bounds.width / 2) * zoom, y + bounds.y * zoom - 12 - (hasGroup.value ? 30 * zoom : 0), flow.dimensions.value.width, flow.dimensions.value.height, toolbarSize.value.width, toolbarSize.value.height);
+  return { left: `${position.left}px`, top: `${position.top}px`, maxWidth: `${Math.max(0, flow.dimensions.value.width - 16)}px` };
 });
+
+async function arrange(command: Arrangement) {
+  if (!["horizontal", "vertical", "grid"].includes(command) || busy.value || props.disabled) return;
+  const roots = [...arrangementRoots.value];
+  if (roots.length < 2) return;
+  busy.value = true;
+  try {
+    await props.batchHistory(async () => {
+      props.getSignal().throwIfAborted();
+      for (const [id, position] of arrangeSelection(roots, command)) flow.updateNode(id, { position });
+    });
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : "排列失败"); }
+  finally { busy.value = false; }
+}
 
 async function duplicateNodes(selection: GraphNode[], signal: AbortSignal, withEdges = true, positions?: Map<string, XYPosition>) {
   const nodes = getSelectionTree(selection, flow.getNodes.value);
@@ -52,31 +93,52 @@ async function duplicateNodes(selection: GraphNode[], signal: AbortSignal, withE
   const snapshot = flow.toObject();
   const savedNodes = new Map(snapshot.nodes.map(node => [node.id, node]));
   const incomingEdges = withEdges ? snapshot.edges.filter(edge => ids.has(edge.target)) : [];
-  const copies = await Promise.all(nodes.map(async node => {
-    const patch = await useNodeEvent(node.id, flow).emit("copy");
+  if (!getFiles) throw new Error("工作区文件接口不可用");
+  const files = getFiles();
+  const assets = await files.list("assets").catch(error => {
+    if (error?.response?.status === 404) return { entries: [] };
+    throw error;
+  });
+  const ownedDirectories = new Set(assets.entries.filter(entry => entry.type === "directory").map(entry => entry.name));
+  const created: string[] = [];
+  const copies: Node[] = [];
+  try {
+    for (const node of nodes) {
+      const patch = await useNodeEvent(node.id, flow).emit("copy");
+      signal.throwIfAborted();
+      const saved = savedNodes.get(node.id)!;
+      const copy = JSON.parse(JSON.stringify({ ...saved, data: { ...saved.data, ...patch } })) as Node;
+      Reflect.deleteProperty(copy, "initialized");
+      copy.id = ids.get(node.id)!;
+      copy.parentNode = ids.get(saved.parentNode ?? "") ?? saved.parentNode;
+      copy.position = positions ? { ...positions.get(node.id)! }
+        : { x: saved.position.x + (rootsIds.has(node.id) ? bounds.width + 64 : 0), y: saved.position.y };
+      copy.data = { ...copy.data, label: `${copy.data?.label || "未命名节点"} - 副本` };
+      if (ownedDirectories.has(node.id)) {
+        const target = `assets/${copy.id}`;
+        await files.copy(`assets/${node.id}`, target);
+        created.push(target);
+      }
+      copy.data = remapNodeOwnedPaths(copy.data, ids);
+      copies.push(copy);
+    }
     signal.throwIfAborted();
-    const saved = savedNodes.get(node.id)!;
-    const copy = JSON.parse(JSON.stringify({ ...saved, data: { ...saved.data, ...patch } })) as Node;
-    Reflect.deleteProperty(copy, "initialized");
-    copy.id = ids.get(node.id)!;
-    copy.parentNode = ids.get(saved.parentNode ?? "") ?? saved.parentNode;
-    copy.position = positions ? { ...positions.get(node.id)! }
-      : { x: saved.position.x + (rootsIds.has(node.id) ? bounds.width + 64 : 0), y: saved.position.y };
-    copy.data = { ...copy.data, label: `${copy.data?.label || "未命名节点"} - 副本` };
-    return copy;
-  }));
-  signal.throwIfAborted();
-  if (nodes.some(node => flow.findNode(node.id) !== node)) throw new Error("节点已变化，请重新创建副本");
-  const edges = incomingEdges.filter(edge => ids.has(edge.source) || flow.findNode(edge.source)).map(edge => ({
-    ...JSON.parse(JSON.stringify(edge)),
-    id: crypto.randomUUID(),
-    source: ids.get(edge.source) ?? edge.source,
-    target: ids.get(edge.target)!,
-    selected: false,
-  }));
-  flow.addNodes(copies);
-  flow.addEdges(edges);
-  return { ids, rootIds: roots.map(node => ids.get(node.id)!) };
+    if (nodes.some(node => flow.findNode(node.id) !== node)) throw new Error("节点已变化，请重新创建副本");
+    const edges = incomingEdges.filter(edge => ids.has(edge.source) || flow.findNode(edge.source)).map(edge => ({
+      ...JSON.parse(JSON.stringify(edge)),
+      id: crypto.randomUUID(),
+      source: ids.get(edge.source) ?? edge.source,
+      target: ids.get(edge.target)!,
+      selected: false,
+    }));
+    flow.addNodes(copies);
+    flow.addEdges(edges);
+    return { ids, rootIds: roots.map(node => ids.get(node.id)!) };
+  } catch (error) {
+    // Only unpublished directories created by this attempt may be cleaned up.
+    await Promise.allSettled(created.filter(path => !flow.findNode(path.slice(7))).map(path => files.remove(path, true)));
+    throw error;
+  }
 }
 
 function groupNodes(selection: GraphNode[]) {
@@ -273,7 +335,7 @@ defineExpose({ operate, startDragCopy, busy });
   position: absolute;
   z-index: 6;
   width: max-content;
-  transform: translate(-50%, -100%);
+  overflow-x: auto;
 
   .toolbarActions {
     display: flex;

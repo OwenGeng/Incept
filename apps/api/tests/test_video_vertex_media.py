@@ -27,7 +27,8 @@ def _patch_httpx_client(monkeypatch: pytest.MonkeyPatch, transport: httpx.MockTr
     monkeypatch.setattr(httpx, "AsyncClient", factory)
 
 
-def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize('with_reference', [False, True])
+def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.MonkeyPatch, with_reference: bool) -> None:
     captured: dict[str, object] = {}
 
     class FakeModels:
@@ -57,6 +58,7 @@ def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.Monke
     fake_types = ModuleType("google.genai.types")
     fake_types.GenerateContentConfig = FakeConfig  # type: ignore[attr-defined]
     fake_types.Modality = SimpleNamespace(TEXT="TEXT", IMAGE="IMAGE")  # type: ignore[attr-defined]
+    fake_types.Part = SimpleNamespace(from_bytes=lambda **kwargs: kwargs)  # type: ignore[attr-defined]
     fake_genai.types = fake_types  # type: ignore[attr-defined]
     import google
 
@@ -67,7 +69,7 @@ def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.Monke
     result = asyncio.run(
         VertexImageApiAdapter().generate(
             cfg=ProviderConfig(provider="vertex", api_key="", project_id="example-project", location="global"),
-            inp=ImageGenerationInput(prompt="A bright product photo", model="configured-image-model"),
+            inp=ImageGenerationInput(prompt="A bright product photo", model="configured-image-model", images=['data:image/png;base64,aW1hZ2U='] if with_reference else []),
             timeout_s=30.0,
         )
     )
@@ -76,8 +78,10 @@ def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.Monke
         "enterprise": True,
         "project": "example-project",
         "location": "global",
+        "http_options": {"timeout": 30000},
     }
     assert captured["model"] == "configured-image-model"
+    assert captured['contents'] == ([{'data': b'image', 'mime_type': 'image/png'}, 'A bright product photo'] if with_reference else 'A bright product photo')
     assert result.images[0].b64_json == "aW1hZ2UtYnl0ZXM="
 
 

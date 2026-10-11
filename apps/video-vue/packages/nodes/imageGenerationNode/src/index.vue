@@ -10,7 +10,8 @@
     :bottomWidth="660"
     :style="{ width: previewUrl && imageWidth ? `${imageWidth + 18}px` : undefined }">
     <template #topActions>
-      <el-button :icon="IconTransfer" :loading="uploading" :disabled="generating || deleting" text title="替换图片" aria-label="替换图片" @click.stop="fileInput?.click()" />
+      <imageActions :source="outputFile" :disabled="generating || uploading || deleting" @busy="editingBusy = $event" />
+      <el-button :icon="IconTransfer" :loading="uploading" :disabled="generating || deleting || editingBusy" text title="替换图片" aria-label="替换图片" @click.stop="fileInput?.click()" />
       <input ref="fileInput" type="file" accept="image/*" hidden aria-label="选择替换图片" :disabled="generating || deleting || uploading" @change="replaceOutput" />
     </template>
     <div v-loading="generating || uploading" class="imageContent nopan" :aria-busy="generating || uploading">
@@ -87,6 +88,7 @@ import { defaultNodeModel, groupNodeModels, nodeSkeleton, nodeTools, useNode, us
 import promptInput from "@linglonglab/video-nodes-scaffold/promptInput";
 import referenceItem from "@linglonglab/video-nodes-scaffold/referenceItem";
 import generationSettings from "./components/generationSettings.vue";
+import imageActions from "@linglonglab/video-nodes-scaffold/imageActions";
 
 defineOptions({
   inheritAttrs: false,
@@ -111,6 +113,7 @@ const { refList, referenceMentions, setReferencePreview, removeReference } = use
 const models = ref<NodeMediaModel[]>([]);
 const modelsLoading = ref(false);
 const uploading = ref(false);
+const editingBusy = ref(false);
 const fileInput = ref<HTMLInputElement>();
 let disposed = false;
 const deleting = ref(false);
@@ -161,7 +164,7 @@ async function replaceOutput(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = "";
-  if (!file || generating.value || deleting.value || uploading.value || disposed) return;
+  if (!file || generating.value || deleting.value || uploading.value || editingBusy.value || disposed) return;
   if (!file.type.startsWith("image/")) return void ElMessage.error("请选择图片文件");
   if (!file.size || file.size > 100 * 1024 * 1024) return void ElMessage.error("图片不能为空且不能超过 100 MB");
   uploading.value = true;
@@ -200,6 +203,7 @@ function loadModels() {
 }
 
 async function startGeneration() {
+  if (editingBusy.value) throw new Error("图片编辑处理中，请等待完成");
   const choice = selectedModel.value;
   if (generating.value) throw new Error("图片正在生成，请等待完成");
   if (uploading.value) throw new Error("图片正在替换，请等待完成");
@@ -239,10 +243,10 @@ async function startGeneration() {
 }
 
 nodeEvent.on("save", (reason) => {
-  if (reason === "reload" && (generating.value || uploading.value || deleting.value)) throw new Error("图片处理中，请完成后再刷新节点");
+  if (reason === "reload" && (generating.value || uploading.value || deleting.value || editingBusy.value)) throw new Error("图片处理中，请完成后再刷新节点");
 });
 nodeEvent.on("delete", async () => {
-  if (uploading.value) throw new Error("图片正在替换，请稍后删除节点");
+  if (uploading.value || editingBusy.value) throw new Error("图片处理中，请稍后删除节点");
   deleting.value = true;
   generationController?.abort();
   try {

@@ -358,7 +358,7 @@ async function deleteNode() {
   }
 }
 
-const copyNodeToClipboard = inject<((node: { type?: string; data: NodeData }) => Promise<void>) | undefined>("copyNodeToClipboard", undefined);
+const copyNodeToClipboard = inject<((node: { id?: string; type?: string; data: NodeData }) => Promise<void>) | undefined>("copyNodeToClipboard", undefined);
 const copyingToClipboard = ref(false);
 const saveNodeToAssets = inject<((label: string, outputs: { label: string; output: NodeOutput }[]) => void) | undefined>(
   "saveNodeToAssets",
@@ -379,7 +379,7 @@ async function handleCommand(command: string) {
     try {
       const patch = await nodeEvent.emit("copy");
       const data = { ...node.data, ...patch };
-      await copyNodeToClipboard({ type: node.type, data });
+      await copyNodeToClipboard({ id: node.id, type: node.type, data });
       ElMessage.success("已复制，可在其他画布粘贴");
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : "节点复制失败");

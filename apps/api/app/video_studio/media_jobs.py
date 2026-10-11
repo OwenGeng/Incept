@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import mimetypes
 import threading
 import uuid
@@ -18,7 +19,7 @@ _tasks: dict[str, asyncio.Task[None]] = {}
 _lock = threading.RLock()
 
 
-def _frame_base64(email: str, project_id: str, relative_path: str | None) -> str | None:
+def _frame_base64(email: str, project_id: str, relative_path: str | None, expected_sha256: str | None = None) -> str | None:
     if not relative_path:
         return None
     root = store.assets_root(email, project_id)
@@ -28,7 +29,10 @@ def _frame_base64(email: str, project_id: str, relative_path: str | None) -> str
     mime_type = store.asset_mime_type(path)
     if not mime_type.startswith("image/"):
         raise ValueError(f"Frame asset must be an image: {relative_path}")
-    return base64.b64encode(path.read_bytes()).decode("ascii")
+    payload = path.read_bytes()
+    if expected_sha256 and hashlib.sha256(payload).hexdigest() != expected_sha256:
+        raise ValueError('Approved frame asset has changed; approve a new request before generation')
+    return base64.b64encode(payload).decode("ascii")
 
 
 def _extension_for_mime(mime_type: str) -> str:
@@ -155,12 +159,14 @@ async def _run_media(email: str, project_id: str, job_id: str) -> None:
                 email,
                 project_id,
                 current.request.first_frame_path,
+                current.request.input_revisions.get(current.request.first_frame_path),
             ),
             asyncio.to_thread(
                 _frame_base64,
                 email,
                 project_id,
                 current.request.last_frame_path,
+                current.request.input_revisions.get(current.request.last_frame_path),
             ),
         )
         if store.get_media_job(email, project_id, job_id).status == "cancelled":

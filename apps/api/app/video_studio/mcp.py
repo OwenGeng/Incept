@@ -22,7 +22,7 @@ from app.incept.config import get_settings
 from app.routers.video_runtime import ManagedMediaRequest, generate_media
 
 from . import store
-from .agent import run_agent
+from .pi_agent import run_agent
 from .models import CanvasDocument, ExportRequest, ProjectCreate, ProjectDocument
 from .render import export_project
 

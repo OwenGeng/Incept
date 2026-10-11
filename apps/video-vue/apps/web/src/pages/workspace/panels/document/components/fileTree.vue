@@ -52,7 +52,7 @@ type FileTreeItem = {
 
 const props = defineProps<{ directory?: string }>();
 const emit = defineEmits<{ selectNode: [selection: TreeSelection] }>();
-const markdownNamePattern = /\.(md|markdown)$/i;
+const markdownNamePattern = /\.(md|markdown|txt)$/i;
 const treeVersion = ref(0);
 const loadError = ref("");
 const treeProps = { label: "name", isLeaf: "isLeaf" };

@@ -23,6 +23,7 @@ export type AgentMessage = {
 export type AgentHistory = { file: string; name: string; modified: string; messageCount: number };
 
 export type AgentConversation = {
+  researchQuestion?: Extract<import("@linglonglab/video-runtime-types/agent/types").AgentEvent, { type: "researchQuestion" }>["question"] | null;
   file: string;
   name: string;
   messages: AgentMessage[];
@@ -34,4 +35,7 @@ export type AgentConversation = {
   parentFile?: string;
   subAgents?: AgentSubAgent[];
   running?: boolean;
+  runId?: string;
+  lastSequence?: number;
+  parentObserved?: boolean;
 };

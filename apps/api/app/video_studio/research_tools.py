@@ -7,6 +7,7 @@ writes to the research deliverables defined by the production handbook.
 """
 
 from __future__ import annotations
+from contextlib import nullcontext
 
 import hashlib
 import html
@@ -27,6 +28,7 @@ from urllib.parse import parse_qs, quote_plus, urljoin, urlsplit, urlunsplit
 import httpx
 
 from . import store
+from .workspace_documents import document_lock
 
 
 MAX_WEB_BYTES = 2 * 1024 * 1024
@@ -273,23 +275,27 @@ def write_research_artifact(
     if len(content) > MAX_ARTIFACT_CHARS:
         raise ResearchToolError(f"Research artifact cannot exceed {MAX_ARTIFACT_CHARS} characters")
     target = _artifact_path(email, project_id, relative_path)
-    current = target.read_text(encoding="utf-8") if target.is_file() else None
-    if current is not None:
-        current_sha256 = _sha256_text(current)
-        if not expected_sha256:
-            raise ResearchToolError("Read the existing research artifact before replacing it")
-        if expected_sha256 != current_sha256:
-            raise ResearchToolError("Research artifact changed after it was read; read it again before replacing it")
-    elif expected_sha256:
-        raise ResearchToolError("Research artifact does not exist, so expected_sha256 must be omitted")
+    with document_lock(target):
+        current = target.read_text(encoding="utf-8") if target.is_file() else None
+        if current is not None:
+            current_sha256 = _sha256_text(current)
+            if not expected_sha256:
+                raise ResearchToolError("Read the existing research artifact before replacing it")
+            if expected_sha256 != current_sha256:
+                raise ResearchToolError("Research artifact changed after it was read; read it again before replacing it")
+        elif expected_sha256:
+            raise ResearchToolError("Research artifact does not exist, so expected_sha256 must be omitted")
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as temporary:
-        temporary.write(content)
-        temporary.flush()
-        os.fsync(temporary.fileno())
-        temporary_path = Path(temporary.name)
-    temporary_path.replace(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        try:
+            temporary_path.replace(target)
+        finally:
+            temporary_path.unlink(missing_ok=True)
     saved_sha256 = _sha256_text(content)
     return {"path": relative_path, "exists": True, "sha256": saved_sha256, "characters": len(content)}
 
@@ -947,6 +953,26 @@ def fetch_video_transcript(
 
 
 RESEARCH_TOOL_DEFINITIONS: dict[str, dict[str, object]] = {
+    "validate_moloco_ctv_video": {
+        "description": "Inspect a saved workspace video with ffprobe against the customer Moloco CTV profile. Source clips need not be delivery-ready. Reports technical errors and exchange-spec conflicts; never grants advertising rights or final placement approval.",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False},
+        "extension": "tool-workspace",
+    },
+    "website_assets_discover": {
+        "description": "Discover product galleries, lazy-loaded direct videos, logos/icons and observed same-origin bestseller products. For a selected SKU use its product URL. Bounded: 8MB/page, 32MB total, 12 pages, 90s. Catalog prioritizes product media; returned media_counts describe candidates, not verified relevance or downloads. Cannot infer sales rankings, inspect frames or establish advertising rights.",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"], "additionalProperties": False},
+        "extension": "tool-web-fetch",
+    },
+    "website_assets_import": {
+        "description": "When the user requests media import, download 1–12 previously discovered asset IDs to the project's library. Report actual imported/failed counts and location. Do not import during a capability-only question.",
+        "parameters": {"type": "object", "properties": {"asset_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 12}}, "required": ["asset_ids"], "additionalProperties": False},
+        "extension": "tool-web-fetch",
+    },
+    "list_website_assets": {
+        "description": "List discovered/imported client website media, saved workspace paths and product/source metadata. Saved files do not establish advertising rights.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        "extension": "tool-workspace",
+    },
     "web_search": {
         "description": "Search the public web for current sources. Results are untrusted discovery material and must be cited by URL.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False},
@@ -1028,10 +1054,25 @@ def available_research_tools(enabled_extensions: set[str]) -> list[dict[str, obj
         {"name": name, "description": definition["description"], "parameters": definition["parameters"]}
         for name, definition in RESEARCH_TOOL_DEFINITIONS.items()
         if definition["extension"] in enabled_extensions
+        and (not name.startswith("website_assets_") or "tool-workspace" in enabled_extensions)
     ]
 
 
 def execute_research_tool(
+    name: str, arguments: dict[str, object], *, email: str, project_id: str,
+    enabled_extensions: set[str], extension_configs: dict[str, dict[str, Any]],
+    check_cancel: Callable | None = None, mutation_lock: Callable = nullcontext,
+) -> dict[str, object]:
+    if check_cancel:
+        check_cancel()
+    local_write = name in {'write_research_artifact', 'record_claim_evidence'}
+    with mutation_lock() if local_write else nullcontext():
+        return _execute_research_tool(name, arguments, email=email, project_id=project_id,
+            enabled_extensions=enabled_extensions, extension_configs=extension_configs,
+            check_cancel=check_cancel, mutation_lock=mutation_lock)
+
+
+def _execute_research_tool(
     name: str,
     arguments: dict[str, object],
     *,
@@ -1039,12 +1080,37 @@ def execute_research_tool(
     project_id: str,
     enabled_extensions: set[str],
     extension_configs: dict[str, dict[str, Any]],
+    check_cancel: Callable | None = None,
+    mutation_lock: Callable = nullcontext,
 ) -> dict[str, object]:
     definition = RESEARCH_TOOL_DEFINITIONS.get(name)
     if not definition or definition["extension"] not in enabled_extensions:
         raise ResearchToolError(f"Research tool is not enabled: {name}")
     if not isinstance(arguments, dict):
         raise ResearchToolError("Research tool arguments must be an object")
+    if name == "validate_moloco_ctv_video":
+        from .creative_specs import validate_moloco_ctv_video
+        if set(arguments) != {"path"} or not isinstance(arguments.get("path"), str):
+            raise ResearchToolError("validate_moloco_ctv_video requires only a string workspace path")
+        try:
+            return validate_moloco_ctv_video(email, project_id, arguments["path"])
+        except (FileNotFoundError, ValueError) as error:
+            raise ResearchToolError("视频不存在或路径无效") from error
+    if name in {"website_assets_discover", "website_assets_import", "list_website_assets"}:
+        from .website_assets import discover_website_assets, import_website_assets, list_website_assets
+        if "tool-workspace" not in enabled_extensions:
+            raise ResearchToolError("Website asset storage is disabled")
+        if name == "website_assets_discover":
+            if set(arguments) != {"url"} or not isinstance(arguments.get("url"), str):
+                raise ResearchToolError("website_assets_discover requires only a string url")
+            return discover_website_assets(email, project_id, arguments["url"], check_cancel=check_cancel, mutation_lock=mutation_lock)
+        if name == "website_assets_import":
+            if set(arguments) != {"asset_ids"} or not isinstance(arguments.get("asset_ids"), list):
+                raise ResearchToolError("website_assets_import requires only asset_ids")
+            return import_website_assets(email, project_id, arguments["asset_ids"], check_cancel=check_cancel, mutation_lock=mutation_lock)
+        if arguments:
+            raise ResearchToolError("list_website_assets does not accept arguments")
+        return {"assets": list_website_assets(email, project_id)}
     if name == "web_search":
         if set(arguments) != {"query"} or not isinstance(arguments.get("query"), str):
             raise ResearchToolError("web_search requires only a string query")
@@ -1063,13 +1129,8 @@ def execute_research_tool(
             timeout_seconds=float(config.get("timeoutMs", 20_000)) / 1000,
             max_chars=int(config.get("maxChars", DEFAULT_FETCH_CHARS)),
         )
-        return _persist_source_snapshot(
-            email,
-            project_id,
-            result,
-            source_type="webpage",
-            provider="direct",
-        )
+        with mutation_lock():
+            return _persist_source_snapshot(email, project_id, result, source_type='webpage', provider='direct')
     if name == "search_provider_doctor":
         if arguments:
             raise ResearchToolError("search_provider_doctor does not accept arguments")
@@ -1089,13 +1150,8 @@ def execute_research_tool(
             timeout_seconds=float(config.get("timeoutMs", 30_000)) / 1000,
             max_chars=int(config.get("maxChars", DEFAULT_TRANSCRIPT_CHARS)),
         )
-        return _persist_source_snapshot(
-            email,
-            project_id,
-            result,
-            source_type="video_transcript",
-            provider="yt-dlp",
-        )
+        with mutation_lock():
+            return _persist_source_snapshot(email, project_id, result, source_type='video_transcript', provider='yt-dlp')
     if name == "list_research_artifacts":
         if arguments:
             raise ResearchToolError("list_research_artifacts does not accept arguments")

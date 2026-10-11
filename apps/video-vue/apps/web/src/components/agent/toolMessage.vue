@@ -1,6 +1,7 @@
 <template>
-  <component v-if="renderer" :is="renderer" :tool="tool" :directory="directory" @copy="emit('copy', $event)" />
-  <el-text v-if="rendererError" type="danger">工具界面加载失败，请停止后重试：{{ rendererError }}</el-text>
+  <questionCard v-if="tool.question" :tool="tool" :directory="directory" :sessionFile="tool.question.sessionFile ?? sessionFile" :runId="tool.question.runId ?? runId" />
+  <component v-else-if="renderer" :is="renderer" :tool="tool" :directory="directory" :sessionFile="sessionFile" :runId="runId" @copy="emit('copy', $event)" />
+  <el-text v-if="rendererError && !tool.question" type="danger">工具界面加载失败，请停止后重试：{{ rendererError }}</el-text>
   <chat-reasoning v-model:collapsed="collapsed" class="messageReasoning toolCall" expandIconPlacement="left">
     <template #header>
       <span class="toolHeader" :data-status="tool.status">
@@ -9,6 +10,7 @@
         <span class="toolState">{{ tool.name === 'subAgent' && tool.status === 'success' ? '调用已返回' : toolStatusLabels[tool.status] }}</span>
       </span>
     </template>
+    <p v-if="tool.progress" class="toolProgress" role="status">{{ tool.progress }}</p>
     <div v-if="!collapsed" class="toolDetails">
       <template v-for="(data, index) in [args, result]" :key="index">
         <template v-if="data">
@@ -31,8 +33,9 @@ import { IconCopy, IconTool } from "@tabler/icons-vue";
 import chatReasoning from "@tdesign-vue-next/chat/es/chat-reasoning";
 import type { AgentToolCall } from "@linglonglab/video-runtime-types/agent/types";
 import messageMarkdown from "@/components/messageMarkdown.vue";
+import questionCard from "../../../../../packages/tools/askUser/src/questionCard.vue";
 
-const { tool, directory } = defineProps<{ tool: AgentToolCall; directory?: string }>();
+const { tool, directory, sessionFile, runId } = defineProps<{ tool: AgentToolCall; directory?: string; sessionFile?: string; runId?: string }>();
 const emit = defineEmits<{ copy: [content: string] }>();
 const renderer = shallowRef<Component>();
 const rendererError = ref("");
@@ -41,12 +44,12 @@ watch(() => [tool.name, tool.question?.callId] as const, async ([name], _previou
   onCleanup(() => { active = false; });
   renderer.value = undefined;
   rendererError.value = "";
-  if (name === "subAgent") return;
+  if (tool.question || name === "subAgent") return;
   try {
     const component = await loadToolComponent(name);
     if (active) {
       renderer.value = component;
-      if (!component && tool.status === "running" && tool.question?.callId) rendererError.value = "该工具未提供可用的交互组件";
+
     }
   } catch (error) {
     if (active) rendererError.value = error instanceof Error ? error.message : String(error);
@@ -61,7 +64,7 @@ onErrorCaptured(error => {
 const collapsed = ref(true);
 const toolStatusLabels = { running: "调用中…", success: "已完成", error: "调用失败", interrupted: "已中断" };
 const toolCodeOptions = { maxHeight: 240, lineNumbers: false };
-const args = computed(() => formatToolData(tool.args));
+const args = computed(() => formatToolData(tool.argsText ?? tool.args));
 const result = computed(() => formatToolData(tool.result));
 
 function formatToolData(value: unknown) {

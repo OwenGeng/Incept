@@ -10,17 +10,16 @@
       popperClass="agentModelPopover"
       :popperStyle="{ padding: '20px', maxWidth: 'calc(100vw - 24px)' }">
       <template #reference>
-        <el-button class="modelButton" text :disabled="disabled" aria-label="模型与推理设置">
+        <el-button class="modelButton" text :disabled="disabled" :aria-label="showReasoning ? t('模型与推理设置', 'Model and reasoning settings') : t('选择模型', 'Select model')">
           <modelIcon v-if="selectedModelChoice" :model="selectedModelChoice.modelId" :size="14" />
-          <span class="modelName">{{ selectedModelChoice?.label ?? "选择模型" }}</span>
-          ·
-          <span class="reasoningLabel">{{ reasoningLabel }}</span>
+          <span class="modelName">{{ selectedModelChoice?.label ?? t("选择模型", "Select model") }}</span>
+          <template v-if="showReasoning">·<span class="reasoningLabel">{{ reasoningLabel }}</span></template>
           <icon-chevron-down :size="12" />
         </el-button>
       </template>
       <el-form class="modelOptions" labelPosition="top">
-        <el-form-item label="模型">
-          <el-select v-model="selectedModel" filterable :disabled="disabled" :teleported="false" placeholder="选择模型" aria-label="选择模型" noDataText="请先在设置中添加模型">
+        <el-form-item :label="t('模型', 'Model')">
+          <el-select v-model="selectedModel" filterable :disabled="disabled" :teleported="false" :placeholder="t('选择模型', 'Select model')" :aria-label="t('选择模型', 'Select model')" :noDataText="t('请先在设置中添加模型', 'Add a model in settings first')">
             <template #prefix><modelIcon v-if="selectedModelChoice" :model="selectedModelChoice.modelId" :size="18" /></template>
             <el-option-group v-for="provider in modelGroups" :key="provider.id" :label="provider.label">
               <el-option v-for="model in provider.models" :key="model.id" :label="model.label" :value="JSON.stringify([provider.id, model.id])">
@@ -32,7 +31,7 @@
             </el-option-group>
           </el-select>
         </el-form-item>
-        <el-form-item label="推理等级">
+        <el-form-item v-if="showReasoning" label="推理等级">
           <el-segmented v-model="reasoningEffort" :options="reasoningOptions" :disabled="disabled" block aria-label="推理等级" />
         </el-form-item>
       </el-form>
@@ -44,11 +43,12 @@
 import { computed, ref, watch } from "vue";
 import { IconChevronDown } from "@tabler/icons-vue";
 import { modelIcon } from "@linglonglab/video-model-icons";
+import { t } from "@/i18n";
 import { customProviders, modelChoices } from "@/stores/settings";
 
 const selectedModel = defineModel<string>({ default: "" });
 const reasoningEffort = defineModel<string>("reasoningEffort", { default: "" });
-const props = withDefaults(defineProps<{ active?: boolean; disabled?: boolean }>(), { active: true, disabled: false });
+const props = withDefaults(defineProps<{ active?: boolean; disabled?: boolean; showReasoning?: boolean }>(), { active: true, disabled: false, showReasoning: true });
 const visible = ref(false);
 const reasoningOptions = [
   { label: "默认", value: "" },

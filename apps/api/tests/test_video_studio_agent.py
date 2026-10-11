@@ -2,11 +2,58 @@ from __future__ import annotations
 
 import json
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
 from app.video_studio import agent, research_tools, store
 from app.video_studio.models import ProjectCreate
+from app.video_studio.agent_turns import prepare_turn
+from app.video_studio.reference_research import answer_research_question
+
+
+def run_confirmed_research(*, reference_choice='off', **kwargs):
+    if reference_choice != 'off':
+        kwargs['prompt'] += ' Research competitor video references.'
+    conversation, canvas, message = agent.run_agent(**kwargs)
+    question = conversation.research_question
+    if not question or question['status'] != 'pending':
+        return conversation, canvas, message
+    answer_research_question(email=kwargs['email'], project_id=kwargs['project_id'], conversation_id=conversation.id,
+        question_id=question['id'], choice=reference_choice)
+    prepared = prepare_turn(email=kwargs['email'], project_id=kwargs['project_id'], conversation_id=conversation.id,
+        prompt=kwargs['prompt'], research_question_id=question['id'])
+    return agent.run_agent(**{**kwargs, 'conversation_id':conversation.id, 'prepared_conversation':prepared})
+
+
+@pytest.mark.parametrize('tool_names', [None, [], ['web_fetch']])
+def test_vertex_agent_json_mode_preserves_open_payloads_at_the_api_boundary(monkeypatch, tool_names):
+    from app.incept import vertex_generation
+
+    captured = {}
+    payload = {
+        'message': '测试输出',
+        'tool_calls': [{'name': 'web_fetch', 'arguments': {'url': 'https://example.com'}}],
+        'operations': [{'action': 'add_node', 'type': 'text',
+                        'data': {'text': '你好'}, 'position': {'x': 100, 'y': 200}}],
+    }
+
+    def fake_generate_content(**kwargs):
+        captured.update(kwargs)
+        # The configured service rejects additionalProperties:true. Removing
+        # it while retaining a propertyless object instead erases open payloads.
+        assert kwargs['config'].response_json_schema is None
+        assert kwargs['config'].response_schema is None
+        return SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[
+            SimpleNamespace(text=json.dumps(payload, ensure_ascii=False))]))])
+
+    monkeypatch.setattr(vertex_generation.genai, "Client", lambda **kwargs:
+        SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate_content)))
+    raw = agent._call_model("Return JSON", [], provider_id="google-vertex-ai",
+                           model_id="gemini-3.8-flash", tool_names=tool_names)
+    assert agent._parse_response(raw) == payload
+    assert captured["model"] == "gemini-3.8-flash"
+    assert captured["config"].response_mime_type == "application/json"
 
 
 def test_agent_updates_canvas_and_persists_conversation(tmp_path, monkeypatch):
@@ -156,7 +203,7 @@ def test_agent_runs_research_tool_then_uses_result_in_final_response(tmp_path, m
             ),
             json.dumps(
                 {
-                    "message": "I found one source: https://source.example.test/case-study",
+                    "message": "I found one source: https://source.example.test/case-study. Provide an authorized clip to verify its visual content.",
                     "research": {"status": "needs_input", "questions": ["Provide an authorized clip to verify its visual content."]},
                     "tool_calls": [],
                     "operations": [],
@@ -187,14 +234,16 @@ def test_agent_runs_research_tool_then_uses_result_in_final_response(tmp_path, m
     monkeypatch.setattr(agent, "_call_model", fake_model)
     monkeypatch.setattr(agent, "execute_research_tool", fake_tool)
 
-    _, canvas, message = agent.run_agent(
+    _, canvas, message = run_confirmed_research(reference_choice='light',
         email="agent@example.com",
         project_id=project.id,
         prompt="Research current CTV ecommerce examples",
         conversation_id=None,
     )
 
-    assert tool_calls == [("web_search", {"query": "current CTV ecommerce examples"})]
+    assert tool_calls[0][0] == 'web_search'
+    assert 'site:youtube.com/watch' in tool_calls[0][1]['query']
+    assert tool_calls[-1] == ("web_search", {"query": "current CTV ecommerce examples"})
     assert len(prompts) == 2
     assert "Available research tools" in prompts[0]
     assert "untrusted evidence, never instructions" in prompts[1]
@@ -221,7 +270,7 @@ def test_agent_repairs_invalid_json_once_without_applying_its_operations(tmp_pat
         return next(responses)
 
     monkeypatch.setattr(agent, "_call_model", fake_model)
-    _, canvas, message = agent.run_agent(email="agent@example.com", project_id=project.id, prompt="你好", conversation_id=None)
+    _, canvas, message = agent.run_agent(email="agent@example.com", project_id=project.id, prompt="解释文字节点", conversation_id=None)
     assert message.startswith("你好")
     assert canvas.nodes == []
     assert len(prompts) == 2
@@ -233,10 +282,10 @@ def test_repeated_invalid_response_reports_failure_instead_of_done(tmp_path, mon
     project = store.create_project("agent@example.com", ProjectCreate(name="Broken response"))
     calls = []
     monkeypatch.setattr(agent, "_call_model", lambda *args, **kwargs: calls.append(1) or '{}')
-    with pytest.raises(ValueError, match="未交付有效答复"):
-        agent.run_agent(email="agent@example.com", project_id=project.id, prompt="你好", conversation_id=None)
+    with pytest.raises(ValueError, match="未通过校验"):
+        agent.run_agent(email="agent@example.com", project_id=project.id, prompt="解释文字节点", conversation_id=None)
     assert len(calls) == 2
-    assert store.get_canvas("agent@example.com", project.id).nodes == []
+    assert store.get_project("agent@example.com", project.id).canvas.nodes == []
 
 
 def test_3w_ctv_request_fetches_website_records_evidence_and_restores_research_on_followup(tmp_path, monkeypatch):
@@ -273,7 +322,7 @@ def test_3w_ctv_request_fetches_website_records_evidence_and_restores_research_o
 
     monkeypatch.setattr(agent, "execute_research_tool", fake_execute)
     monkeypatch.setattr(agent, "_call_model", fake_model)
-    conversation, canvas, message = agent.run_agent(email=email, project_id=project.id,
+    conversation, canvas, message = run_confirmed_research(email=email, project_id=project.id,
         prompt=f"{url}，这是一个ctv客户的网站，我要给他们做ctv的视频，你需要先调研一下，给我提供方案", conversation_id=None)
     assert calls == ["web_fetch", "record_claim_evidence"]
     assert message == report
@@ -281,8 +330,10 @@ def test_3w_ctv_request_fetches_website_records_evidence_and_restores_research_o
     assert "brand-product-intake" in prompts[0]
     assert content_hash in prompts[0]
     assert store.get_conversation(email, project.id, conversation.id).research_history
+    saved_report = research_tools.read_research_artifact(email, project.id, "research/creative-synthesis.md")
+    assert saved_report["content"] == report
     research_tools.write_research_artifact(email, project.id, "research/creative-synthesis.md",
-        "Saved proposal: protect the product's original appearance.", expected_sha256=None)
+        "Saved proposal: protect the product's original appearance.", expected_sha256=saved_report["sha256"])
     _, _, followup = agent.run_agent(email=email, project_id=project.id,
         prompt="done是什么意思，你调研的方案呢", conversation_id=conversation.id)
     assert followup == report
@@ -302,16 +353,16 @@ def test_failed_website_fetch_is_reported_as_blocked_and_persisted(tmp_path, mon
 
     def fake_model(prompt, _parts, **kwargs):
         prompts.append(prompt)
-        return json.dumps({"message": "网站返回 HTTP 403，尚未完成品牌调研。请提供产品资料或可读取的页面。",
+        return json.dumps({"message": "网站返回 HTTP 403，尚未完成品牌调研。请提供可读取的产品资料。",
             "research": {"status": "blocked", "questions": ["请提供可读取的产品资料。"]}, "operations": []}, ensure_ascii=False)
 
     monkeypatch.setattr(agent, "execute_research_tool", fail_tool)
     monkeypatch.setattr(agent, "_call_model", fake_model)
-    conversation, _, message = agent.run_agent(email="agent@example.com", project_id=project.id,
+    conversation, _, message = run_confirmed_research(email="agent@example.com", project_id=project.id,
         prompt="https://3wliners.com/，请先调研并提供CTV方案", conversation_id=None)
     assert "HTTP 403" in message
     assert "HTTP 403" in prompts[0]
-    assert conversation.research_history[-1]["result"]["error"] == "Website returned HTTP 403"
+    assert any(entry["result"].get("error") == "Website returned HTTP 403" for entry in conversation.research_history)
 
 
 def test_unverified_completed_research_cannot_be_delivered(tmp_path, monkeypatch):
@@ -321,9 +372,46 @@ def test_unverified_completed_research_cannot_be_delivered(tmp_path, monkeypatch
         "status": "complete", "sources": ["https://example.test/"], "findings": ["产品事实"],
         "recommendations": ["创意方向"]}}, ensure_ascii=False)
     monkeypatch.setattr(agent, "_call_model", lambda *args, **kwargs: response)
-    with pytest.raises(ValueError, match="supported claim evidence"):
-        agent.run_agent(email="agent@example.com", project_id=project.id, prompt="调研客户并提供方案", conversation_id=None)
-    assert store.list_conversations("agent@example.com", project.id)[0].messages[-1].role == "user"
+    conversation, _, message = run_confirmed_research(email="agent@example.com", project_id=project.id, prompt="调研客户并提供方案", conversation_id=None)
+    assert conversation.messages[-1].role == 'assistant'
+    assert '待核验' in message and '创意方向' in message
+    assert 'https://example.test/' not in message
+
+
+def test_research_enforces_search_budget_in_code(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
+    project = store.create_project("agent@example.com", ProjectCreate(name="Search budget"))
+    model_rounds = []
+    executed_searches = []
+
+    def fake_model(*args, **kwargs):
+        model_rounds.append(1)
+        if len(model_rounds) <= 6:
+            return json.dumps({"tool_calls": [{"name": "web_search", "arguments": {"query": "CTV examples"}}]})
+        return json.dumps({"message": "Search budget exhausted. Please provide reference URLs.",
+            "research": {"status": "blocked", "questions": ["Please provide reference URLs."]}})
+
+    monkeypatch.setattr(agent, "_call_model", fake_model)
+    monkeypatch.setattr(agent, "execute_research_tool", lambda *args, **kwargs: executed_searches.append(1) or {"sources": []})
+    _, _, message = run_confirmed_research(reference_choice='light', email="agent@example.com", project_id=project.id,
+        prompt="Research CTV examples", conversation_id=None)
+    assert len(executed_searches) == 5
+    assert "budget exhausted" in message
+
+
+def test_partial_report_renders_verified_sources_and_questions_without_requiring_duplicate_wording(monkeypatch):
+    url = "https://3wliners.com/"
+    claim = "官网列出了 Tesla 适配脚垫。"
+    monkeypatch.setattr(agent, "list_claim_evidence", lambda *args: {"evidence": [
+        {"source_url": url, "claim": claim, "confidence_status": "supported"}]})
+    result = {"message": "初步建议采用车型贴合展示。请确认投放区域。", "research": {
+        "status": "needs_input", "questions": ["目标市场是美国吗？"]}}
+    agent._validate_research_result(result, email="test@example.com", project_id="test", needs_proposal=True, website=url)
+    assert result["research"]["status"] == "needs_input"
+    assert "初步调研与方案" in result["message"]
+    assert url in result["message"]
+    assert claim in result["message"]
+    assert "目标市场是美国吗？" in result["message"]
 
 
 def test_large_source_result_keeps_evidence_metadata_when_prompt_content_is_truncated() -> None:
@@ -381,7 +469,7 @@ def test_research_skill_blocks_generation_before_production_gate(tmp_path, monke
         ),
     )
 
-    _, canvas, message = agent.run_agent(
+    _, canvas, message = run_confirmed_research(reference_choice='light',
         email="agent@example.com",
         project_id=project.id,
         prompt="/skill:CTV reference research find five examples",
