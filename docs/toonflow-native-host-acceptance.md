@@ -132,3 +132,12 @@ isolation. Full API acceptance passed **579 tests**, zero failures/errors/skips.
 No paid generation or real external-agent transmission was performed by these
 mock-boundary tests. Runtime/frontend source is unchanged from its prior 53/81
 passing suites.
+
+Linux CI also exposed an initialization-dependent report-cancellation test
+barrier. Injecting a six-second initialization delay reproduced both old test
+failures; the corrected test passes both cases under that same delay. It now
+waits for runtime readiness before holding the metadata lock and observes the
+callback's actual lock attempt before cancellation/replacement. The critical
+callback deadline remains five seconds, and the test still requires
+AgentCancelled and no persisted reports; no runtime cancellation check was
+relaxed or skipped.

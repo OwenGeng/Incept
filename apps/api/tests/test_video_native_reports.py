@@ -187,18 +187,33 @@ def test_report_callback_waiting_metadata_lock_rejects_cancelled_or_replaced_run
     _,project,_,child,payload=reports
     turn=prepare_turn(email=EMAIL,project_id=project.id,prompt='Report direct progress',conversation_id=child.id)
     journal=RunJournal(EMAIL,project.id,child.id,turn.run_id);journal.create()
-    callback_started=threading.Event()
+    runtime_ready=threading.Event()
+    allow_report=threading.Event()
+    waiting_for_metadata=threading.Event()
+    worker_id=None
+    path=store._project_root(EMAIL,project.id)/'.agent/children'/f'{child.id}.json'
+    def observed_lock(target):
+        if threading.get_ident()==worker_id and target==path:
+            waiting_for_metadata.set()
+        return document_lock(target)
+    monkeypatch.setattr(pi_agent,'document_lock',observed_lock)
     def run_process(config,callback,*args,**kwargs):
-        callback_started.set()
+        nonlocal worker_id
+        worker_id=threading.get_ident()
+        runtime_ready.set()
+        assert allow_report.wait(5), 'The test must release the report callback'
         callback('tool',payload)
         raise AssertionError('A cancelled report must never reach result commit')
     monkeypatch.setattr(pi_agent,'run_process',run_process)
-    path=store._project_root(EMAIL,project.id)/'.agent/children'/f'{child.id}.json'
     with ThreadPoolExecutor(max_workers=1) as pool:
+        future=pool.submit(pi_agent.run_agent,email=EMAIL,project_id=project.id,prompt='Report direct progress',
+            conversation_id=child.id,prepared_conversation=turn,journal=journal,progress=journal.emit)
+        # Startup is outside the race under test. Hold the lock only after the
+        # runtime is ready, and verify the callback actually attempts that lock.
+        assert runtime_ready.wait(15), 'Agent initialization did not reach the runtime'
         with document_lock(path):
-            future=pool.submit(pi_agent.run_agent,email=EMAIL,project_id=project.id,prompt='Report direct progress',
-                conversation_id=child.id,prepared_conversation=turn,journal=journal,progress=journal.emit)
-            assert callback_started.wait(5)
+            allow_report.set()
+            assert waiting_for_metadata.wait(5), 'Report callback did not attempt the metadata lock'
             cancel_turn(EMAIL,project.id,child.id,turn.run_id)
             if replace:prepare_turn(email=EMAIL,project_id=project.id,prompt='New independent turn',conversation_id=child.id)
         with pytest.raises(AgentCancelled):future.result(timeout=5)
