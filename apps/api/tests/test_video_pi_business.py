@@ -574,3 +574,95 @@ def test_remote_http_uses_pinned_transport_bounded_json_and_rejects_protocol_err
         headers={'content-type': 'application/json'}, content=b'x' * 200_001)))
     with pytest.raises(ValueError, match='response budget'):
         business._remote_rpc('https://configured.example/a2a', 'message/send', {})
+
+
+@pytest.mark.parametrize('language', ['zh-CN', 'en-US'])
+@pytest.mark.parametrize('decision', ['approve', 'cancel', 'skip', 'ambiguous', 'wrong_action', 'wrong_language'])
+def test_media_approval_follows_account_language_and_exact_visible_choice(business, api_loop, monkeypatch, language, decision):
+    settings = store.get_settings(business.email)
+    store.save_settings(business.email, settings.model_copy(update={'language': language}))
+    loop, business.invoke_async = api_loop
+    created = fake_generation(monkeypatch, loop)
+    questions = []
+    def ask(call, question):
+        questions.append(question)
+        # Changing settings while a card is open must not change its approval meaning.
+        store.save_settings(business.email, settings.model_copy(update={'language': 'zh-CN' if language.startswith('en') else 'en-US'}))
+        return {'approve': {'answer': question['options'][0]},
+                'cancel': {'answer': question['options'][1]},
+                'skip': {'skipped': True, 'answer': question['options'][0]},
+                'ambiguous': {'answer': 'yes'},
+                'wrong_action': {'answer': 'Approve and send'},
+                'wrong_language': {'answer': '批准并提交' if language.startswith('en') else 'Approve and submit'}}[decision]
+    business.ask = ask
+    result = business.execute('mediaJobs', {'action': 'submit', 'request': request()}, tool_call_id='locale-media')
+    question = questions[0]
+    if language.startswith('en'):
+        assert question['title'] == 'Approve media generation'
+        assert question['options'] == ['Approve and submit', 'Cancel']
+        assert not any('\u4e00' <= char <= '\u9fff' for char in json.dumps(question, ensure_ascii=False))
+        assert 'cost is currently unknown' in question['question']
+    else:
+        assert question['title'] == '批准媒体生成'
+        assert question['options'] == ['批准并提交', '取消']
+    assert question['paidRequest']['request']['prompt'] == request()['prompt']
+    assert len(created) == (1 if decision == 'approve' else 0)
+    if decision != 'approve':
+        assert result['status'] == 'approval_denied'
+
+
+@pytest.mark.parametrize('language', ['zh-CN', 'en-US'])
+@pytest.mark.parametrize('decision', ['approve', 'cancel', 'skip', 'ambiguous'])
+def test_external_send_and_cancel_use_localized_exact_approval(business, monkeypatch, language, decision):
+    configure_remote(business, monkeypatch)
+    settings = store.get_settings(business.email).model_copy(update={'language': language})
+    store.save_settings(business.email, settings)
+    questions, calls = [], []
+    def ask(call, question):
+        questions.append(question)
+        return {'approve': {'values': {'choice': question['options'][0]}},
+                'cancel': {'answer': question['options'][1]},
+                'skip': {'skipped': True}, 'ambiguous': {'answer': 'yes'}}[decision]
+    business.ask = ask
+    def rpc(url, method, params):
+        calls.append(method)
+        return {'kind': 'task', 'id': 'locale-task', 'status': {'state': 'working'}}
+    monkeypatch.setattr(business, '_remote_rpc', rpc)
+    payload = {'action': 'send', 'target_id': 'writer', 'text': 'Original task', 'idempotency_key': 'locale-remote'}
+    result = business.execute('remoteTeam', payload)
+    question = questions[0]
+    if language.startswith('en'):
+        assert question['title'] == 'Approve external agent collaboration'
+        assert question['options'] == ['Approve and send', 'Cancel']
+        assert not any('\u4e00' <= char <= '\u9fff' for char in json.dumps(question, ensure_ascii=False))
+    else:
+        assert question['title'] == '批准外部代理协作'
+        assert question['options'] == ['批准并发送', '取消']
+    assert calls == (['message/send'] if decision == 'approve' else [])
+    if decision != 'approve':
+        assert result['status'] == 'approval_denied'
+        # Seed a separate approved task, then exercise the chosen cancel decision.
+        business.ask = lambda call, question: {'answer': question['options'][0]}
+        result = business.execute('remoteTeam', {**payload, 'idempotency_key': 'seed-task'})
+        business.ask = ask
+    before = len(calls)
+    cancelled = business.execute('remoteTeam', {'action': 'cancel', 'receipt_id': result['receipt_id']})
+    assert calls[before:] == (['tasks/cancel'] if decision == 'approve' else [])
+    if language.startswith('en'):
+        assert questions[-1]['title'] == 'Cancel external agent task'
+        assert 'configured external agent' in questions[-1]['question']
+    else:
+        assert questions[-1]['title'] == '取消外部代理任务'
+    if decision != 'approve':
+        assert cancelled['status'] == 'approval_denied'
+
+
+def test_localized_approval_preserves_customer_request_and_account_isolation(business):
+    settings = store.get_settings(business.email)
+    store.save_settings(business.email, settings.model_copy(update={'language': 'en-US'}))
+    copy = business._approval_copy('remote_cancel', target_name='客户代理', task_id='task-1')
+    assert copy['title'] == 'Cancel external agent task'
+    assert '客户代理' in copy['question']
+    other_project = store.create_project('another@example.com', ProjectCreate(name='Separate locale'))
+    other = BusinessTools('another@example.com', other_project.id, business.conversation_id, business.control, business.canvas_tools)
+    assert other._approval_copy('media')['title'] == '批准媒体生成'

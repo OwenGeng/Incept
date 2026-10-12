@@ -464,8 +464,29 @@ class BusinessTools:
             return function()
         return self.invoke_async(invoke())
 
+    def _approval_copy(self, kind, **values):
+        """Snapshot this account's language and its exact approval label together."""
+        english = store.get_settings(self.email).language.lower().startswith('en')
+        copies = {
+            'media': (
+                ('批准媒体生成', '这项生成可能产生供应商费用，费用尚未知。批准下面的完整请求并提交吗？', '批准并提交'),
+                ('Approve media generation', 'This generation may incur provider charges; the cost is currently unknown. Approve and submit the complete request below?', 'Approve and submit'),
+            ),
+            'remote_send': (
+                ('批准外部代理协作', '以下任务正文将发送给已配置的外部代理。批准发送吗？', '批准并发送'),
+                ('Approve external agent collaboration', 'The task below will be sent to the configured external agent. Approve sending it?', 'Approve and send'),
+            ),
+            'remote_cancel': (
+                ('取消外部代理任务', '向已配置外部代理 {target_name} 请求取消任务 {task_id}？', '批准并发送'),
+                ('Cancel external agent task', 'Request cancellation of task {task_id} from the configured external agent {target_name}?', 'Approve and send'),
+            ),
+        }
+        title, question, approval = copies[kind][int(english)]
+        return {'title': title, 'question': question.format(**values),
+                'options': [approval, 'Cancel' if english else '取消']}
+
     @staticmethod
-    def _approved(answer, label='批准并提交'):
+    def _approved(answer, label):
         if not isinstance(answer, dict) or answer.get('skipped'):
             return False
         values = answer.get('values', {})
@@ -494,10 +515,10 @@ class BusinessTools:
                 return {'receipt_id': args['receipt_id'], 'status': receipt['status'], 'result': receipt.get('result')}
             if args['action'] == 'cancel':
                 # Cancellation sends a message externally too; ask before doing so.
+                copy = self._approval_copy('remote_cancel', target_name=target['name'], task_id=receipt['task_id'])
                 if not self.ask or not self._approved(self.ask(tool_call_id or f'remote-cancel-{args["receipt_id"][:20]}', {
-                    'title': '取消外部代理任务', 'question': f'向已配置外部代理 {target["name"]} 请求取消任务 {receipt["task_id"]}？',
-                    'options': ['批准并发送', '取消'], 'outboundRequest': {'target': target, 'task_id': receipt['task_id'], 'method': 'tasks/cancel'},
-                }), '批准并发送'):
+                    **copy, 'outboundRequest': {'target': target, 'task_id': receipt['task_id'], 'method': 'tasks/cancel'},
+                }), copy['options'][0]):
                     return {'status': 'approval_denied', 'receipt_id': args['receipt_id']}
             method = 'tasks/cancel' if args['action'] == 'cancel' else 'tasks/get'
             result = self._remote_rpc(target['url'], method, {'id': receipt['task_id']})
@@ -525,10 +546,10 @@ class BusinessTools:
                            'text': args['text'], 'status': 'asking', 'run_id': getattr(self.control, 'run_id', None)}
                 store._write_json(path, receipt)
         if not approved:
+            copy = self._approval_copy('remote_send')
             try:
                 answer = self.ask(tool_call_id or f'remote-{key[:24]}', {
-                    'title': '批准外部代理协作', 'question': '以下任务正文将发送给已配置的外部代理。批准发送吗？\n' + json.dumps(exact, ensure_ascii=False, indent=2),
-                    'options': ['批准并发送', '取消'], 'outboundRequest': {'requestHash': request_hash, 'request': exact},
+                    **copy, 'question': copy['question'] + '\n' + json.dumps(exact, ensure_ascii=False, indent=2), 'outboundRequest': {'requestHash': request_hash, 'request': exact},
                 }) if self.ask else {'skipped': True}
             except Exception:
                 with document_lock(path):
@@ -536,7 +557,7 @@ class BusinessTools:
                     store._write_json(path, receipt)
                 raise
             with self._mutation(), document_lock(path):
-                receipt.update(status='approved' if self._approved(answer, '批准并发送') else 'denied', answer=answer)
+                receipt.update(status='approved' if self._approved(answer, copy['options'][0]) else 'denied', answer=answer)
                 store._write_json(path, receipt)
             if receipt['status'] == 'denied':
                 return {'receipt_id': key, 'status': 'approval_denied'}
@@ -647,13 +668,13 @@ class BusinessTools:
                 store._write_json(path, {'request_hash': request_hash, 'request': exact, 'status': 'asking' if media else 'approved',
                                         'run_id': getattr(self.control, 'run_id', None)})
         if media and not approved:
+            copy = self._approval_copy('media')
             if not self.ask:
                 answer = {'skipped': True}
             else:
                 try:
                     answer = self.ask(tool_call_id or f'approve-{key[:24]}', {
-                        'title': '批准媒体生成', 'question': '这项生成可能产生供应商费用，费用尚未知。批准下面的完整请求并提交吗？\n' + json.dumps(exact, ensure_ascii=False, indent=2),
-                        'options': ['批准并提交', '取消'],
+                        **copy, 'question': copy['question'] + '\n' + json.dumps(exact, ensure_ascii=False, indent=2),
                         'paidRequest': {'requestHash': request_hash, 'request': exact},
                     })
                 except Exception:
@@ -666,9 +687,9 @@ class BusinessTools:
                     raise
             with self._mutation(), document_lock(path):
                 receipt = store._read_json(path, {})
-                receipt.update(status='approved' if self._approved(answer) else 'denied', answer=answer)
+                receipt.update(status='approved' if self._approved(answer, copy['options'][0]) else 'denied', answer=answer)
                 store._write_json(path, receipt)
-            if not self._approved(answer):
+            if not self._approved(answer, copy['options'][0]):
                 return {'status': 'approval_denied', 'approval_receipt': key}
         self._check()
         with self._mutation(), document_lock(path):

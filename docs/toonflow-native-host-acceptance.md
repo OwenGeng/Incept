@@ -116,3 +116,19 @@ no development TypeScript loader is needed for dependency files.
 Question cards receive interface language explicitly, including fallback titles,
 invalid-form hints, validation, submission and skip receipts. Failed askUser
 forms use the same inline card and do not depend on a separate renderer build.
+
+## Business approval locale closure (2026-10-12)
+
+Media submission, external-agent transmission and remote cancellation approval
+cards now use each authenticated account's Chinese/English setting for titles,
+explanations and both choices. Approval parsing requires the exact label issued
+with that card; it does not silently default to Chinese after an English choice.
+A language change while the card is pending cannot change its approval meaning.
+The exact request, original customer content and idempotency binding are retained.
+
+Twenty-one additional regressions cover both locales, approval, cancellation,
+skip, ambiguous answers, wrong-action/wrong-language choices and account
+isolation. Full API acceptance passed **579 tests**, zero failures/errors/skips.
+No paid generation or real external-agent transmission was performed by these
+mock-boundary tests. Runtime/frontend source is unchanged from its prior 53/81
+passing suites.
