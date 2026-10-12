@@ -151,7 +151,7 @@ class CanvasTools:
 
 
 def skill_tool(skills):
-    return {'name': 'skillOperator', 'description': 'List/read enabled production skills and references. Research skills require explicit user invocation. No skill writes.',
+    return {'name': 'skillOperator', 'description': 'List/read enabled production skills and references. Reading instructions does not grant permission to research, import assets or generate media. No skill writes.',
         'parameters': {'type': 'object', 'properties': {'action': {'type': 'string', 'enum': ['list', 'read']},
             'name': {'type': 'string'}, 'scope': {'type': 'string', 'enum': ['workspace']}, 'path': {'type': 'string'}},
             'required': ['action'], 'additionalProperties': False}}
@@ -160,7 +160,7 @@ def skill_tool(skills):
 def read_skill(args, skills):
     if args['action'] == 'list':
         return {'skills': [{'name': 'workflow', 'scope': 'workspace', 'description': 'Toonflow production workflow; continue approved stages.'},
-            *[{'name': s.id, 'description': s.description, 'scope': 'workspace', 'disableModelInvocation': True} for s in skills]]}
+            *[{'name': s.id, 'description': s.description, 'scope': 'workspace', 'disableModelInvocation': not (s.builtin and s.id in {'canvas', 'storyboard', 'continuity', 'ctv-creative-strategy'})} for s in skills]]}
     name = args.get('name')
     relative = args.get('path') or 'SKILL.md'
     if name == 'workflow':

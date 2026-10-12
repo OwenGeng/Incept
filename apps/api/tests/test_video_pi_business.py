@@ -666,3 +666,47 @@ def test_localized_approval_preserves_customer_request_and_account_isolation(bus
     other_project = store.create_project('another@example.com', ProjectCreate(name='Separate locale'))
     other = BusinessTools('another@example.com', other_project.id, business.conversation_id, business.control, business.canvas_tools)
     assert other._approval_copy('media')['title'] == '批准媒体生成'
+
+
+def test_media_submit_uses_deployment_default_before_exact_paid_approval(business, api_loop, monkeypatch):
+    loop, business.invoke_async = api_loop
+    created = fake_generation(monkeypatch, loop)
+    configured = [{'type': 'image', 'providerId': 'configured', 'modelId': 'configured-image', 'isDefault': True}]
+    monkeypatch.setattr('app.routers.video_runtime.configured_media_models', lambda: configured)
+    questions = []
+    business.ask = lambda call, question: questions.append(question) or {'answer': '批准并提交'}
+    payload = request()
+    del payload['provider_id'], payload['model_id']
+    result = business.execute('mediaJobs', {'action': 'submit', 'request': payload})
+    assert result['job']['id'] == 'b' * 32
+    assert (created[0].provider_id, created[0].model_id) == ('configured', 'configured-image')
+    assert 'configured-image' in json.dumps(questions)
+    assert 'configured-image' in business.media_context()
+
+
+def test_media_default_missing_does_not_request_approval(business, monkeypatch):
+    monkeypatch.setattr('app.routers.video_runtime.configured_media_models', lambda: [])
+    business.ask = lambda *args: pytest.fail('No paid approval when deployment has no model')
+    payload = request()
+    del payload['provider_id'], payload['model_id']
+    with pytest.raises(ValueError, match='No configured image|未配置图片默认模型'):
+        business.execute('mediaJobs', {'action': 'submit', 'request': payload})
+
+
+@pytest.mark.parametrize('language', ['en-US', 'zh-CN'])
+def test_media_partial_override_never_asks_approval_and_error_is_localized(business, monkeypatch, language):
+    from app.video_studio.models import VideoStudioSettings
+    store.save_settings(business.email, VideoStudioSettings(language=language))
+    business.ask = lambda *args: pytest.fail('Partial model override must fail before approval')
+    payload = request()
+    del payload['model_id']
+    with pytest.raises(ValueError) as failure:
+        business.execute('mediaJobs', {'action': 'submit', 'request': payload})
+    assert str(failure.value).startswith('Specify both' if language.startswith('en') else '请同时指定')
+
+
+def test_disabled_media_context_does_not_advertise_generation(business, monkeypatch):
+    business.enabled_extensions = {'tool-workspace'}
+    monkeypatch.setattr('app.routers.video_runtime.configured_media_models', lambda: pytest.fail('Disabled generation must not be advertised'))
+    assert '"generation_enabled": false' in business.media_context()
+    assert '"models": []' in business.media_context()

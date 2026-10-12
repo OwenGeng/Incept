@@ -174,6 +174,17 @@ export function nativeSystemText(value, language) {
     .replace(/^Request failed \((\d+)\)$/, '请求失败（$1）');
 }
 export function nativeToolResult(value, name, language) {
+  if (name === 'web_search') {
+    try {
+      const receipt = typeof value === 'string' ? JSON.parse(value) : value;
+      if (receipt?.status === 'research_incomplete') {
+        const localized = {...receipt, message: language.startsWith('en')
+          ? 'Research incomplete: search returned no usable sources. Continue with verified existing materials or user-provided URLs; disclose the missing research and do not invent findings.'
+          : '调研未完成：搜索未返回可用来源。可使用已有的可核实资料或用户提供的链接继续；须说明调研缺口，不能编造结果。'};
+        return typeof value === 'string' ? JSON.stringify(localized) : localized;
+      }
+    } catch {}
+  }
   if (name === 'report' && typeof value === 'string') return nativeSystemText(value, language);
   if (name !== 'subAgent' || typeof value !== 'string') return value;
   try {

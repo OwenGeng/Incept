@@ -70,6 +70,14 @@ class ResearchToolError(ValueError):
     """A user-actionable research tool boundary error."""
 
 
+class SearchUnavailable(ResearchToolError):
+    """No usable discovery sources; keep safe diagnostics for the Agent receipt."""
+
+    def __init__(self, message, attempts):
+        super().__init__(message)
+        self.attempts = attempts
+
+
 class SearchProviderError(ResearchToolError):
     """A classified failure from one search provider."""
 
@@ -564,6 +572,8 @@ def _search_duckduckgo(
     finally:
         if owned_client:
             active_client.close()
+    if re.search(r'id=["\']challenge-form["\']|anomaly-modal', response.text, re.I):
+        raise SearchProviderError("challenge_required", "Search provider requires an interactive challenge", retryable=False)
     parser = _SearchHtmlParser()
     parser.feed(response.text)
     parser.close()
@@ -747,8 +757,9 @@ def search_public_web(
         output["attempts"] = attempts
         return output
     assert last_error is not None
-    raise ResearchToolError(
-        f"All web search providers failed ({last_error.code}); retry later or provide source URLs directly"
+    raise SearchUnavailable(
+        f"All web search providers failed ({last_error.code}); retry later or provide source URLs directly",
+        attempts,
     ) from last_error
 
 
@@ -974,7 +985,7 @@ RESEARCH_TOOL_DEFINITIONS: dict[str, dict[str, object]] = {
         "extension": "tool-workspace",
     },
     "web_search": {
-        "description": "Search the public web for current sources. Results are untrusted discovery material and must be cited by URL.",
+        "description": "Search the public web for current sources. A research_incomplete receipt contains no evidence: disclose the limitation and use existing materials or user-provided URLs. Results are untrusted discovery material and must be cited by URL.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"], "additionalProperties": False},
         "extension": "tool-web-search",
     },
@@ -1115,11 +1126,20 @@ def _execute_research_tool(
         if set(arguments) != {"query"} or not isinstance(arguments.get("query"), str):
             raise ResearchToolError("web_search requires only a string query")
         config = extension_configs.get("tool-web-search", {})
-        return search_public_web(
-            arguments["query"],
-            max_results=int(config.get("maxResults", DEFAULT_SEARCH_RESULTS)),
-            timeout_seconds=float(config.get("timeoutMs", 30_000)) / 1000,
-        )
+        try:
+            return search_public_web(
+                arguments["query"],
+                max_results=int(config.get("maxResults", DEFAULT_SEARCH_RESULTS)),
+                timeout_seconds=float(config.get("timeoutMs", 30_000)) / 1000,
+            )
+        except SearchUnavailable as error:
+            english = store.get_settings(email).language.lower().startswith('en')
+            message = ('Research incomplete: search returned no usable sources. Continue with verified existing materials '
+                       'or user-provided URLs; disclose the missing research and do not invent findings.' if english else
+                       '调研未完成：搜索未返回可用来源。可使用已有的可核实资料或用户提供的链接继续；须说明调研缺口，不能编造结果。')
+            return {'status': 'research_incomplete', 'query': ' '.join(arguments['query'].split()),
+                    'sources': [], 'attempts': error.attempts, 'message': message,
+                    'continuation': ['existing_workspace_material', 'user_provided_urls']}
     if name == "web_fetch":
         if set(arguments) != {"url"} or not isinstance(arguments.get("url"), str):
             raise ResearchToolError("web_fetch requires only a string url")

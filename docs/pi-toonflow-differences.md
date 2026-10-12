@@ -122,3 +122,39 @@ Local browser acceptance uses the real Pi SDK with a synthetic model transport;
 it does not establish real-provider or deployed Cloud Run behavior. Container
 build remains a release gate: the local attempt failed while fetching the Python
 base image from Docker Hub with a TLS handshake timeout, before application build.
+
+## Creative, research and media tool corrections (2026-10-12)
+
+Enabled skill instructions can be read for the requested task without implicitly
+activating external research. Creative strategy can use existing verified material
+for a preliminary proposal. Research skills retain explicit invocation metadata;
+selecting an ordinary `/skill:` does not automatically enable web search.
+
+When all attempted search providers fail, the Agent receives a structured
+`research_incomplete` receipt with an empty source list and per-provider error
+codes. Both English and Chinese tool cards display the incomplete state, including
+restored history. The Agent is instructed to disclose the gap, continue with
+verified workspace material or user-provided links, and never invent sources or
+claim a completed competitor audit. Search challenges are classified separately
+from empty results. The current default remains DuckDuckGo HTML; this change does
+not provision another external search provider or guarantee search availability.
+
+Media tools default to the deployment-configured model for the requested media
+type. The Agent supplies production parameters without looking up or inventing
+model IDs. The host resolves and validates the exact provider/model before paid
+approval and request hashing. Explicit configured pairs remain compatible with
+existing sessions. Partial pairs and absent defaults fail before approval. Model
+configuration and enabled media capability are provided as context, without keys;
+configured availability is not evidence of a successful live generation call.
+
+Acceptance includes the real Pi SDK callback path with simulated provider
+responses: failed search followed by reading a project document and fetching a
+supplied URL, and creative skill reading without external research permission.
+Browser acceptance verifies incomplete search status in both interface languages.
+No paid provider calls or production deployment were performed in this correction.
+
+Correction validation: 591 backend tests, 53 native runtime tests and 86 frontend
+tests passed, with zero failures or skips. Workspace type checks, the Vue
+translation audit, production web build/sync and diff checks passed. Browser
+model/search responses were synthetic; no live search or paid-generation
+availability was asserted.

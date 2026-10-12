@@ -152,6 +152,12 @@ class BusinessTools:
         # Input revisions are authenticated by the host before approval, never
         # accepted as hashes supplied by a model.
         media_request_schema['properties'].pop('input_revisions', None)
+        # The Agent normally supplies production parameters only. Explicit IDs
+        # remain compatible with existing sessions, but must match deployment config.
+        media_request_schema['required'] = [key for key in media_request_schema['required']
+                                            if key not in {'provider_id', 'model_id'}]
+        for key in ('provider_id', 'model_id'):
+            media_request_schema['properties'][key]['description'] = 'Optional explicit configured override; omit to use the deployment default.'
         resource = _object({'action': _string(enum=['read', 'write', 'forget', 'configure']),
             'scope': _string(enum=['user', 'project']), 'content': _string(maxLength=MAX_RESOURCE_CHARS),
             'expected_revision': _string(), 'enabled': {'type': 'boolean'}}, ['action'])
@@ -168,7 +174,7 @@ class BusinessTools:
             ('canvasManager', 'List/read canvases or create/switch/rename them. Switching is blocked if this turn has uncommitted canvas edits.', _object({
                 'action': _string(enum=['list', 'read'] if not canvas_write else ['list', 'read', 'create', 'switch', 'rename']),
                 'canvas_id': _string(), 'name': _string(minLength=1, maxLength=120)}, ['action'])),
-            ('mediaJobs', 'Submit a configured provider/model request only after interactive exact-request paid approval; inspect, cancel or attach completed jobs. A stable idempotency_key is required.', _object({
+            ('mediaJobs', 'Generate using the deployment default model: omit provider_id and model_id. The host resolves the exact model before interactive exact-request paid approval; inspect, cancel or attach completed jobs. A stable idempotency_key is required.', _object({
                 'action': _string(enum=['list', 'status'] + ((['cancel'] if cancellation_enabled else []) + (['attach'] if attachment_enabled else []) + (['submit'] if generation_enabled else []) if media_write else [])),
                 'request': media_request_schema, 'job_id': _string(pattern='^[a-f0-9]{32}$'),
                 'node_id': _string(), 'position': _object({'x': {'type': 'number'}, 'y': {'type': 'number'}}, ['x', 'y'])}, ['action'])),
@@ -319,6 +325,15 @@ class BusinessTools:
         content = '' if args['action'] == 'forget' else args.get('content', current['content'])
         enabled = args.get('enabled', current['enabled'])
         return self.resource_write(resource, content, args.get('expected_revision'), enabled, scope)
+
+    def media_context(self):
+        from app.routers.video_runtime import configured_media_models
+        enabled = self.enabled_extensions is None or 'tool-media-generation' in self.enabled_extensions
+        models = configured_media_models() if enabled else []
+        return ('Deployment media configuration (configured, not a successful live provider check):\n'
+                  + json.dumps({'generation_enabled': enabled, 'models': models}, ensure_ascii=False)
+                  + '\nSubmit production parameters without provider_id/model_id to use the deployment default. '
+                    'Do not invent IDs or claim no provider when configured models exist.')
 
     def context(self):
         chunks = []
@@ -621,7 +636,27 @@ class BusinessTools:
     def _submit(self, media, args, tool_call_id):
         from . import jobs, media_jobs
         model = MediaJobCreate if media else ExportRequest
-        request = model.model_validate(args['request'])
+        payload = dict(args['request'])
+        if media:
+            has_provider, has_model = 'provider_id' in payload, 'model_id' in payload
+            if has_provider != has_model:
+                english = store.get_settings(self.email).language.lower().startswith('en')
+                raise ValueError('Specify both configured provider_id and model_id, or omit both for the deployment default' if english else
+                                 '请同时指定已配置的服务商和模型，或同时省略以使用部署默认模型')
+            if not has_provider:
+                from app.routers.video_runtime import configured_media_models
+                candidates = [item for item in configured_media_models() if item['type'] == payload.get('media_type')]
+                default = next((item for item in candidates if item.get('isDefault')), None)
+                if default is None and len(candidates) == 1:
+                    default = candidates[0]
+                if default is None:
+                    english = store.get_settings(self.email).language.lower().startswith('en')
+                    kind = payload.get('media_type')
+                    label = {'image': '图片', 'video': '视频', 'audio': '音频'}.get(kind, kind)
+                    raise ValueError(f'No configured {kind} default model; check deployment configuration' if english else
+                                     f'未配置{label}默认模型，请检查部署配置')
+                payload.update(provider_id=default['providerId'], model_id=default['modelId'])
+        request = model.model_validate(payload)
         if not request.idempotency_key:
             raise ValueError('Submit requires a stable request idempotency_key')
         if media:

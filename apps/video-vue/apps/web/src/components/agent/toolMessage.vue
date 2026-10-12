@@ -7,9 +7,10 @@
       <span class="toolHeader" :data-status="tool.status">
         <icon-tool :size="14" />
         <span class="toolName">{{ renderer ? "操作工具" : tool.name || "工具调用" }}</span>
-        <span class="toolState">{{ tool.name === 'subAgent' && tool.status === 'success' ? '调用已返回' : toolStatusLabels[tool.status] }}</span>
+        <span class="toolState">{{ researchIncomplete ? t('调研未完成', 'Research incomplete') : tool.name === 'subAgent' && tool.status === 'success' ? '调用已返回' : toolStatusLabels[tool.status] }}</span>
       </span>
     </template>
+    <p v-if="researchIncomplete" class="toolProgress" role="status">{{ t("搜索未返回可用来源，可使用已有资料或你提供的链接继续。", "Search returned no usable sources. Continue with existing materials or links you provide.") }}</p>
     <p v-if="tool.progress" class="toolProgress" role="status">{{ nativeSystemText(tool.progress, interfaceLanguage) }}</p>
     <div v-if="!collapsed" class="toolDetails">
       <template v-for="(data, index) in [args, result]" :key="index">
@@ -27,6 +28,7 @@
 </template>
 
 <script setup lang="ts">
+import { isResearchIncomplete } from "./toolOutcome";
 import { t, interfaceLanguage } from "@/i18n";
 import { nativeSystemText, nativeToolResult } from "@linglonglab/video-runtime-types/agent/locale";
 import { computed, onErrorCaptured, ref, shallowRef, watch, type Component } from "vue";
@@ -63,6 +65,7 @@ onErrorCaptured(error => {
   rendererError.value = error.message;
   return false;
 });
+const researchIncomplete = computed(() => isResearchIncomplete(tool.name, tool.result));
 const collapsed = ref(true);
 const toolStatusLabels = { running: "调用中…", success: "已完成", error: "调用失败", interrupted: "已中断" };
 const toolCodeOptions = { maxHeight: 240, lineNumbers: false };

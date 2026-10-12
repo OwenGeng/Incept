@@ -247,3 +247,55 @@ def test_bad_session_path_and_disabled_agent_fail_before_any_provider_call(proje
     with pytest.raises(ValueError, match='disabled'):
         run(project, 'Hello')
     assert store.list_conversations(EMAIL, project.id)[0].run_status == 'failed'
+
+
+@pytest.mark.parametrize('prompt', [
+    '不要调研竞品，使用 ctv-creative-strategy 给我初步方案',
+    '/skill:ctv-creative-strategy Give me a preliminary proposal using existing documents.',
+])
+def test_creative_skill_read_does_not_authorize_external_research(project, monkeypatch, prompt):
+    def model(payload, **kwargs):
+        names = {tool['name'] for tool in payload['context']['tools']}
+        assert 'web_search' not in names
+        results = [m for m in payload['context']['messages'] if m['role'] == 'toolResult']
+        if not results:
+            return reply(payload, calls=[call('skillOperator', {'action': 'read', 'name': 'ctv-creative-strategy'})])
+        assert not results[-1].get('isError'), results[-1]
+        assert 'website-only preliminary proposal' in results[-1]['content'][0]['text']
+        return reply(payload, 'Preliminary proposal using existing verified material; reference audit pending.')
+    monkeypatch.setattr(pi_agent, 'model_response', model)
+    result, _, _ = run(project, prompt)
+    assert result.run_status == 'completed'
+
+
+@pytest.mark.parametrize('language', ['zh-CN', 'en-US'])
+def test_failed_research_continues_existing_material_and_user_link_in_actual_sdk(project, monkeypatch, language):
+    from app.video_studio import research_tools
+    from app.video_studio.models import VideoStudioSettings
+    store.save_settings(EMAIL, VideoStudioSettings(language=language))
+    (store.assets_root(EMAIL, project.id) / 'client-facts.md').write_text('Confirmed product: custom fitted floor mat.')
+    research_tools._PROVIDER_HEALTH.clear()
+    monkeypatch.setattr(research_tools, '_default_search_providers', lambda **kwargs: [
+        research_tools.SearchProvider('offline', lambda *args: {'sources': []})])
+    url = 'https://brand.example.test/product'
+    monkeypatch.setattr(research_tools, 'fetch_public_webpage', lambda target, **kwargs:
+        {'url': target, 'title': 'Product', 'content': 'Documented washable material.'})
+    label = 'Research incomplete' if language.startswith('en') else '调研未完成'
+    def model(payload, **kwargs):
+        assert label in payload['context']['systemPrompt']
+        results = [m for m in payload['context']['messages'] if m['role'] == 'toolResult']
+        if not results:
+            return reply(payload, calls=[call('web_search', {'query': 'floor mats commercial'})])
+        receipts = [json.loads(m['content'][0]['text']) for m in results]
+        assert receipts[0]['status'] == 'research_incomplete' and receipts[0]['sources'] == []
+        if len(results) == 1:
+            return reply(payload, calls=[call('workspaceDocuments', {'action': 'read', 'path': 'client-facts.md'})])
+        assert 'custom fitted' in receipts[1]['text']
+        if len(results) == 2:
+            return reply(payload, calls=[call('web_fetch', {'url': url})])
+        assert receipts[2]['content_sha256'] and receipts[2]['url'] == url
+        assert 'washable' in receipts[2]['content']
+        return reply(payload, f'{label}. Preliminary direction from existing client facts and the supplied product link; competitor audit pending.')
+    monkeypatch.setattr(pi_agent, 'model_response', model)
+    result, _, text = run(project, f'Research competitor references. Use existing material and {url} if search fails.')
+    assert result.run_status == 'completed' and label in text

@@ -421,3 +421,33 @@ def test_tool_execution_requires_its_enabled_extension(tmp_path, monkeypatch) ->
         "record_claim_evidence",
         "list_claim_evidence",
     } <= names
+
+
+@pytest.mark.parametrize('language', ['zh-CN', 'en-US'])
+def test_search_failure_receipt_is_incomplete_and_preserves_provider_diagnostics(tmp_path, monkeypatch, language):
+    from app.video_studio.models import VideoStudioSettings
+    monkeypatch.setenv('VIDEO_STUDIO_DATA_DIR', str(tmp_path))
+    email = 'incomplete@example.com'
+    project = store.create_project(email, ProjectCreate(name='Incomplete research'))
+    store.save_settings(email, VideoStudioSettings(language=language))
+    research_tools._PROVIDER_HEALTH.clear()
+    providers = [research_tools.SearchProvider('failed-test-provider', lambda *args: {'sources': []})]
+    original = research_tools.search_public_web
+    monkeypatch.setattr(research_tools, 'search_public_web', lambda query, **kwargs: original(query, providers=providers, **kwargs))
+    result = research_tools.execute_research_tool('web_search', {'query': 'floor mats'}, email=email,
+        project_id=project.id, enabled_extensions={'tool-web-search'}, extension_configs={})
+    assert result['status'] == 'research_incomplete' and result['sources'] == []
+    assert result['attempts'][0]['error_code'] == 'empty_results'
+    assert result['message'].startswith('Research incomplete' if language.startswith('en') else '调研未完成')
+    assert result['continuation'] == ['existing_workspace_material', 'user_provided_urls']
+    assert not list(store.assets_root(email, project.id).rglob('*.md'))
+
+
+def test_search_challenge_is_classified_separately_from_no_results():
+    research_tools._PROVIDER_HEALTH.clear()
+    transport = httpx.MockTransport(lambda request: httpx.Response(202, request=request,
+        text='<form id="challenge-form">Please select all squares containing a duck</form>'))
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(research_tools.ResearchToolError) as failure:
+            research_tools.search_public_web('floor mats', client=client, resolver=_public_resolver)
+    assert failure.value.attempts[0]['error_code'] == 'challenge_required'

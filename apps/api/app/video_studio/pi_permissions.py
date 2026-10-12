@@ -19,7 +19,7 @@ def tool_permissions(prompt):
     return {
         'canvas': bool(canvas),
         'destructive': bool(re.search(r'删除|移除|断开|\b(?:delete|remove|disconnect)\b', affirmative, re.I)),
-        'research': bool(re.search(r'/skill:|调研|研究|\b(?:research|investigate)\b', affirmative, re.I)),
+        'research': bool(re.search(r'/skill:(?:ctv-reference-research|brand-product-intake)(?:\s|$)|调研|研究|\b(?:research|investigate)\b', affirmative, re.I)),
         'collection': collection and not capability,
         'public_fetch': bool(re.search(r'https?://|方案|创意|提案|分镜|脚本|\b(?:proposal|creative|storyboard|script)\b', prompt, re.I)),
         'workspace': bool(re.search(r'(?:创建|修改|保存|写入|更新).{0,40}(?:文档|文件)|\b(?:create|edit|save|write|update)\b.{0,40}\b(?:document|file)\b',affirmative,re.I)) and not capability,

@@ -62,6 +62,11 @@ def test_skill_catalog_and_references_are_real_and_path_scoped(monkeypatch):
     listed = read_skill({'action': 'list'}, [custom])
     assert any(item['name'] == 'workflow' for item in listed['skills'])
     assert listed['skills'][1]['disableModelInvocation']
+    creative = SkillDefinition(id='ctv-creative-strategy', name='Creative', builtin=True)
+    research = SkillDefinition(id='ctv-reference-research', name='Research', builtin=True)
+    kinds = read_skill({'action': 'list'}, [creative, research])['skills']
+    assert not kinds[1]['disableModelInvocation']
+    assert kinds[2]['disableModelInvocation']
     assert 'PART A' in read_skill({'action': 'read', 'name': 'workflow'}, [])['content']
     assert read_skill({'action': 'read', 'name': 'workflow', 'path': 'references/canvasExecution.md'}, [])['content']
     assert read_skill({'action': 'read', 'name': custom.id}, [custom])['content'] == custom.instructions
