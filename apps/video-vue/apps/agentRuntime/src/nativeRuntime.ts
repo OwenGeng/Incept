@@ -1,5 +1,5 @@
 /** Public protocol adapter around vendored Toonflow's original run lifecycle. */
-import { nativeSystemText, nativeToolResult } from '../../../packages/runtimeTypes/agent-locale.ts';
+import { nativeSystemText, nativeToolResult } from '@linglonglab/video-agent-locale';
 import { basename, dirname } from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
 import { SessionManager } from '@earendil-works/pi-coding-agent';

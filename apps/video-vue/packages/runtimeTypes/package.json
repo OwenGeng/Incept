@@ -8,6 +8,7 @@
     "./agent/locale": "./agent-locale.ts"
   },
   "dependencies": {
-    "@linglonglab/video-tools-scaffold": "workspace:*"
+    "@linglonglab/video-tools-scaffold": "workspace:*",
+    "@linglonglab/video-agent-locale": "workspace:*"
   }
 }

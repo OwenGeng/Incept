@@ -1,4 +1,4 @@
-import { nativeSystemText } from "../../../../packages/runtimeTypes/agent-locale.ts";
+import { nativeSystemText } from "@linglonglab/video-agent-locale";
 /** Authenticated storage/model/tool boundaries for unchanged Toonflow lifecycle.
  * Source modules are pinned in provenance.json; no agent/model loop lives here.
  */

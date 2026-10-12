@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
-import { nativePhraseEntries } from '../../../packages/runtimeTypes/agent-locale.ts';
+import { nativePhraseEntries } from '@linglonglab/video-agent-locale';
 test('every pinned upstream static Chinese error has an English boundary translation',()=>{
   const known=new Set(nativePhraseEntries.map(([zh])=>zh));
   for(const folder of ['runtime','tools'])for(const name of readdirSync(new URL(`./native/upstream/${folder}/`,import.meta.url))){

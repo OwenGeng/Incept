@@ -107,3 +107,8 @@ failures or skips, plus workspace types, translation audit and production Vue
 build/static sync. Linux image build and lifecycle CI for the preceding host
 commit passed at https://github.com/OwenGeng/Incept/actions/runs/38162782495;
 the bilingual commit has its own CI run.
+
+The shared locale catalogue is an explicit production dependency shipped as
+JavaScript with TypeScript declarations. A clean production-only deployment
+successfully imported the native runtime, private host and locale package;
+no development TypeScript loader is needed for dependency files.
