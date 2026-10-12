@@ -20,6 +20,6 @@ When an external API returns 4xx errors (404, 400, 403):
 
 - **API:** FastAPI (Python), runs at `localhost:8000`
 - **Web:** Next.js (TypeScript), runs at `localhost:3000`
-- **Image generation:** `gemini-3.1-flash-image` via Vertex AI, `location=global` (NOT `us-central1`)
+- **Image generation:** default `gemini-nano-banana-2.1`, fallback `gemini-3.1-flash-image`, via Vertex AI, `location=global` (NOT `us-central1`)
 - **Text/analysis Gemini:** `gemini-3.8-flash` via Enterprise Agent Platform, `location=global`
 - **Config files:** `apps/api/app/incept/config.py` (all Vertex/Gemini models), `apps/api/app/core/config.py` (shared API/BigQuery settings only)

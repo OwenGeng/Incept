@@ -82,7 +82,7 @@ def _save_composite(target: Path, encoded: str, original: Image.Image, mask: Ima
 
 async def masked_image_edit(root: Path, body: MaskedEditRequest) -> dict[str, str]:
     settings = get_settings()
-    if body.providerId != 'google-vertex-ai' or body.modelId != settings.vertex_gemini_image_model:
+    if body.providerId != 'google-vertex-ai' or body.modelId not in {settings.vertex_gemini_image_model, settings.vertex_gemini_image_fallback_model}:
         raise ValueError('局部重绘仅支持当前部署启用的 Vertex 图片模型')
     if not body.prompt.strip():
         raise ValueError('请输入局部重绘提示词')

@@ -252,6 +252,7 @@ def configured_media_models() -> list[dict[str, Any]]:
     if settings.gcp_project_id:
         models.extend([
             {"providerId": "google-vertex-ai", "modelId": settings.vertex_gemini_image_model, "type": "image", "isDefault": True},
+            {"providerId": "google-vertex-ai", "modelId": settings.vertex_gemini_image_fallback_model, "type": "image", "isDefault": False},
             {"providerId": "google-vertex-ai", "modelId": settings.vertex_veo_fast_model, "type": "video", "isDefault": True},
             {"providerId": "google-cloud-tts", "modelId": settings.google_tts_model, "type": "audio", "isDefault": True},
         ])

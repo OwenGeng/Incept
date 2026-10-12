@@ -127,13 +127,14 @@ def test_vue_settings_and_built_in_nodes_are_server_managed(tmp_path, monkeypatc
     media_models = api.get("/video-legacy/api/ai/media/models", headers=headers()).json()["data"]
     media_ids = {item["modelId"] for item in media_models}
     assert "gemini-3.1-flash-image" in media_ids
-    assert "gpt-image-2.5-flare" in media_ids
+    assert "gemini-nano-banana-2.1" in media_ids
+    assert "gpt-image-2.5-flare" not in media_ids
     assert "gemini-omni-1.1-flash-preview" in media_ids
     assert "gpt-4o-mini-tts-2025-12-15" in media_ids
     assert "gemini-3.1-flash-tts-preview" in media_ids
     defaults = {item["type"]: (item["providerId"], item["modelId"]) for item in media_models if item["isDefault"]}
     assert defaults == {
-        "image": ("google-vertex-ai", "gemini-3.1-flash-image"),
+        "image": ("google-vertex-ai", "gemini-nano-banana-2.1"),
         "video": ("google-vertex-ai", "gemini-omni-1.1-flash-preview"),
         "audio": ("google-cloud-tts", "gemini-3.1-flash-tts-preview"),
     }

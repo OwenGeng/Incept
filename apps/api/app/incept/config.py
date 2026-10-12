@@ -30,14 +30,15 @@ class Settings(BaseModel):
     openai_text_model: str = Field(default="gpt-6.1-sol")
 
     default_image_provider: str = Field(default="gemini")
-    openai_image_model: str = Field(default="gpt-image-2.5-flare")
+    openai_image_model: str = Field(default="")
     openai_tts_model: str = Field(default="gpt-4o-mini-tts-2025-12-15")
     vertex_ai_enabled: bool = Field(default=False)
     # Imagen models (generate_images / edit_image API) — deprecated 2026-06-30
     vertex_imagen_model: str = Field(default="imagen-4.0-generate-001")
     vertex_imagen_edit_model: str = Field(default="imagen-4.0-generate-001")
     # Gemini image generation (generate_content API — replaces Imagen long-term)
-    vertex_gemini_image_model: str = Field(default="gemini-3.1-flash-image")
+    vertex_gemini_image_model: str = Field(default="gemini-nano-banana-2.1")
+    vertex_gemini_image_fallback_model: str = Field(default="gemini-3.1-flash-image")
     vertex_gemini_enabled: bool = Field(default=True)
     vertex_gemini_model: str = Field(default="gemini-3.8-flash")
     vertex_playable_model: str = Field(default="gemini-3.8-flash")
@@ -131,12 +132,13 @@ def get_settings() -> Settings:
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-6.1-sol"),
         default_image_provider=os.getenv("DEFAULT_IMAGE_PROVIDER", "gemini"),
-        openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare"),
+        openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", ""),
         openai_tts_model=os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts-2025-12-15"),
         vertex_ai_enabled=os.getenv("VERTEX_AI_ENABLED", "false").lower() == "true",
         vertex_imagen_model=os.getenv("VERTEX_IMAGEN_MODEL", "imagen-4.0-generate-001"),
         vertex_imagen_edit_model=os.getenv("VERTEX_IMAGEN_EDIT_MODEL", "imagen-4.0-generate-001"),
-        vertex_gemini_image_model=os.getenv("VERTEX_GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
+        vertex_gemini_image_model=os.getenv("VERTEX_GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1"),
+        vertex_gemini_image_fallback_model=os.getenv("VERTEX_GEMINI_IMAGE_FALLBACK_MODEL", "gemini-3.1-flash-image"),
         vertex_gemini_enabled=os.getenv("VERTEX_GEMINI_ENABLED", "true").lower() == "true",
         vertex_gemini_model=os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.8-flash"),
         vertex_playable_model=os.getenv("VERTEX_PLAYABLE_MODEL", "gemini-3.8-flash"),

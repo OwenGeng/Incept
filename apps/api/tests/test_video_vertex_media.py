@@ -57,6 +57,7 @@ def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.Monke
     fake_genai.Client = FakeClient  # type: ignore[attr-defined]
     fake_types = ModuleType("google.genai.types")
     fake_types.GenerateContentConfig = FakeConfig  # type: ignore[attr-defined]
+    fake_types.ImageConfig = FakeConfig  # type: ignore[attr-defined]
     fake_types.Modality = SimpleNamespace(TEXT="TEXT", IMAGE="IMAGE")  # type: ignore[attr-defined]
     fake_types.Part = SimpleNamespace(from_bytes=lambda **kwargs: kwargs)  # type: ignore[attr-defined]
     fake_genai.types = fake_types  # type: ignore[attr-defined]
@@ -69,7 +70,7 @@ def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.Monke
     result = asyncio.run(
         VertexImageApiAdapter().generate(
             cfg=ProviderConfig(provider="vertex", api_key="", project_id="example-project", location="global"),
-            inp=ImageGenerationInput(prompt="A bright product photo", model="configured-image-model", images=['data:image/png;base64,aW1hZ2U='] if with_reference else []),
+            inp=ImageGenerationInput(prompt="A bright product photo", model="configured-image-model", target_ratio="16:9", images=['data:image/png;base64,aW1hZ2U='] if with_reference else []),
             timeout_s=30.0,
         )
     )
@@ -81,6 +82,7 @@ def test_vertex_image_uses_enterprise_generate_content(monkeypatch: pytest.Monke
         "http_options": {"timeout": 30000},
     }
     assert captured["model"] == "configured-image-model"
+    assert captured["config"].kwargs["image_config"].kwargs == {"aspect_ratio": "16:9"}
     assert captured['contents'] == ([{'data': b'image', 'mime_type': 'image/png'}, 'A bright product photo'] if with_reference else 'A bright product photo')
     assert result.images[0].b64_json == "aW1hZ2UtYnl0ZXM="
 

@@ -218,6 +218,7 @@ class VertexImageApiAdapter:
                 config=genai_types.GenerateContentConfig(
                     candidateCount=1,
                     responseModalities=[genai_types.Modality.TEXT, genai_types.Modality.IMAGE],
+                    image_config=genai_types.ImageConfig(aspect_ratio=inp.target_ratio) if inp.target_ratio else None,
                 ),
             )
             images: list[ImageItem] = []

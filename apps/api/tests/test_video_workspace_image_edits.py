@@ -26,8 +26,11 @@ def images(tmp_path, monkeypatch):
     return api, {'directory': directory, 'sourcePath': 'assets/source/image.png', 'maskPath': 'assets/new/mask.png', 'prompt': 'Change selected area to red', 'providerId': 'google-vertex-ai', 'modelId': get_settings().vertex_gemini_image_model, 'outputDirectory': 'assets/new'}, source
 
 
-def test_masked_edit_keeps_original_and_every_unmasked_pixel(images, monkeypatch):
+@pytest.mark.parametrize('use_fallback', [False, True])
+def test_masked_edit_keeps_original_and_every_unmasked_pixel(images, monkeypatch, use_fallback):
     api, body, source = images
+    if use_fallback:
+        body['modelId'] = get_settings().vertex_gemini_image_fallback_model
     captured = {}
     async def generate(self, **kwargs):
         from app.video_studio.vertex_media import ImageGenerationResult, ImageItem
