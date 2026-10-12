@@ -96,9 +96,10 @@
       <div ref="senderElement" class="senderEditor" @keydown.capture="skillMenuRef?.handleKeydown($event)"></div>
       <div class="senderActions">
         <input ref="attachmentPicker" type="file" accept="image/*,video/*" multiple hidden :disabled="!canAddAttachments" @change="pickAttachments" />
-        <el-button class="uploadButton" text size="small" :disabled="!canAddAttachments" aria-label="上传素材" title="每条最多 20 个附件；图片上传限额 100 MiB，视频 450 MB（450,000,000 字节）；分析与并发限制由服务端校验" @click="attachmentPicker?.click()"><icon-paperclip :size="16" />上传素材</el-button>
+        <el-button class="uploadButton" text circle size="small" :disabled="!canAddAttachments" aria-label="上传素材" title="每条最多 20 个附件；图片上传限额 100 MiB，视频 450 MB（450,000,000 字节）；分析与并发限制由服务端校验" @click="attachmentPicker?.click()"><icon-paperclip :size="16" aria-hidden="true" /></el-button>
         <modelPopover v-model="selectedModel" :showReasoning="false" :active="active" :disabled="disabled" />
-        <el-select v-if="thinkingLevels.length" v-model="thinkingLevel" class="thinkingSelect" size="small" :disabled="busy || remoteRunning || disabled" :aria-label="t('思考强度', 'Thinking level')" :title="t('思考强度', 'Thinking level')">
+        <el-select v-if="thinkingLevels.length" v-model="thinkingLevel" class="thinkingSelect" size="small" :disabled="busy || remoteRunning || disabled" :aria-label="t('思考强度', 'Thinking level')" :title="`${t('思考强度', 'Thinking level')} · ${thinkingLabel(thinkingLevel)}`">
+          <template #label><icon-atom :size="16" aria-hidden="true" /></template>
           <el-option v-for="level in thinkingLevels" :key="level" :value="level" :label="thinkingLabel(level)" />
         </el-select>
         <skillMenu ref="skillMenuRef" :directory="directory" :active="active" :disabled="locked || editingId !== undefined || !directory" :query="skillQuery" :editor="senderElement" @select="selectSkill" @dismiss="skillQuery = undefined" />
@@ -1140,13 +1141,26 @@ watch(() => !props.initialSession?.parentFile && !!workspaceStore.pendingAgentMe
         margin-left: 0;
       }
 
-      .thinkingSelect { width: 102px; flex-shrink: 0; }
+      .thinkingSelect {
+        width: 28px;
+        flex-shrink: 0;
+        .el-select__wrapper {
+          min-height: 28px;
+          padding: 4px;
+          background-color: transparent;
+          box-shadow: none;
+          &.is-hovering { background-color: var(--el-fill-color-light); }
+          &.is-focused { box-shadow: 0 0 0 1px var(--el-color-primary) inset; }
+        }
+        .el-select__selected-item { display: flex; align-items: center; justify-content: center; }
+        .el-select__suffix { display: none; }
+      }
       .runningAction { width: 110px; flex-shrink: 0; }
       .modelPopover {
         flex: 1;
         margin-right: auto;
       }
-      .uploadButton { flex-shrink: 0; gap: 4px; }
+      .uploadButton { width: 28px; height: 28px; padding: 0; flex-shrink: 0; }
 
       .contextButton {
         width: 24px;
