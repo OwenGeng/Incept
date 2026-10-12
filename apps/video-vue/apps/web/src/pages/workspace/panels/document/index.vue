@@ -1,27 +1,27 @@
 <template>
-  <section class="documentWorkspace" aria-label="文档工作区">
+  <section class="documentWorkspace" :aria-label="t('文档工作区', 'Document workspace')">
     <aside class="sidebar">
-      <div class="sidebarModes"><el-button size="small" :type="searchVisible ? 'default' : 'primary'" @click="searchVisible = false">文件</el-button><el-button size="small" :type="searchVisible ? 'primary' : 'default'" @click="searchVisible = true">全文搜索 / 替换</el-button></div>
+      <div class="sidebarModes"><el-button size="small" :type="searchVisible ? 'default' : 'primary'" @click="searchVisible = false">{{ t('文件', 'Files') }}</el-button><el-button size="small" :type="searchVisible ? 'primary' : 'default'" @click="searchVisible = true">{{ t('全文搜索 / 替换', 'Search / Replace') }}</el-button></div>
       <workspaceSearch v-show="searchVisible" ref="searchPanel" :directory="workspaceStore.project?.directory" :openPaths="openPaths" :blocked="tabs.some(tab => tab.loading)" @openFile="path => openSelection({ filePath: path, label: path.split('/').at(-1)! })" />
       <fileTree v-show="!searchVisible" :directory="workspaceStore.project?.directory" @selectNode="openSelection" />
     </aside>
     <div class="documents">
-      <div class="layoutToolbar" role="group" aria-label="文档布局">
+      <div class="layoutToolbar" role="group" :aria-label="t('文档布局', 'Document layout')">
         <span>{{ tabs.length }} / 12 个标签</span>
         <el-button size="small" :type="layout === 'single' ? 'primary' : 'default'" @click="setLayout('single')">单窗</el-button>
         <el-button size="small" :type="layout === 'horizontal' ? 'primary' : 'default'" @click="setLayout('horizontal')">左右分屏</el-button>
         <el-button size="small" :type="layout === 'vertical' ? 'primary' : 'default'" @click="setLayout('vertical')">上下分屏</el-button>
       </div>
-      <div class="tabBar" role="tablist" aria-label="打开的文档">
+      <div class="tabBar" role="tablist" :aria-label="t('打开的文档', 'Open documents')">
         <div v-for="tab in tabs" :key="tab.id" class="tab" :class="{ active: activeId === tab.id }">
           <button role="tab" :aria-selected="activeId === tab.id" :title="tab.id" @click="activate(tab.id)">{{ tab.label }}{{ tab.error ? ' · 保存失败' : tab.dirty ? ' · 未保存' : '' }}</button>
           <button :aria-label="`关闭 ${tab.label}`" @click="closeTab(tab.id)">×</button>
         </div>
       </div>
-      <div class="paneControls" role="group" aria-label="选择分屏文档">
+      <div class="paneControls" role="group" :aria-label="t('选择分屏文档', 'Choose pane documents')">
         <label v-for="pane in paneCount" :key="pane" :class="{ focused: activePane === pane - 1 }" @focusin="activePane = pane - 1">
           {{ layout === 'vertical' ? (pane === 1 ? '上窗' : '下窗') : (pane === 1 ? '左窗' : '右窗') }}
-          <el-select :model-value="paneIds[pane - 1]" placeholder="选择标签" size="small" aria-label="选择此窗文档" @change="id => activate(id, pane - 1)">
+          <el-select :model-value="paneIds[pane - 1]" :placeholder="t('选择标签', 'Choose a tab')" size="small" :aria-label="t('选择此窗文档', 'Choose document for this pane')" @change="id => activate(id, pane - 1)">
             <el-option v-for="tab in tabs" :key="tab.id" :label="tab.label" :value="tab.id" />
           </el-select>
         </label>
@@ -30,13 +30,14 @@
         <div v-for="tab in tabs" v-show="paneIds.slice(0, paneCount).includes(tab.id)" :key="tab.id" class="editorSlot" :style="{ gridArea: paneIds[0] === tab.id ? 'first' : 'second' }" @focusin="activePane = paneIds[0] === tab.id ? 0 : 1" @pointerdown="activePane = paneIds[0] === tab.id ? 0 : 1">
           <documentEditor :ref="instance => setEditor(tab.id, instance)" :readNode="props.readNode" :saveNode="props.saveNode" @state="state => { tab.dirty = state.dirty; tab.error = state.error; tab.filePath = state.textPath; }" />
         </div>
-        <div v-for="pane in paneCount" v-show="!paneIds[pane - 1]" :key="`empty-${pane}`" class="emptyPane" :style="{ gridArea: pane === 1 ? 'first' : 'second' }" @pointerdown="activePane = pane - 1">从文件树打开文档，或选择已有标签。</div>
+        <div v-for="pane in paneCount" v-show="!paneIds[pane - 1]" :key="`empty-${pane}`" class="emptyPane" :style="{ gridArea: pane === 1 ? 'first' : 'second' }" @pointerdown="activePane = pane - 1">{{ t('从文件树打开文档，或选择已有标签。', 'Open a document from the file tree, or choose an existing tab.') }}</div>
       </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n';
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useWorkspaceStore } from '@/stores/workspace';

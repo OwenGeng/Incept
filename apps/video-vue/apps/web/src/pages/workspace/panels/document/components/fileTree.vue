@@ -15,13 +15,13 @@
     <div class="treeContent">
       <el-tree v-if="directory" :key="treeVersion" lazy highlightCurrent :load="loadChildren" :props="treeProps" nodeKey="key" emptyText="暂无文件" @node-click="selectNode">
         <template #default="{ node, data }">
-          <span class="fileItem" :title="data.name">
+          <span class="fileItem" :title="workspaceFileLabel(data.name, data.type, interfaceLanguage)">
             <icon-layout-dashboard v-if="data.type === 'canvas'" :size="16" aria-hidden="true" />
             <icon-file-text v-else-if="data.type === 'node'" :size="16" aria-hidden="true" />
             <icon-folder-open v-else-if="data.type === 'directory' && node.expanded" :size="16" aria-hidden="true" />
             <icon-folder v-else-if="data.type === 'directory'" :size="16" aria-hidden="true" />
             <icon-file v-else :size="16" aria-hidden="true" />
-            <span class="fileName">{{ data.name }}</span>
+            <span class="fileName">{{ workspaceFileLabel(data.name, data.type, interfaceLanguage) }}</span>
           </span>
         </template>
       </el-tree>
@@ -30,6 +30,8 @@
 </template>
 
 <script setup lang="ts">
+import { interfaceLanguage, t } from "@/i18n";
+import { workspaceFileLabel } from "../fileLocale";
 import { onBeforeUnmount, ref, watch } from "vue";
 import axios from "axios";
 import type { LoadFunction } from "element-plus";
@@ -107,7 +109,7 @@ async function createMarkdownFile() {
   let value: string;
   try {
     ({ value } = await ElMessageBox.prompt("在工作区根目录新建 Markdown 文件", "新建文件", {
-      inputValue: "文档.md",
+      inputValue: t("文档.md", "Document.md"),
       inputPattern: /^[^\\/]+$/,
       inputErrorMessage: "名称不能包含斜杠",
       inputValidator: name => !!name?.trim() || "请输入文件名称",
