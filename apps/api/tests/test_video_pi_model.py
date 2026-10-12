@@ -3,6 +3,24 @@ import pytest
 from app.video_studio.pi_model import gemini_contents, model_response
 
 
+def test_parallel_tool_results_share_one_gemini_response_turn():
+    context = {'messages': [
+        {'role': 'assistant', 'content': [
+            {'type': 'toolCall', 'id': 'a', 'name': 'getCanvas', 'arguments': {}, 'thoughtSignature': 'c2ln'},
+            {'type': 'toolCall', 'id': 'b', 'name': 'workspaceDocuments', 'arguments': {}},
+        ]},
+        {'role': 'toolResult', 'toolName': 'getCanvas', 'toolCallId': 'a', 'content': [{'type': 'text', 'text': 'canvas'}]},
+        {'role': 'toolResult', 'toolName': 'workspaceDocuments', 'toolCallId': 'b', 'isError': True, 'content': [{'type': 'text', 'text': 'failed'}]},
+        {'role': 'user', 'content': 'Continue'},
+    ]}
+    contents = gemini_contents(context, [])
+    assert len(contents) == 3
+    assert contents[0].parts[0].thought_signature == b'sig'
+    assert [p.function_response.id for p in contents[1].parts] == ['a', 'b']
+    assert contents[1].parts[1].function_response.response == {'result': 'failed', 'isError': True}
+    assert contents[2].parts[0].text == 'Continue'
+
+
 def test_native_tool_history_and_signatures_are_preserved():
     context = {'messages': [
         {'role': 'user', 'content': 'Make a draft'},

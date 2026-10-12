@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Literal
@@ -144,6 +145,38 @@ def _decode_data_image(value: str | None) -> tuple[bytes, str] | None:
     return base64.b64decode(encoded), header[5:] or "image/png"
 
 
+@asynccontextmanager
+async def _omni_reference_frames(inp: VideoGenerationInput):
+    uploaded = []
+    references = list(inp.reference_media)
+    try:
+        for value in (inp.first_frame_base64 or inp.key_frame_base64, inp.last_frame_base64):
+            decoded = _decode_data_image(value)
+            if decoded is None:
+                continue
+            data, mime = decoded
+            if mime not in {'image/png', 'image/jpeg', 'image/webp'} or not 0 < len(data) <= 20 * 1024 * 1024:
+                raise RuntimeError('Omni reference must be a PNG, JPEG or WebP image under 20 MiB')
+            bucket = _asset_bucket()
+            key = f'video/provider-inputs/omni/{uuid.uuid4().hex}'
+            blob = _gcs_client().bucket(bucket).blob(key)
+            task = asyncio.create_task(asyncio.to_thread(blob.upload_from_string, data,
+                content_type=mime, if_generation_match=0, timeout=30))
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                await task  # Finish the bounded upload before deleting its result.
+                uploaded.append(blob)
+                raise
+            uploaded.append(blob)
+            references.append(VideoReferenceMedia(uri=f'gs://{bucket}/{key}', mime_type=mime))
+        yield inp.model_copy(update={'first_frame_base64': None, 'last_frame_base64': None,
+            'key_frame_base64': None, 'reference_media': references})
+    finally:
+        for blob in uploaded:
+            await asyncio.to_thread(blob.delete, if_generation_match=blob.generation, timeout=30)
+
+
 class VertexImageApiAdapter:
     async def generate(
         self,
@@ -217,7 +250,8 @@ class VertexVideoApiAdapter:
         if not inp.model:
             raise RuntimeError("Vertex video generation requires the configured LinglongLab video model")
         if inp.model == "gemini-omni-1.1-flash-preview":
-            return await VertexOmniVideoApiAdapter().generate(cfg=cfg, inp=inp, timeout_s=timeout_s)
+            async with _omni_reference_frames(inp) as prepared:
+                return await VertexOmniVideoApiAdapter().generate(cfg=cfg, inp=prepared, timeout_s=timeout_s)
         try:
             from google import genai
             from google.genai import types as genai_types

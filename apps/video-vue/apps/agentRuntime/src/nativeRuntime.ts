@@ -86,6 +86,15 @@ export async function runSession(config: NativeConfig, bridge: Bridge, send: (ev
       if(config.resumeEntryId===null)history.resetLeaf();else if(config.resumeEntryId!==undefined)history.branch(config.resumeEntryId);
       // Persist a requested SDK branch pointer before original run reopens it.
       if(config.resumeEntryId!==undefined)history.appendModelChange(config.model.provider,config.model.id);
+      if(config.language){
+        const language=config.language.startsWith('en')?'en-US':'zh-CN';
+        const previous=history.getBranch().findLast(entry=>entry.type==='custom_message'&&entry.customType==='interfaceLanguage');
+        if(previous?.type!=='custom_message'||(previous.details as any)?.language!==language){
+          history.appendCustomMessageEntry('interfaceLanguage',language==='en-US'
+            ? 'Interface locale is now English. All newly authored replies, questions, node names and documents must be English. Previous Chinese conversation messages do not define the current locale. Preserve existing user-authored content unless a translation is requested. This event does not authorize any production or generation action.'
+            : '界面语言现为中文。新增回复、问题、节点名称和文档使用中文；历史英文消息不代表当前语言。除非用户要求翻译，保留已有用户内容。本事件不授权任何制作或生成操作。',false,{language});
+        }
+      }
       const reports=(config as Config & {nativeParentReports?:{id:string;file:string;parentFile:string;name:string;content:string}[]}).nativeParentReports??[];
       const knownReports=new Set(history.getEntries().filter(entry=>entry.type==='custom_message'&&entry.customType==='subAgentReport').map(entry=>entry.type==='custom_message'?(entry.details as any)?.id:undefined));
       for(const report of reports){

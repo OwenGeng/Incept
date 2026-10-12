@@ -1,4 +1,7 @@
 export const uiPhraseEntries = [
+  ["下载副本", "Download a copy"],
+  ["编辑图片", "Edit image"],
+  ["图片编辑与宫格切分", "Image editing and grid split"],
   // Application chrome for the restored document/image workspace; never
   // translate user-authored document contents or customer file names here.
   ["排列", "Arrange"], ["水平排列", "Arrange horizontally"],
@@ -806,6 +809,15 @@ export const nodeUiPhraseEntries = [
 ] as const;
 
 export const dynamicUiTranslations: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^关闭 (.+)$/u, "Close $1"],
+  [/^图片、文本输入 · (.+)$/u, "Image and text input · $1"],
+  [/^图片、视频、音频、文本输入 · (.+)$/u, "Image, video, audio, and text input · $1"],
+  [/^视频、图片、文本输入 · (.+)$/u, "Video, image, and text input · $1"],
+  [/^文本、图片、视频输入 · (.+)$/u, "Text, image, and video input · $1"],
+  [/^图片输出 · (.+)$/u, "Image output · $1"],
+  [/^视频输出 · (.+)$/u, "Video output · $1"],
+  [/^音频输出 · (.+)$/u, "Audio output · $1"],
+  [/^文本输出 · (.+)$/u, "Text output · $1"],
   [/^已检查\s*(\d+)\s*个文件，\s*(\d+)\s*个文件匹配。$/u, "Inspected $1 files; $2 files matched."],
   [/^（\s*(\d+)\s*处）$/u, "($1 matches)"],
   [/^(\d+)\s*\/\s*12\s*个标签$/u, "$1 / 12 tabs"],

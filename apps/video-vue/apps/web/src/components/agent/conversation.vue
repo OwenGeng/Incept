@@ -175,7 +175,7 @@ import attachmentList from "./attachmentList.vue";
 import useWorkspaceFiles from "@/lib/workspaceFiles";
 import { writeClipboardText } from "@/lib/clipboard";
 import anonymousData from "@/lib/anonymousData";
-import { modelChoices } from "@/stores/settings";
+import { modelChoices, saveSettings } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { interfaceLanguage, t } from "@/i18n";
 import type { AgentAttachment, AgentConversation, AgentMessage } from "./types";
@@ -581,6 +581,8 @@ async function sendMessage(source?: AgentMessage, researchResume?: { id: string;
   const finishStats = anonymousData.startAgent();
   try {
     if (!source && !researchResume) await instance.reset();
+    // Finish language/model preference saves before the host captures this turn.
+    await saveSettings();
     requestController.signal.throwIfAborted();
     await uploadAttachments(attachments, requestDirectory, requestController.signal);
     await canvasContext?.prepare?.();
@@ -603,6 +605,7 @@ async function sendMessage(source?: AgentMessage, researchResume?: { id: string;
       switch (event.type) {
         case "session":
           if (!researchResume) researchQuestion.value = null;
+          progress.value = t("正在执行…", "Running…");
           requestRun = { directory: requestDirectory, sessionFile: event.file, runId: event.runId ?? requestRun?.runId ?? currentRunId.value };
           activeRun = requestRun;
           remoteRunning.value = true;

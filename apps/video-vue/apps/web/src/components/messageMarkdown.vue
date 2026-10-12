@@ -2,8 +2,8 @@
   <div class="messageMarkdown">
     <markdown
       v-for="(chunk, index) in chunks"
-      :key="index + '-' + !!definitions"
-      v-memo="[chunk, streaming && index === chunks.length - 1, codeOptions]"
+      :key="index + '-' + !!definitions + '-' + (workspace.project?.directory ?? '')"
+      v-memo="[chunk, streaming && index === chunks.length - 1, codeOptions, workspace.project?.directory]"
       class="markdownChunk"
       :content="chunk"
       :mode="streaming && index === chunks.length - 1 ? 'streaming' : 'static'"
@@ -13,6 +13,7 @@
       :linkOptions="{ safetyCheck: false }"
       :cdnOptions="cdnOptions"
       :components="markdownOverlays"
+      :postprocess="resolveReferences"
       :parseMarkdownIntoBlocks="definitions ? keepChunk : undefined"
       :locale="interfaceLanguage" />
   </div>
@@ -27,6 +28,11 @@ import { interfaceLanguage } from "@/i18n";
 import "vue-stream-markdown/index.css";
 import "vue-stream-markdown/theme.css";
 import markdownOverlays from "./markdownOverlays";
+import { useWorkspaceStore } from '@/stores/workspace';
+import { resolveWorkspaceMarkdown } from './workspaceMarkdown';
+const workspace = useWorkspaceStore();
+const resolveReferences = (tree: ReturnType<MarkdownAstParser['markdownToAst']>) =>
+  resolveWorkspaceMarkdown(tree, workspace.project?.directory ?? '', window.location.origin);
 
 const { content, streaming = false, codeOptions } = defineProps<{ content: string; streaming?: boolean; codeOptions?: CodeOptions }>();
 const shikiOptions: ShikiOptions = { theme: ["github-light", "github-dark"] };

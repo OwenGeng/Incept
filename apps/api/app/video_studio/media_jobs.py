@@ -32,7 +32,7 @@ def _frame_base64(email: str, project_id: str, relative_path: str | None, expect
     payload = path.read_bytes()
     if expected_sha256 and hashlib.sha256(payload).hexdigest() != expected_sha256:
         raise ValueError('Approved frame asset has changed; approve a new request before generation')
-    return base64.b64encode(payload).decode("ascii")
+    return f'data:{mime_type};base64,{base64.b64encode(payload).decode("ascii")}'
 
 
 def _extension_for_mime(mime_type: str) -> str:
@@ -59,6 +59,7 @@ def _write_result(
     mime_type: str,
     encoded: str,
     output_directory: str,
+    mute: bool = False,
 ) -> tuple[str, int]:
     try:
         payload = base64.b64decode(encoded, validate=True)
@@ -73,9 +74,25 @@ def _write_result(
     target = store.safe_asset_path(root, relative_path.as_posix())
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(f"{target.suffix}.{uuid.uuid4().hex}.tmp")
-    temporary.write_bytes(payload)
-    temporary.replace(target)
-    return relative_path.as_posix(), len(payload)
+    muted = temporary.with_suffix('.muted.mp4')
+    try:
+        temporary.write_bytes(payload)
+        if mute and media_type == 'video':
+            import os
+            from .agent_media import _run
+            _run([os.getenv('FFMPEG_PATH','ffmpeg'), '-v', 'error', '-nostdin', '-y',
+                '-protocol_whitelist', 'file,pipe', '-i', str(temporary), '-map', '0:v:0',
+                '-c:v', 'copy', '-an', '-movflags', '+faststart', str(muted)],
+                timeout=60, output_files=[(muted, 450_000_000)])
+            muted.replace(temporary)
+            payload_size = temporary.stat().st_size
+        else:
+            payload_size = len(payload)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+        muted.unlink(missing_ok=True)
+    return relative_path.as_posix(), payload_size
 
 
 def create_media_job(email: str, project_id: str, request: MediaJobCreate) -> MediaJob:
@@ -212,6 +229,7 @@ async def _run_media(email: str, project_id: str, job_id: str) -> None:
             response.mime_type,
             response.data,
             current.request.output_directory,
+            current.request.generate_audio is False,
         )
         latest = store.get_media_job(email, project_id, job_id)
         if latest.status != "cancelled":

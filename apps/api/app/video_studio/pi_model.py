@@ -42,7 +42,12 @@ def gemini_contents(context: dict, media_parts: list) -> list:
         if index == current_user:
             parts.extend(media_parts)
         if parts:
-            contents.append(types.Content(role='model' if role == 'assistant' else 'user', parts=parts))
+            # Pi emits one message per result; Gemini expects all responses to
+            # a parallel call batch together in the next function-response turn.
+            if role == 'toolResult' and contents and all(part.function_response for part in contents[-1].parts):
+                contents[-1].parts.extend(parts)
+            else:
+                contents.append(types.Content(role='model' if role == 'assistant' else 'user', parts=parts))
     return contents
 
 

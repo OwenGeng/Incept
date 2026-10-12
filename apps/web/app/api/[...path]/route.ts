@@ -62,6 +62,11 @@ async function proxy(request: NextRequest, context: Context): Promise<Response> 
       const value = upstream.headers.get(name);
       if (value) responseHeaders.set(name, value);
     }
+    if (upstream.headers.get("content-type")?.includes("application/x-ndjson")) {
+      // Compression can buffer small Agent events, including approval cards.
+      responseHeaders.set("cache-control", "no-store, no-transform");
+      responseHeaders.set("x-accel-buffering", "no");
+    }
     return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch (error) {
     console.error("[video proxy] upstream unavailable", error);

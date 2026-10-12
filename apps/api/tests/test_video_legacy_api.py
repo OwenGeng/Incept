@@ -81,6 +81,20 @@ def test_vue_workspace_project_and_file_compatibility(tmp_path, monkeypatch):
     assert content.content == b"hello"
 
 
+def test_vue_language_is_shared_with_agent_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
+    from app.video_studio import store
+    api = client(tmp_path, monkeypatch)
+    email = "legacy@example.com"
+    api.get("/video-legacy/api/settings/get", headers=headers(email))
+    assert store.get_settings(email).language == 'en-US'
+    api.put("/video-legacy/api/settings/save", headers=headers(email), json={'settings': {'ui': {'language': 'zh-CN'}}})
+    assert store.get_settings(email).language == 'zh-CN'
+    api.put("/video-legacy/api/settings/save", headers=headers(email), json={'settings': {'ui': {'language': 'en'}}})
+    assert store.get_settings(email).language == 'en-US'
+    assert api.get("/video-legacy/api/settings/get", headers=headers(email)).json()['data']['ui']['language'] == 'en'
+
+
 def test_vue_settings_and_built_in_nodes_are_server_managed(tmp_path, monkeypatch):
     api = client(tmp_path, monkeypatch)
     response = api.get("/video-legacy/api/settings/get", headers=headers())

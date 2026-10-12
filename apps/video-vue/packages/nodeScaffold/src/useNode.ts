@@ -1,4 +1,4 @@
-import { computed, getCurrentInstance, inject, readonly, ref, type Component, type Ref } from "vue";
+import { computed, getCurrentInstance, inject, readonly, ref, watch, type Component, type Ref } from "vue";
 import { useNode as useFlowNode, useVueFlow } from "@vue-flow/core";
 import { isTypeCompatible, type NodeData, type NodeHandle } from "./connection";
 import { isNodeOutput, type NodeOutputs } from "./values";
@@ -31,6 +31,16 @@ export function useNode<T extends NodeOutputs = NodeOutputs>(options: NodeOption
       && (!defaultOutput || defaultOutput.dataType === output.dataType);
   }));
   const outputs = ref({ ...options.outputs, ...savedOutputs }) as Ref<T>;
+  // Hosted tools can replace canvas data while this component stays mounted.
+  // Hydrate those results before the skeleton publishes its current outputs.
+  watch(() => node.data.outputs, value => {
+    if (value === outputs.value) return;
+    const restored = Object.fromEntries(Object.entries(value ?? {}).filter(([handleId, output]) => {
+      const handle = handles.value.find(item => item.type === "source" && item.id === handleId);
+      return handle && isNodeOutput(output) && isTypeCompatible(output.dataType, handle.dataType);
+    }));
+    outputs.value = { ...options.outputs, ...restored } as T;
+  }, { flush: 'sync' });
   const nodeProps = computed(() => ({
     previewReady: previewReady.value,
     label: node.data.label ?? options.label,

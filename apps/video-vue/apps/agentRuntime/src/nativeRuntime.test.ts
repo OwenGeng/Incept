@@ -19,6 +19,41 @@ function seedSdkSession(dir: string, contents: string[]) {
   return history.getSessionFile();
 }
 
+for (const language of ['zh-CN', 'en-US']) test(`native prompt default follows ${language} without contradictory language defaults`, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'linglonglab-language-'));
+  try {
+    await runSession({ cwd: dir, sessionDir: join(dir, 'sessions'), model, language,
+      prompt: 'Hello', systemPrompt: '', tools: [] }, async (kind, payload) => {
+      if (kind === 'tool') return {};
+      assert.match(payload.context.systemPrompt, language.startsWith('en') ? /默认英文/u : /默认中文/u);
+      if (language.startsWith('en')) assert.doesNotMatch(payload.context.systemPrompt, /默认中文/u);
+      assert.match(payload.context.systemPrompt, /## 推进创作/u);
+      return { role: 'assistant', api: payload.model.api, provider: model.provider, model: model.id,
+        timestamp: Date.now(), usage, stopReason: 'stop', content: [{ type: 'text', text: 'Hello.' }] };
+    });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('changing locale appends one Pi event and retains the original conversation', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'linglonglab-language-event-'));
+  try {
+    const original = seedSdkSession(dir, ['Original customer brief', '原先的中文回复']);
+    const bridge = async (kind: string, payload: any) => {
+      if (kind === 'tool') return {};
+      assert.match(JSON.stringify(payload.context.messages), /Original customer brief/);
+      assert.match(JSON.stringify(payload.context.messages), /Interface locale is now English/);
+      return { role: 'assistant', api: payload.model.api, provider: model.provider, model: model.id,
+        timestamp: Date.now(), usage, stopReason: 'stop', content: [{ type: 'text', text: 'English reply.' }] };
+    };
+    const config = { cwd: dir, sessionDir: join(dir, 'sessions'), model, language: 'en-US', systemPrompt: '', tools: [] };
+    const first = await runSession({ ...config, sessionFile: original, prompt: 'Continue.' }, bridge);
+    const second = await runSession({ ...config, sessionFile: first.sessionFile, prompt: 'Continue again.' }, bridge);
+    const entries = SessionManager.open(second.sessionFile!, join(dir, 'sessions'), dir).getBranch();
+    assert.equal(entries.filter(e => e.type === 'custom_message' && e.customType === 'interfaceLanguage').length, 1);
+    assert.ok(entries.some(e => e.type === 'message' && e.message.role === 'assistant' && JSON.stringify(e.message.content).includes('原先的中文回复')));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('resend branches through Pi entry IDs and retains earlier tool receipts', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'linglonglab-pi-'));
   const observed: any[] = [];

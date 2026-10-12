@@ -57,6 +57,13 @@ and have not been deleted or rewritten during this correction.
 
 ## Acceptance boundary
 
+Live follow-up: [2026-10-12 workflow acceptance](toonflow-live-acceptance-2026-10-12.md)
+records the real local image → reference video → export → playback/download run,
+additional interface/transport repairs, and its remaining acceptance limits.
+The host now records interface-language changes through Pi custom messages and
+localizes only the upstream default language in its adapter. The eleven original
+upstream module bodies remain unchanged.
+
 Regression tests exercise the real SDK with synthetic model responses: retained
 native prompt, stable enabled-plugin catalogs, context-dependent Chinese/English
 node creation, polite generation reaching exact approval, disabled-plugin refusal,

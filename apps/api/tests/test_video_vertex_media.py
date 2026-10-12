@@ -189,3 +189,36 @@ def test_omni_video_keeps_configured_global_interactions_contract(monkeypatch: p
 
     assert result.provider_task_id == "interaction-1"
     assert result.url == "data:video/mp4;base64,dmlkZW8="
+
+
+@pytest.mark.parametrize('fails', [False, True])
+def test_omni_inline_frame_becomes_owned_reference_and_is_cleaned(monkeypatch, fails):
+    from app.video_studio import vertex_media as media
+    seen = []
+    class Blob:
+        generation = 123
+        def upload_from_string(self, data, **kwargs):
+            assert data == b'image'
+            assert kwargs == {'content_type': 'image/png', 'if_generation_match': 0, 'timeout': 30}
+            seen.append('uploaded')
+        def delete(self, **kwargs):
+            assert kwargs == {'if_generation_match': 123, 'timeout': 30}
+            seen.append('deleted')
+    blob = Blob()
+    monkeypatch.setattr(media, '_asset_bucket', lambda: 'owner-bucket')
+    monkeypatch.setattr(media, '_gcs_client', lambda: SimpleNamespace(bucket=lambda name: SimpleNamespace(blob=lambda key: blob)))
+    async def generate(self, *, cfg, inp, timeout_s):
+        assert inp.first_frame_base64 is None
+        assert inp.reference_media[0].uri.startswith('gs://owner-bucket/video/provider-inputs/omni/')
+        assert inp.reference_media[0].mime_type == 'image/png'
+        seen.append('generated')
+        if fails: raise RuntimeError('provider failure')
+        return media.VideoGenerationResult(url='data:video/mp4;base64,dmlkZW8=', provider='vertex', status='succeeded')
+    monkeypatch.setattr(media.VertexOmniVideoApiAdapter, 'generate', generate)
+    async def run():
+        return await media.VertexVideoApiAdapter().generate(cfg=ProviderConfig(provider='vertex',api_key='',project_id='owner-project',location='global'),
+            inp=VideoGenerationInput(prompt='Test',model='gemini-omni-1.1-flash-preview',seconds=4,first_frame_base64='data:image/png;base64,aW1hZ2U='),poll_interval_s=2,timeout_s=30)
+    if fails:
+        with pytest.raises(RuntimeError,match='provider failure'): asyncio.run(run())
+    else: asyncio.run(run())
+    assert seen == ['uploaded', 'generated', 'deleted']

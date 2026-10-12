@@ -107,6 +107,38 @@ def test_multiple_canvases_are_durable_and_keep_one_active(tmp_path, monkeypatch
     assert [item.id for item in remaining.canvases] == ["main"]
 
 
+def test_workspace_frame_keeps_mime_and_approved_revision(tmp_path, monkeypatch):
+    import hashlib
+    import pytest
+    from app.video_studio.vertex_media import _decode_data_image
+    monkeypatch.setenv('VIDEO_STUDIO_DATA_DIR', str(tmp_path))
+    project = store.create_project('creator@example.com', ProjectCreate(name='Frame contract'))
+    path = store.assets_root('creator@example.com', project.id) / 'frame.png'
+    path.write_bytes(b'frame-image')
+    revision = hashlib.sha256(path.read_bytes()).hexdigest()
+    encoded = media_jobs._frame_base64('creator@example.com', project.id, 'frame.png', revision)
+    assert _decode_data_image(encoded) == (b'frame-image', 'image/png')
+    path.write_bytes(b'changed-frame')
+    with pytest.raises(ValueError, match='changed'):
+        media_jobs._frame_base64('creator@example.com', project.id, 'frame.png', revision)
+
+
+def test_silent_generation_result_removes_provider_audio_without_reencoding_video(tmp_path, monkeypatch):
+    from app.video_studio import render
+    monkeypatch.setenv('VIDEO_STUDIO_DATA_DIR', str(tmp_path))
+    project = store.create_project('creator@example.com', ProjectCreate(name='Silent result'))
+    source = tmp_path / 'provider.mp4'
+    render._run(['ffmpeg','-v','error','-y','-f','lavfi','-i','color=c=red:s=32x32:r=24:d=0.5',
+        '-f','lavfi','-i','sine=frequency=440:duration=0.5','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',str(source)],timeout=30)
+    relative, size = media_jobs._write_result('creator@example.com', project.id, 'silent-test', 'video',
+        'video/mp4', base64.b64encode(source.read_bytes()).decode(), 'generated', mute=True)
+    probe = render.probe_asset('creator@example.com', project.id, relative)
+    assert [s['codec_type'] for s in probe['streams']] == ['video']
+    assert probe['streams'][0]['width'] == 32
+    assert abs(float(probe['format']['duration']) - 0.5) < 0.05
+    assert size == (store.assets_root('creator@example.com', project.id) / relative).stat().st_size
+
+
 def test_media_job_writes_generated_asset_without_browser_round_trip(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_STUDIO_DATA_DIR", str(tmp_path))
     project = store.create_project("creator@example.com", ProjectCreate(name="Campaign"))

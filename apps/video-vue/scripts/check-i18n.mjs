@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { withoutInlineTranslations } from './i18n-audit.mjs';
+import { withoutInlineTranslations, untranslatedStaticText } from './i18n-audit.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoots = [join(root, "apps/web/src"), join(root, "packages")];
@@ -36,6 +36,10 @@ for (const file of sourceRoots.flatMap(vueFiles)) {
       return;
     }
     if (!/[\u3400-\u9fff]/u.test(line)) return;
+    if (untranslatedStaticText(line, translatedPhrases).length) {
+      unresolved.push(`${relative(root, file)}:${index + 2}: ${line.trim()}`);
+      return;
+    }
     if (translatedPhrases.some(phrase => line.includes(phrase.trim()))) return;
     if (dynamicPatterns.some(pattern => pattern.test(line))) return;
     unresolved.push(`${relative(root, file)}:${index + 2}: ${line.trim()}`);

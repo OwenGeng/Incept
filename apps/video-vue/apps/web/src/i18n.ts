@@ -197,7 +197,7 @@ const phrases = new Map<string, string>([
 
 const originalText = new WeakMap<Text, string>();
 const originalAttributes = new WeakMap<Element, Map<string, string>>();
-const translatedAttributes = ["aria-label", "title", "placeholder", "aria-description"];
+const translatedAttributes = ["aria-label", "title", "placeholder", "aria-description", "alt"];
 
 function translate(value: string) {
   const leading = value.match(/^\s*/u)?.[0] ?? "";

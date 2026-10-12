@@ -612,7 +612,20 @@ def get_legacy_settings(email: str = Depends(current_user)) -> dict[str, Any]:
     value = {**defaults, **stored}
     value["customProviders"] = defaults["customProviders"]
     value["privacy"] = {"dataCollectionEnabled": False}
+    _sync_legacy_language(email, value)
     return success(value)
+
+
+def _sync_legacy_language(email: str, value: dict[str, Any]) -> None:
+    # Reconcile existing Vue preferences with the Agent's canonical setting.
+    ui = value.get('ui')
+    language = ui.get('language') if isinstance(ui, dict) else None
+    if language not in {'en', 'zh-CN'}:
+        return
+    settings = store.get_settings(email)
+    resolved = 'en-US' if language == 'en' else 'zh-CN'
+    if settings.language != resolved:
+        store.save_settings(email, settings.model_copy(update={'language': resolved}))
 
 
 @router.put("/settings/save")
@@ -620,6 +633,7 @@ def save_legacy_settings(body: SettingsBody, email: str = Depends(current_user))
     defaults = _default_legacy_settings()
     value = {**body.settings, "customProviders": defaults["customProviders"], "privacy": {"dataCollectionEnabled": False}}
     store._write_json(_legacy_settings_path(email), value)  # noqa: SLF001
+    _sync_legacy_language(email, value)
     return success(value)
 
 

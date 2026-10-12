@@ -5,3 +5,8 @@ export function withoutInlineTranslations(line) {
     (call, _zhQuote, _zh, _enQuote, english) =>
       english.trim() && !/[\u3400-\u9fff]/u.test(english) ? '' : call);
 }
+
+export function untranslatedStaticText(line, phrases) {
+  return [...line.matchAll(/>([^<>]+)</gu)].map(match => match[1].trim())
+    .filter(text => /[\u3400-\u9fff]/u.test(text) && !text.includes('{{') && !phrases.includes(text));
+}
