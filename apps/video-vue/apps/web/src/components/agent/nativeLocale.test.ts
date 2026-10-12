@@ -31,3 +31,13 @@ test('English stream errors cover HTTP failure, missing body and interrupted tra
     await assert.rejects(async()=>{for await(const event of readAgentEvents(response,new AbortController().signal,'en'))void event;},pattern);
   }
 });
+
+
+test('question chrome including protected fallback and invalid form text has explicit locale pairs', async()=>{
+  const {readFileSync}=await import('node:fs');
+  const source=readFileSync(new URL('../../../../../packages/tools/askUser/src/questionCard.vue',import.meta.url),'utf8');
+  assert.match(source,/textForLocale\("请确认", "Please confirm"\)/);
+  assert.match(source,/textForLocale\("表单暂时未生成，请 AI 重新整理。", "The form could not be created/);
+  assert.match(source,/textForLocale\("提交回答", "Submit answer"\)/);
+  assert.match(source,/language\?: string/);
+});

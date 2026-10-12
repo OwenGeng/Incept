@@ -102,7 +102,7 @@ so it cannot overwrite a newly rendered reactive label with the previous
 language. The Chinese language option itself displays `Chinese` in English.
 [English Agent settings evidence](acceptance/toonflow-native-host/english-agent-settings.png).
 
-The updated suite passed 558 API, 53 runtime and 80 frontend tests, without
+The updated suite passed 558 API, 53 runtime and 81 frontend tests, without
 failures or skips, plus workspace types, translation audit and production Vue
 build/static sync. Linux image build and lifecycle CI for the preceding host
 commit passed at https://github.com/OwenGeng/Incept/actions/runs/38162782495;
@@ -112,3 +112,7 @@ The shared locale catalogue is an explicit production dependency shipped as
 JavaScript with TypeScript declarations. A clean production-only deployment
 successfully imported the native runtime, private host and locale package;
 no development TypeScript loader is needed for dependency files.
+
+Question cards receive interface language explicitly, including fallback titles,
+invalid-form hints, validation, submission and skip receipts. Failed askUser
+forms use the same inline card and do not depend on a separate renderer build.

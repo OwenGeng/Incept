@@ -1,5 +1,5 @@
 <template>
-  <questionCard v-if="tool.question" :tool="tool" :directory="directory" :sessionFile="tool.question.sessionFile ?? sessionFile" :runId="tool.question.runId ?? runId" />
+  <questionCard v-if="tool.question || tool.name === 'askUser'" :language="interfaceLanguage" :tool="tool" :directory="directory" :sessionFile="tool.question?.sessionFile ?? sessionFile" :runId="tool.question?.runId ?? runId" />
   <component v-else-if="renderer" :is="renderer" :tool="tool" :directory="directory" :sessionFile="sessionFile" :runId="runId" @copy="emit('copy', $event)" />
   <el-text v-if="rendererError && !tool.question" type="danger">{{ t("工具界面加载失败，请停止后重试：", "Tool UI failed to load. Stop and retry:") }}{{ rendererError }}</el-text>
   <chat-reasoning v-model:collapsed="collapsed" class="messageReasoning toolCall" expandIconPlacement="left">
@@ -46,7 +46,7 @@ watch(() => [tool.name, tool.question?.callId] as const, async ([name], _previou
   onCleanup(() => { active = false; });
   renderer.value = undefined;
   rendererError.value = "";
-  if (tool.question || name === "subAgent") return;
+  if (tool.question || name === "askUser" || name === "subAgent") return;
   try {
     const component = await loadToolComponent(name);
     if (active) {
