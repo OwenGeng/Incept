@@ -5,7 +5,7 @@
     data-no-translate
     size="small"
     :aria-label="t('界面语言', 'Interface language')">
-    <el-radio-button value="zh-CN">中文</el-radio-button>
+    <el-radio-button value="zh-CN">{{ t("中文", "Chinese") }}</el-radio-button>
     <el-radio-button value="en">EN</el-radio-button>
   </el-radio-group>
 </template>

@@ -1,3 +1,5 @@
+import { restoredLocaleText } from "./localeRestore";
+import { nativePhraseEntries } from "@linglonglab/video-runtime-types/agent/locale";
 import { computed, onMounted, onUnmounted, watch } from "vue";
 import { uiSettings, updateUiSettings } from "@/stores/settings";
 import { dynamicUiTranslations, extendedUiPhraseEntries, nodeUiPhraseEntries, uiPhraseEntries } from "@/i18nCatalog";
@@ -25,6 +27,7 @@ export function t(chinese: string, english: string) {
  * canvas, document, prompt and project content is deliberately excluded.
  */
 const phrases = new Map<string, string>([
+  ...nativePhraseEntries,
   ["模型与推理设置", "Model and reasoning settings"],
   ["创建项目并发送", "Create project and send"],
   ["返回 LinglongLab", "Back to LinglongLab"],
@@ -222,7 +225,8 @@ function translateNode(node: Node, english: boolean) {
   if (node instanceof Text && !shouldSkip(node)) {
     const previous = originalText.get(node);
     if (!english) {
-      if (previous !== undefined && node.data !== previous) node.data = previous;
+      const target = restoredLocaleText(node.data, previous, previous === undefined ? undefined : translate(previous));
+      if (node.data !== target) node.data = target;
       return;
     }
     if (previous === undefined || node.data !== translate(previous)) originalText.set(node, node.data);
@@ -245,7 +249,8 @@ function translateNode(node: Node, english: boolean) {
     if (value === null) continue;
     if (!english) {
       const source = stored.get(name);
-      if (source !== undefined && value !== source) node.setAttribute(name, source);
+      const target = restoredLocaleText(value, source, source === undefined ? undefined : translate(source));
+      if (value !== target) node.setAttribute(name, target);
       continue;
     }
     const source = stored.get(name);

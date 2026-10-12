@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     "./agent/types": "./agent-types.ts",
-    "./desktop": "./desktop.ts"
+    "./desktop": "./desktop.ts",
+    "./agent/locale": "./agent-locale.ts"
   },
   "dependencies": {
     "@linglonglab/video-tools-scaffold": "workspace:*"

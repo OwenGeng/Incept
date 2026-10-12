@@ -1,4 +1,5 @@
 /** Public protocol adapter around vendored Toonflow's original run lifecycle. */
+import { nativeSystemText, nativeToolResult } from '../../../packages/runtimeTypes/agent-locale.ts';
 import { basename, dirname } from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
@@ -25,6 +26,13 @@ export async function runSession(config: NativeConfig, bridge: Bridge, send: (ev
   controls?.signal?.addEventListener('abort',abort,{once:true});if(controls?.signal?.aborted)abort();
   function project(event:any):any {
     const copy={...event};
+    const language=config.language??'zh-CN';
+    if(copy.type==='error')copy.message=nativeSystemText(copy.message,language);
+    if(copy.type==='progress')copy.content=nativeSystemText(copy.content,language);
+    if(copy.type==='tool')copy.tool={...copy.tool,
+      ...(typeof copy.tool.progress==='string'?{progress:nativeSystemText(copy.tool.progress,language)}:{}),
+      ...(copy.tool.result!==undefined?{result:copy.tool.status==='error'&&typeof copy.tool.result==='string'?nativeSystemText(copy.tool.result,language):nativeToolResult(copy.tool.result,copy.tool.name,language)}:{})};
+    if(copy.type==='subAgent' && ['running','error','cancelled'].includes(copy.agent.status))copy.agent={...copy.agent,result:nativeSystemText(copy.agent.result??'',language)};
     const canonical=(file:string)=>ctx.scopes.get(basename(file))?.canonical??file;
     if(copy.file)copy.file=canonical(copy.file);if(copy.parentFile)copy.parentFile=canonical(copy.parentFile);
     if(copy.agent)copy.agent={...copy.agent,file:canonical(copy.agent.file),parentFile:canonical(copy.agent.parentFile)};
@@ -58,7 +66,10 @@ export async function runSession(config: NativeConfig, bridge: Bridge, send: (ev
       if(current.path)config.onSessionCreated?.(current.path);
     }
     const projected=project(event);
-    if(inner.type==='tool')projected.type==='subAgentEvent'?projected.event.tool=safeValue(inner.tool):projected.tool=safeValue(inner.tool);
+    if(inner.type==='tool'){
+      if(projected.type==='subAgentEvent')projected.event.tool=safeValue(projected.event.tool);
+      else projected.tool=safeValue(projected.tool);
+    }
     if(projected.type==='session')projected.file=context().scope.canonical;
     send(redactCredential(projected, config.apiKey));
   }

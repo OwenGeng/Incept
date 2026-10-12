@@ -36,7 +36,7 @@
                 <span class="statusDot" :data-status="item.status" role="img" :aria-label="subAgentStatusLabels[item.status] ?? '状态待确认'" :title="subAgentStatusLabels[item.status] ?? '状态待确认'" />
                 <span class="subAgentInfo">
                   <span class="subAgentName" :title="item.name">{{ item.name }}</span>
-                  <span v-if="item.result || item.task" class="subAgentSummary">{{ item.result || item.task }}</span>
+                  <span v-if="item.result || item.task" class="subAgentSummary">{{ item.result && item.status !== "completed" ? nativeSystemText(item.result, interfaceLanguage) : item.result || item.task }}</span>
                 </span>
                 <icon-check v-if="item.file === sessionFile" class="selectedIcon" :size="15" aria-hidden="true" />
               </button>
@@ -82,6 +82,8 @@
 </template>
 
 <script setup lang="ts">
+import { nativeSystemText } from "@linglonglab/video-runtime-types/agent/locale";
+import { interfaceLanguage } from "@/i18n";
 import { nextTick, ref, watch } from "vue";
 import { ElMessageBox, type InputInstance } from "element-plus";
 import type { AgentHistory } from "./types";

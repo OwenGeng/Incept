@@ -46,7 +46,7 @@
               <el-input v-if="item.role === 'user' && editingId === item.id" v-model="editingText" type="textarea" :autosize="{ minRows: 2, maxRows: 10 }" :disabled="locked" aria-label="编辑消息" @keydown.esc.prevent="cancelEdit" />
               <div v-else-if="item.role === 'user'" class="messageText">{{ item.content }}</div>
               <div v-if="item.pendingInstruction" class="messageError" role="status" data-no-translate>{{ t('执行已中断；如需继续，请重新发送这条指令', 'Interrupted; resend this instruction to continue.') }}</div>
-              <div v-if="item.error" class="messageError" role="alert">{{ item.error }}</div>
+              <div v-if="item.error" class="messageError" role="alert">{{ nativeSystemText(item.error, interfaceLanguage) }}</div>
             </div>
           </template>
         </chat-item>
@@ -184,6 +184,7 @@ import { canApplyDelegatedSnapshot } from "./delegatedLifecycle";
 import { createConversationStream, readAgentEvents } from "./replyStream";
 import { selectAttachments } from "./attachmentInput";
 import { attachmentWarnings, messagePrompt, recoverDraft, resendMessageId, cancelPayload, type AgentRunScope } from "./conversationInput";
+import { nativeSystemText } from "@linglonglab/video-runtime-types/agent/locale";
 import { progressText } from './progressLocale';
 import type { CanvasContext } from "@linglonglab/video-tool-canvas/runtime";
 import chatList from "@tdesign-vue-next/chat/es/chat-list";
@@ -589,7 +590,7 @@ async function sendMessage(source?: AgentMessage, researchResume?: { id: string;
       body: JSON.stringify({ prompt, researchQuestionId: researchResume?.id, attachments: attachments.map(({ name, path, mimeType }) => ({ name, path, mimeType })), directory: requestDirectory, providerId: model.providerId, modelId: model.modelId, thinkingLevel: thinkingLevels.value.length ? thinkingLevel.value : undefined, sessionFile: props.sessionFile, resendFrom, canvas: canvasContext ? { id: canvasContext.id, tools: canvasContext.tools } : undefined }),
       signal: requestController.signal,
     });
-    for await (const event of readAgentEvents(response, requestController.signal)) {
+    for await (const event of readAgentEvents(response, requestController.signal, interfaceLanguage.value)) {
       // 子任务复用发起委派时的画布与取消通道，界面切换不改变工具执行目标。
       let toolEvent: AgentEvent = event;
       while (toolEvent.type === "subAgentEvent") toolEvent = toolEvent.event;
@@ -788,7 +789,7 @@ async function observeRun(scope: AgentRunScope, canvasContext: CanvasContext | u
         if (!remoteRunning.value) { progress.value = ""; return; }
         throw new Error("运行正在恢复");
       }
-      for await (const event of readAgentEvents(response, signal)) {
+      for await (const event of readAgentEvents(response, signal, interfaceLanguage.value)) {
         retries = 0;
         if (event.sequence !== undefined && event.sequence <= lastSequence) continue;
         let toolEvent = event;

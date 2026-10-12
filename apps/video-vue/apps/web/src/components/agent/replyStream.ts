@@ -1,14 +1,15 @@
+import { nativeSystemText } from "@linglonglab/video-runtime-types/agent/locale";
 import { reactive, type Ref } from "vue";
 import { throttle } from "lodash-es";
 import type { AgentEvent } from "@linglonglab/video-runtime-types/agent/types";
 import type { AgentMessage, AgentMessagePart } from "./types";
 
-export async function* readAgentEvents(response: Response, signal: AbortSignal) {
+export async function* readAgentEvents(response: Response, signal: AbortSignal, language = "zh-CN") {
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    throw new Error(error?.message || error?.detail?.message || (typeof error?.detail === 'string' ? error.detail : undefined) || `请求失败（${response.status}）`);
+    throw new Error(nativeSystemText(error?.message || error?.detail?.message || (typeof error?.detail === 'string' ? error.detail : undefined) || nativeSystemText(`请求失败（${response.status}）`, language), language));
   }
-  if (!response.body) throw new Error("未收到响应流");
+  if (!response.body) throw new Error(nativeSystemText("未收到响应流", language));
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let pending = "";
   try {
@@ -27,7 +28,7 @@ export async function* readAgentEvents(response: Response, signal: AbortSignal) 
         yield event;
         signal.throwIfAborted();
       }
-      if (done) throw new Error("连接已中断，请重试");
+      if (done) throw new Error(nativeSystemText("连接已中断，请重试", language));
     }
   } finally {
     await reader.cancel().catch(() => {});

@@ -156,6 +156,11 @@ export const uiPhraseEntries = [
   ["在右侧插入列", "Insert column right"],
 
   // Agent and tool UI.
+  ["未取得运行标识，请重新打开对话后停止生成", "No run identifier is available. Reopen the conversation to stop it."],
+  ["服务端停止请求失败，请重新打开对话后重试", "The stop request failed. Reopen the conversation and try again."],
+  ["服务端未返回更新后的对话，请重新载入会话", "The server did not return the updated conversation. Reload it."],
+  ["重试上一条消息", "Retry the previous message"],
+  ["运行正在恢复", "The run is recovering"],
   ["返回父 Agent", "Back to parent agent"],
   ["对话名称", "Conversation name"],
   ["子 Agent", "Sub-agent"],

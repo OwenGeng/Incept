@@ -295,7 +295,7 @@ def run_agent(*, email, project_id, prompt, conversation_id, agent_id=None, asse
                 for part in parts if part.inline_data and part.inline_data.mime_type.startswith('image/')]
             text_parts = '\n'.join(part.text for part in parts if part.text)
             system = ('Deployment policies below override upstream defaults.\n'
-                f'Answer and all visible progress in {"English" if english else "Chinese"}, regardless of input language.\n'
+                f'Answer and all visible progress in {"English" if english else "Chinese"}, regardless of input language, including questions, choices, task names, tool progress and errors.\n'
                 'Continue the full SDK conversation and approved production stage; never restart known intake. '
                 'Research skills require explicit user invocation; do not ask whether to activate them. '
                 'Ordinary chat does not activate production, asset imports, or research. '
@@ -319,7 +319,7 @@ def run_agent(*, email, project_id, prompt, conversation_id, agent_id=None, asse
             config = {'cwd': str(store.assets_root(email, project_id)), 'sessionDir': str(directory),
                 'callbackScope':hashlib.sha256((email.strip().lower() or 'local').encode('utf-8')).hexdigest(),
                 'sessionFile': session_file, 'prompt': prompt + ('\n\nCurrent selected attachment text:\n' + text_parts if text_parts else ''),
-                'systemPrompt': system, 'model': {'provider': model['providerId'], 'id': model['modelId'],
+                'systemPrompt': system, 'language':settings.language, 'model': {'provider': model['providerId'], 'id': model['modelId'],
                     # Local operating limits, not guessed provider model specifications.
                     'contextWindow': int(os.getenv('VIDEO_AGENT_CONTEXT_BUDGET', '65536')),
                     'maxTokens': int(os.getenv('VIDEO_AGENT_OUTPUT_BUDGET', '16384')),

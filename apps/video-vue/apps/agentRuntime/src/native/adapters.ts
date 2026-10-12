@@ -1,3 +1,4 @@
+import { nativeSystemText } from "../../../../packages/runtimeTypes/agent-locale.ts";
 /** Authenticated storage/model/tool boundaries for unchanged Toonflow lifecycle.
  * Source modules are pinned in provenance.json; no agent/model loop lives here.
  */
@@ -122,7 +123,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions) {
   } else if (options.customTools) {
     options = {...options,customTools:options.customTools.map(tool => tool.name !== 'subAgent' ? tool : {...tool,description:tool.description.replace('任务数量、并发数、执行轮次和总时长不设固定上限，可由用户停止。','宿主限制最多四个并行子任务，共享四十次模型请求预算，子任务不能继续委派。'),async execute(...args:Parameters<ToolDefinition['execute']>){if(!Array.isArray((args[1] as any).tasks)||(args[1] as any).tasks.length>4)throw Error('Native delegation permits at most four tasks');return tool.execute(...args);}})};
   }
-  options={...options,customTools:options.customTools?.map(tool=>({...tool,execute(...args:Parameters<ToolDefinition['execute']>){return hostContext.run(ctx,()=>tool.execute(...args));}}))};
+  options={...options,customTools:options.customTools?.map(tool=>({...tool,label:nativeSystemText(tool.label??tool.name,ctx.config.language??"zh-CN"),execute(...args:Parameters<ToolDefinition['execute']>){return hostContext.run(ctx,()=>tool.execute(...args));}}))};
   const result = await sdkCreate(options); const session = result.session;
   ctx.scope.session = session; ctx.scope.path = session.sessionManager.getSessionFile();
   ctx.scope.initialIds = new Set(session.sessionManager.getBranch().map(entry => entry.id));

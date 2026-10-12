@@ -1,7 +1,7 @@
 <template>
   <questionCard v-if="tool.question" :tool="tool" :directory="directory" :sessionFile="tool.question.sessionFile ?? sessionFile" :runId="tool.question.runId ?? runId" />
   <component v-else-if="renderer" :is="renderer" :tool="tool" :directory="directory" :sessionFile="sessionFile" :runId="runId" @copy="emit('copy', $event)" />
-  <el-text v-if="rendererError && !tool.question" type="danger">工具界面加载失败，请停止后重试：{{ rendererError }}</el-text>
+  <el-text v-if="rendererError && !tool.question" type="danger">{{ t("工具界面加载失败，请停止后重试：", "Tool UI failed to load. Stop and retry:") }}{{ rendererError }}</el-text>
   <chat-reasoning v-model:collapsed="collapsed" class="messageReasoning toolCall" expandIconPlacement="left">
     <template #header>
       <span class="toolHeader" :data-status="tool.status">
@@ -10,7 +10,7 @@
         <span class="toolState">{{ tool.name === 'subAgent' && tool.status === 'success' ? '调用已返回' : toolStatusLabels[tool.status] }}</span>
       </span>
     </template>
-    <p v-if="tool.progress" class="toolProgress" role="status">{{ tool.progress }}</p>
+    <p v-if="tool.progress" class="toolProgress" role="status">{{ nativeSystemText(tool.progress, interfaceLanguage) }}</p>
     <div v-if="!collapsed" class="toolDetails">
       <template v-for="(data, index) in [args, result]" :key="index">
         <template v-if="data">
@@ -27,6 +27,8 @@
 </template>
 
 <script setup lang="ts">
+import { t, interfaceLanguage } from "@/i18n";
+import { nativeSystemText, nativeToolResult } from "@linglonglab/video-runtime-types/agent/locale";
 import { computed, onErrorCaptured, ref, shallowRef, watch, type Component } from "vue";
 import { loadToolComponent } from "@linglonglab/video-tools-scaffold/client";
 import { IconCopy, IconTool } from "@tabler/icons-vue";
@@ -65,7 +67,7 @@ const collapsed = ref(true);
 const toolStatusLabels = { running: "调用中…", success: "已完成", error: "调用失败", interrupted: "已中断" };
 const toolCodeOptions = { maxHeight: 240, lineNumbers: false };
 const args = computed(() => formatToolData(tool.argsText ?? tool.args));
-const result = computed(() => formatToolData(tool.result));
+const result = computed(() => formatToolData(tool.status === "error" && typeof tool.result === "string" ? nativeSystemText(tool.result, interfaceLanguage.value) : nativeToolResult(tool.result, tool.name, interfaceLanguage.value)));
 
 function formatToolData(value: unknown) {
   if (value === undefined) return;

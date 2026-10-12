@@ -82,3 +82,28 @@ Real-provider quality, actual paid generation, final exported-media quality and
 deployed Cloud Run restart/resource/quota behavior have not been exercised.
 Those require authorized release acceptance. No production service or history
 was changed and no deployment was performed.
+
+## Bilingual follow-up (2026-10-12)
+
+Interface-owned native status, report receipts, stream failures and pinned
+upstream static errors have an English/Chinese catalogue. Each native run
+receives its authenticated account language. The model policy explicitly applies
+to questions, options, task names and visible progress as well as answers.
+User text, filenames, task names supplied by users and completed creative work
+are preserved, rather than translated by the UI. Existing historical model
+content remains in its original language; real-provider language compliance
+still requires model acceptance.
+
+Concurrent real SDK child/report sessions verify independent Chinese/English
+receipts without changing report content. A browser round trip from Chinese to
+English and back verified memory controls, reasoning labels, navigation and
+ARIA labels. The legacy DOM locale bridge now restores only text it translated,
+so it cannot overwrite a newly rendered reactive label with the previous
+language. The Chinese language option itself displays `Chinese` in English.
+[English Agent settings evidence](acceptance/toonflow-native-host/english-agent-settings.png).
+
+The updated suite passed 558 API, 53 runtime and 80 frontend tests, without
+failures or skips, plus workspace types, translation audit and production Vue
+build/static sync. Linux image build and lifecycle CI for the preceding host
+commit passed at https://github.com/OwenGeng/Incept/actions/runs/38162782495;
+the bilingual commit has its own CI run.

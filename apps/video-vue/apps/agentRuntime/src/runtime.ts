@@ -14,7 +14,7 @@ export type Control = { type: 'steer' | 'followUp' | 'abort' | 'abortChild'; pro
 export type Controls = { register: (handler: (command: Control) => Promise<void>) => void };
 export type Budget = { calls: number; maxCalls: number };
 export type Config = {
-  cwd: string; sessionDir: string; sessionFile?: string; prompt: string; systemPrompt: string;
+  language?: string; cwd: string; sessionDir: string; sessionFile?: string; prompt: string; systemPrompt: string;
   model: { provider: string; id: string; contextWindow: number; maxTokens: number; reasoning?: boolean };
   thinkingLevel?: 'off' | 'low' | 'medium' | 'high';
   teamAgents?: { id: string; name: string; instructions: string }[];

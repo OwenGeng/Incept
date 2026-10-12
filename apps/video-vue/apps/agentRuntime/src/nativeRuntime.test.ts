@@ -639,3 +639,25 @@ test('same parent native child continuation resets per-run text and tool block p
    return {role:'assistant',api:payload.model.api,provider:model.provider,model:model.id,timestamp:Date.now(),usage,stopReason:content[0].type==='toolCall'?'toolUse':'stop',content};
  });const metadata=saved.get(childFile);const block=metadata.parts.find((part:any)=>part.id==='1:0');assert.equal(block.type,'tool');assert.match(block.tool.result,/Actual second-turn receipt/);assert.ok(metadata.parts.some((part:any)=>part.type==='text'&&part.content==='Second child text block.'));assert.ok(!metadata.parts.some((part:any)=>part.content==='First child text block.'));}finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('concurrent real native report sessions keep each interface language and authored report content', async()=>{
+  await Promise.all(['en','zh-CN'].map(async language=>{
+    const dir=await mkdtemp(join(tmpdir(),'linglonglab-native-locale-'));
+    const events:any[]=[];let calls=0;
+    try {
+      await runSession({cwd:dir,sessionDir:join(dir,'sessions'),model,language,
+        conversationFile:`agent/${'c'.repeat(32)}.json`,parentFile:`agent/${'d'.repeat(32)}.json`,
+        prompt:'Report actual progress.',systemPrompt:'',tools:[]},async(kind,payload)=>{
+          if(kind==='tool'){assert.equal(payload.arguments.content,'客户原文');return {id:payload.arguments.id};}
+          calls++;
+          return {role:'assistant',api:payload.model.api,provider:model.provider,model:model.id,
+            timestamp:Date.now(),usage,stopReason:calls===1?'toolUse':'stop',content:calls===1
+              ?[{type:'toolCall',id:'same-call-id',name:'report',arguments:{content:'客户原文'}}]
+              :[{type:'text',text:'Done.'}]};
+        },event=>events.push(event));
+      const receipt=events.find(event=>event.type==='tool'&&event.tool.status==='success');
+      assert.equal(receipt.tool.result,language==='en'?'Reported to parent agent':'已上报父 Agent');
+    } finally {await rm(dir,{recursive:true,force:true});}
+  }));
+});
