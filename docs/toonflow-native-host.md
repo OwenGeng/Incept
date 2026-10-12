@@ -75,3 +75,47 @@ The GitHub preflight workflow runs on pushes to this branch as well as `main`.
 It checks the native SDK import inside the unified API image. A failed image
 build must be reported, not counted as a deployment-ready result. No production
 deployment or production-history reset is part of this migration.
+
+## Native tool registration correction (2026-10-12)
+
+Pinned upstream `apps/server/src/agent/tools/index.ts:createAgentTools` loads
+plugins through `listTools`, skips disabled plugins, validates plugin config,
+and passes their tool definitions to Pi's `createAgentSession`. Its catalog does
+not depend on the latest user's wording. The canvas plugin likewise registers
+its operation definitions when a canvas context exists; it has no sentence
+classifier that converts polite requests into read-only sessions.
+
+The migrated Python `pi_permissions.tool_permissions` classifier was an added
+host policy, not upstream Toonflow code. It hid write tools for requests such as
+"can you create them for me" and "continue", and hid generation for "can you
+help generate these images". It has been deleted, including the per-domain
+permission overrides in the business adapter. Enabled plugins now register
+supported operations for the whole native session; Pi understands requested
+work, prohibitions and follow-ups through its existing history and instruction
+handling. No replacement Python planner or classifier was added.
+
+Authentication, owned resource paths, disabled plugin checks, schema validation,
+revision/concurrency checks, cancellation and exact paid/external request approval
+remain host boundaries. Tool availability alone is not a request to perform
+unrelated operations. The native lifecycle modules and their provenance hashes
+are unchanged. These are hosted business adapters, not a claim that all desktop
+plugins or generation APIs have been copied unchanged.
+
+The adapter also previously replaced the native default prompt via the upstream
+custom-prompt setting. It now retains the original default prompt, letting the
+native builder populate its tool guidelines before appending hosted deployment
+notes. Global Moloco campaign specifications moved to the matching builtin CTV
+skill. Other hosted additions are inventoried in
+[added adapters and rules](toonflow-added-adaptations.md); they are not described
+as native Toonflow requirements.
+
+Native workspace file read caching is also restored: full/range/snapshot reads
+return no-store, and the client revalidates previously cached files. Browser
+acceptance includes node creation followed by reload, not merely live tool events.
+
+Correction validation: 602 backend tests, 53 native runtime tests and 86 frontend
+tests passed without failures or skips. Runtime/workspace type checks, Vue
+translation audit and production build/sync passed. Isolated browser verification
+confirmed natural follow-up creation of two image-generation nodes, exact media
+approval/cancellation, and both nodes surviving reload after cache correction.
+Model responses were synthetic and paid calls were blocked.

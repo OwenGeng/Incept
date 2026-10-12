@@ -42,7 +42,7 @@ jobs:
       - run: node --experimental-strip-types --test --test-reporter=junit $(rg --files apps/web/src -g '*.test.ts') > /tmp/linglonglab-agent-frontend-tests.xml
         working-directory: apps/video-vue
       - run: python scripts/check-agent-test-report.py /tmp/linglonglab-agent-frontend-tests.xml
-      - run: python -m coverage run --source=app.video_studio.agent,app.video_studio.agent_context,app.video_studio.agent_turns,app.video_studio.pi_agent,app.video_studio.pi_tools,app.video_studio.pi_process,app.video_studio.pi_model,app.video_studio.pi_sessions,app.video_studio.pi_permissions,app.video_studio.pi_runs,app.video_studio.pi_http,app.video_studio.pi_business,app.video_studio.pi_capabilities,app.video_studio.native_host,app.video_studio.workspace_documents -m pytest apps/api/tests -q --junitxml=/tmp/linglonglab-agent-tests.xml
+      - run: python -m coverage run --source=app.video_studio.agent,app.video_studio.agent_context,app.video_studio.agent_turns,app.video_studio.pi_agent,app.video_studio.pi_tools,app.video_studio.pi_process,app.video_studio.pi_model,app.video_studio.pi_sessions,app.video_studio.pi_runs,app.video_studio.pi_http,app.video_studio.pi_business,app.video_studio.pi_capabilities,app.video_studio.native_host,app.video_studio.workspace_documents -m pytest apps/api/tests -q --junitxml=/tmp/linglonglab-agent-tests.xml
         env:
           PYTHONPATH: apps/api
       - run: python scripts/check-agent-test-report.py /tmp/linglonglab-agent-tests.xml

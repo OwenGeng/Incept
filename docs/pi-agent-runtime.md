@@ -30,7 +30,9 @@ The upstream prompt/workflow is not an authorization boundary. Deployment
 policies override its Chinese default and Seedance-specific routing: this
 deployment must use the UI language and its actual enabled models. The host
 also preserves user-selected media scope, private paths, extension permissions,
-explicit canvas authority and existing cancellation/concurrent-edit checks.
+enabled-plugin tool access and existing cancellation/concurrent-edit checks.
+Tool availability is independent of the latest message wording; Pi interprets
+requested actions and prohibitions from its full SDK conversation.
 Unsupported safety claims are marked in draft text, not promoted to approved
 advertising copy and not used to reject an unrelated chat turn.
 
@@ -136,7 +138,7 @@ replace only provider/network boundaries. Native-provider tests intercept fetch;
 Python tests forbid unmocked Pi provider calls. SDK tests prove successful tool
 execution, persistent continuation, automatic compaction, native current-image
 contracts and failure without provider swaps. Python tests cover lazy migration,
-selected-media scope, partial tool failure, current-turn permissions, durable
+selected-media scope, partial tool failure, enabled-plugin tool permissions, durable
 snapshot restoration/deletion, structured timing feedback, cancel, retry and concurrent edits.
 Historical-engine regression tests remain, but do not count as Pi/model-quality
 evidence. CI independently gates active host coverage at 80%, zero failures/skips,

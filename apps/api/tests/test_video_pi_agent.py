@@ -37,6 +37,14 @@ def run(project, prompt, conversation_id=None, **kwargs):
 def test_stage_inference_and_python_history_replay_are_not_pi_context(project, monkeypatch):
     def model(payload, **kwargs):
         assert 'Current user choices (policy hints' not in payload['context']['systemPrompt']
+        assert payload['context']['systemPrompt'].startswith('你是 Toonflow 的 AI 创作搭档')
+        assert '## 主动使用技能' in payload['context']['systemPrompt']
+        assert '## 推进创作' in payload['context']['systemPrompt']
+        assert '## 消耗算力前的确认' in payload['context']['systemPrompt']
+        assert '{{tools}}' not in payload['context']['systemPrompt']
+        assert "For Moloco CTV, use the customer's campaign profile" not in payload['context']['systemPrompt']
+        assert 'addNode' in payload['context']['systemPrompt']
+        assert payload['context']['systemPrompt'].index('Deployment policies') > payload['context']['systemPrompt'].index('## 推进创作')
         return reply(payload, 'Pi owns the brief and approval state.')
     monkeypatch.setattr(pi_agent, 'model_response', model)
     first, _, _ = run(project, '3W Bronco 30-second plan')
@@ -144,11 +152,12 @@ def test_sdk_history_and_partial_tool_failure_keep_useful_delivery(project, monk
     assert 'preliminary' in text
 
 
-def test_ordinary_chat_cannot_mutate_canvas_or_import_assets(project, monkeypatch):
+def test_ordinary_chat_keeps_canvas_idle_with_native_catalog(project, monkeypatch):
     def model(p, **k):
         names = {tool['name'] for tool in p['context']['tools']}
-        assert 'addNode' not in names
-        assert 'website_assets_import' not in names
+        assert 'addNode' in names
+        assert 'Ordinary chat does not activate production, asset imports, or research.' in p['context']['systemPrompt']
+        assert 'website_assets_import' in names
         return reply(p, 'Hello!')
     monkeypatch.setattr(pi_agent, 'model_response', model)
     _, canvas, text = run(project, 'Hello!')
@@ -185,21 +194,23 @@ def test_current_selection_only_and_no_media_during_compaction(project, monkeypa
     assert selected == ['new.txt']
 
 
-def test_create_permission_does_not_enable_destructive_tools(project, monkeypatch):
+def test_native_catalog_is_available_while_user_prohibitions_remain_in_context(project, monkeypatch):
     def model(p, **k):
         names = {tool['name'] for tool in p['context']['tools']}
         assert 'addNode' in names
-        assert 'deleteNodes' not in names and 'deleteEdges' not in names
+        assert 'deleteNodes' in names and 'deleteEdges' in names
+        assert 'overriding user prohibitions' in p['context']['systemPrompt']
         return reply(p, 'Ready to add draft nodes.')
     monkeypatch.setattr(pi_agent, 'model_response', model)
     run(project, 'Create a draft workflow, do not delete existing nodes.')
 
 
 @pytest.mark.parametrize('prompt', ['不要调研竞品，给我初步方案', 'Do not research competitors; give me a preliminary plan.'])
-def test_declining_research_does_not_enable_search_or_auto_permission_cards(project, monkeypatch, prompt):
+def test_declining_research_keeps_user_scope_and_does_not_create_auto_permission_cards(project, monkeypatch, prompt):
     def model(p, **k):
         names = {tool['name'] for tool in p['context']['tools']}
-        assert 'web_search' not in names and 'video_transcript_fetch' not in names
+        assert 'web_search' in names and 'video_transcript_fetch' in names
+        assert 'Research and asset collection require the user to request them' in p['context']['systemPrompt']
         return reply(p, 'Preliminary plan using only confirmed client information.')
     monkeypatch.setattr(pi_agent, 'model_response', model)
     result, _, _ = run(project, prompt)
@@ -233,7 +244,8 @@ def test_language_and_brief_approval_permissions_survive_reload(project, monkeyp
     first, _, _ = run(project, '3W Bronco 30秒方案')
     def confirm(p, **k):
         assert '3W Bronco' in json.dumps(p['context']['messages'])
-        assert 'addNode' not in {tool['name'] for tool in p['context']['tools']}
+        assert 'addNode' in {tool['name'] for tool in p['context']['tools']}
+        assert 'Content approval is not paid generation authorization' in p['context']['systemPrompt']
         return reply(p, 'Approved content retained. Next: create the draft workflow when authorized.')
     monkeypatch.setattr(pi_agent, 'model_response', confirm)
     second, canvas, _ = run(project, '确认' if language == 'zh-CN' else 'Confirmed.', first.id)
@@ -253,10 +265,11 @@ def test_bad_session_path_and_disabled_agent_fail_before_any_provider_call(proje
     '不要调研竞品，使用 ctv-creative-strategy 给我初步方案',
     '/skill:ctv-creative-strategy Give me a preliminary proposal using existing documents.',
 ])
-def test_creative_skill_read_does_not_authorize_external_research(project, monkeypatch, prompt):
+def test_creative_skill_read_does_not_replace_explicit_research_intent(project, monkeypatch, prompt):
     def model(payload, **kwargs):
         names = {tool['name'] for tool in payload['context']['tools']}
-        assert 'web_search' not in names
+        assert 'web_search' in names
+        assert 'Reading a skill does not authorize external research' in payload['context']['systemPrompt']
         results = [m for m in payload['context']['messages'] if m['role'] == 'toolResult']
         if not results:
             return reply(payload, calls=[call('skillOperator', {'action': 'read', 'name': 'ctv-creative-strategy'})])
@@ -299,3 +312,108 @@ def test_failed_research_continues_existing_material_and_user_link_in_actual_sdk
     monkeypatch.setattr(pi_agent, 'model_response', model)
     result, _, text = run(project, f'Research competitor references. Use existing material and {url} if search fails.')
     assert result.run_status == 'completed' and label in text
+
+
+@pytest.mark.parametrize('prompt', [
+    '我还没创建呢，你可以直接帮我创建吗，还是需要我手动',
+    'Can you create them for me, or do I need to do it manually?',
+    '好的，继续',
+])
+def test_native_followup_creates_known_generation_nodes_without_keyword_authority(project, monkeypatch, prompt):
+    shot_prompts = ['Shot 1: coffee spill in a car footwell, 16:9.', 'Shot 2: digital scan of a floor mat, 16:9.']
+    followup = False
+    def model(payload, **kwargs):
+        if not followup:
+            return reply(payload, 'Prepare two image generation nodes for Shot 1 and Shot 2 with these prompts: ' + json.dumps(shot_prompts))
+        messages = payload['context']['messages']
+        assert shot_prompts[0] in json.dumps(messages)
+        assert shot_prompts[1] in json.dumps(messages)
+        results = [m for m in messages if m['role'] == 'toolResult']
+        if not results:
+            return reply(payload, calls=[call('addNode', {'type': 'imageGenerationNode', 'position': {'x': 0, 'y': 0}, 'label': 'Shot 1'})])
+        if len(results) == 1:
+            node = json.loads(results[-1]['content'][0]['text'])['node']
+            return reply(payload, calls=[call('nodeTools', {'nodeId': node['id'], 'name': 'node:setPrompt', 'args': {'prompt': shot_prompts[0]}})])
+        if len(results) == 2:
+            return reply(payload, calls=[call('addNode', {'type': 'imageGenerationNode', 'position': {'x': 400, 'y': 0}, 'label': 'Shot 2'})])
+        if len(results) == 3:
+            node = json.loads(results[-1]['content'][0]['text'])['node']
+            return reply(payload, calls=[call('nodeTools', {'nodeId': node['id'], 'name': 'node:setPrompt', 'args': {'prompt': shot_prompts[1]}})])
+        assert all(not result.get('isError') for result in results)
+        return reply(payload, 'Created both draft generation nodes. Paid generation has not started.')
+    monkeypatch.setattr(pi_agent, 'model_response', model)
+    first, _, _ = run(project, 'Prepare Shot 1 and Shot 2 for keyframe testing.')
+    followup = True
+    result, canvas, _ = run(project, prompt, first.id)
+    assert result.run_status == 'completed'
+    assert [node.data['prompt'] for node in canvas.nodes] == shot_prompts
+    saved = store.get_project(EMAIL, project.id).canvas
+    assert [node.data['label'] for node in saved.nodes] == ['Shot 1', 'Shot 2']
+    assert store.list_media_jobs(EMAIL, project.id) == []
+
+
+@pytest.mark.parametrize('prompt', ['可以帮我生成这两张图片吗', 'Can you generate these images for me?'])
+def test_polite_generation_request_reaches_exact_paid_confirmation(project, monkeypatch, prompt):
+    from app.video_studio import media_jobs, pi_runs
+    from app.video_studio.agent_turns import prepare_turn
+    questions = []
+    monkeypatch.setattr('app.routers.video_runtime.configured_media_models', lambda: [
+        {'providerId': 'configured', 'modelId': 'configured-image', 'type': 'image', 'isDefault': True}])
+    monkeypatch.setattr('app.routers.video_runtime.validate_media_model', lambda *args: None)
+    monkeypatch.setattr(media_jobs, 'create_media_job', lambda *args: pytest.fail('Cancelled approval must not create a paid job'))
+    monkeypatch.setattr(pi_runs.RunJournal, 'ask', lambda self, call_id, question, control:
+        questions.append(question) or {'answer': 'Cancel'})
+    def model(payload, **kwargs):
+        results = [m for m in payload['context']['messages'] if m['role'] == 'toolResult']
+        if not results:
+            return reply(payload, calls=[call('mediaJobs', {'action': 'submit', 'request': {
+                'media_type': 'image', 'prompt': 'Shot 1 coffee spill', 'ratio': '16:9', 'idempotency_key': 'native-polite-request'}})])
+        assert not results[-1].get('isError'), results[-1]
+        assert json.loads(results[-1]['content'][0]['text'])['status'] == 'approval_denied'
+        return reply(payload, 'Generation cancelled; no paid job started.')
+    monkeypatch.setattr(pi_agent, 'model_response', model)
+    conv = prepare_turn(email=EMAIL, project_id=project.id, prompt=prompt, conversation_id=None)
+    journal = pi_runs.RunJournal(EMAIL, project.id, conv.id, conv.run_id)
+    journal.create()
+    result, _, _ = run(project, prompt, prepared_conversation=conv, journal=journal)
+    assert result.run_status == 'completed' and len(questions) == 1
+    assert 'configured-image' in json.dumps(questions)
+    assert store.list_media_jobs(EMAIL, project.id) == []
+
+
+def test_enabled_plugin_catalog_is_stable_across_greeting_and_prohibition(project, monkeypatch):
+    catalogs = []
+    def model(payload, **kwargs):
+        catalogs.append({tool['name']: tool['parameters'] for tool in payload['context']['tools']})
+        return reply(payload, 'No project changes requested or made.')
+    monkeypatch.setattr(pi_agent, 'model_response', model)
+    first, _, _ = run(project, 'Hello')
+    second, canvas, _ = run(project, '不要修改画布，不要生成媒体，只解释现有方案', first.id)
+    assert catalogs[0] == catalogs[1]
+    assert 'addNode' in catalogs[1] and 'deleteNodes' in catalogs[1]
+    assert 'submit' in catalogs[1]['mediaJobs']['properties']['action']['enum']
+    assert second.run_status == 'completed' and canvas.nodes == []
+    assert store.list_media_jobs(EMAIL, project.id) == []
+
+
+def test_disabled_plugins_still_block_actual_sdk_media_submission(project, monkeypatch):
+    from app.video_studio.models import CatalogImport, ExtensionDefinition
+    from app.video_studio import media_jobs
+    store.save_catalog(EMAIL, CatalogImport(extensions=[
+        ExtensionDefinition(id=identifier, name=identifier, category='tool', enabled=False)
+        for identifier in ['tool-canvas', 'tool-workspace', 'tool-web-search', 'tool-web-fetch', 'tool-media-generation']]))
+    monkeypatch.setattr(media_jobs, 'create_media_job', lambda *args: pytest.fail('Disabled plugin cannot generate media'))
+    def model(payload, **kwargs):
+        tools = {tool['name']: tool for tool in payload['context']['tools']}
+        assert not {'addNode', 'getCanvas', 'canvasManager', 'workspaceDocuments', 'web_search', 'web_fetch'} & tools.keys()
+        assert 'submit' not in tools['mediaJobs']['parameters']['properties']['action']['enum']
+        results = [m for m in payload['context']['messages'] if m['role'] == 'toolResult']
+        if not results:
+            return reply(payload, calls=[call('mediaJobs', {'action': 'submit', 'request': {
+                'media_type': 'image', 'prompt': 'Shot 1', 'idempotency_key': 'disabled-plugin-request'}})])
+        assert results[-1].get('isError')
+        return reply(payload, 'Media generation is disabled in plugin settings.')
+    monkeypatch.setattr(pi_agent, 'model_response', model)
+    result, canvas, _ = run(project, 'Please create these nodes and generate images.')
+    assert result.run_status == 'completed' and canvas.nodes == []
+    assert store.list_media_jobs(EMAIL, project.id) == []

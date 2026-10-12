@@ -113,3 +113,14 @@ def test_draft_text_is_not_rewritten_by_the_host_or_treated_as_advertising_appro
     assert result['text'] == 'Non-toxic material. Show custom fit and cleaning.'
     assert result['status'] == 'staged_pending_commit'
     assert 'Show custom fit and cleaning.' in result['text']
+
+
+def test_campaign_rules_are_read_through_matching_builtin_skill_not_generic_workflow():
+    creative = SkillDefinition(id='ctv-creative-strategy', name='CTV', builtin=True, instructions='Use verified facts.')
+    content = read_skill({'action': 'read', 'name': creative.id}, [creative])['content']
+    assert content.startswith(creative.instructions)
+    assert "For Moloco CTV, use the customer's campaign profile" in content
+    assert '450 MB' in content
+    assert "For Moloco CTV, use the customer's campaign profile" not in read_skill({'action': 'read', 'name': 'workflow'}, [])['content']
+    custom = SkillDefinition(id='ctv-creative-strategy', name='Custom', instructions='User-defined workflow.')
+    assert read_skill({'action': 'read', 'name': custom.id}, [custom])['content'] == custom.instructions

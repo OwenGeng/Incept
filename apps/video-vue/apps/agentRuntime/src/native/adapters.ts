@@ -1,4 +1,5 @@
 import { nativeSystemText } from "@linglonglab/video-agent-locale";
+import { defaultSystemPrompt } from "./upstream/runtime/prompt.ts";
 /** Authenticated storage/model/tool boundaries for unchanged Toonflow lifecycle.
  * Source modules are pinned in provenance.json; no agent/model loop lives here.
  */
@@ -234,7 +235,7 @@ export async function saveDocument(name:string,content:string,revision:string){
 export function loadAgentSkills(_cwd:string):{skills:any[];diagnostics:any[]}{return {skills:[],diagnostics:[]};}
 export const providerSchema=z.object({id:z.string(),models:z.array(z.any())});
 export function getModelLimits(_provider:string,_model:any){return {contextWindow:context().config.model.contextWindow};}
-const conf={get(_key:string,_fallback:any){const {config}=context();return {agentSystemPrompt:config.systemPrompt+(context().scope.task?.startsWith('Configured team role:')?'\n'+context().scope.task:'' ),customProviders:[{id:config.model.provider,models:[{id:config.model.id}]}]};}};
+const conf={get(_key:string,_fallback:any){const {config}=context();return {agentSystemPrompt:defaultSystemPrompt+'\n\n'+config.systemPrompt+(context().scope.task?.startsWith('Configured team role:')?'\n'+context().scope.task:'' ),customProviders:[{id:config.model.provider,models:[{id:config.model.id}]}]};}};
 export default conf;
 export async function readAiReferences(..._args:any[]):Promise<any>{throw Error('Media must pass the authenticated business adapter');}
 export function referenceContent(..._args:any[]):any {throw Error('Media must pass the authenticated business adapter');}

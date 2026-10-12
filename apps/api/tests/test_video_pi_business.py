@@ -150,7 +150,7 @@ def test_tools_validate_unknown_args_limits_and_permissions(business):
     for args in [{'action': 'list', 'command': 'cat secret'}, {'action': 'list', 'limit': 201}, {'action': 'create', 'path': 'x', 'text': 3}]:
         with pytest.raises(ValueError):
             business.execute('workspaceDocuments', args)
-    business.permissions = {'canvas': False}
+    business.readonly = True
     with pytest.raises(ValueError, match='authorize'):
         business.execute('workspaceDocuments', {'action': 'create', 'path': 'x.md', 'text': 'x'})
     business.enabled_extensions = set()
@@ -364,8 +364,8 @@ def test_status_and_cancel_jobs_run_on_original_api_loop(business, api_loop, mon
     assert business.execute('mediaJobs', {'action': 'status', 'job_id': job.id})['job']['status'] == 'queued'
     assert business.execute('mediaJobs', {'action': 'cancel', 'job_id': job.id})['job']['id'] == job.id
     assert seen == [job.id, job.id]
-    business.permissions = {'canvas': True, 'destructive': False}
-    with pytest.raises(ValueError, match='cancellation'):
+    business.readonly = True
+    with pytest.raises(ValueError, match='authorize'):
         business.execute('mediaJobs', {'action': 'cancel', 'job_id': job.id})
 
 
@@ -418,10 +418,10 @@ def test_media_processing_has_fixed_commands_limits_and_no_private_paths(busines
 def test_domain_authority_does_not_require_canvas_mutation_for_generation_or_documents(business, api_loop, monkeypatch):
     loop, business.invoke_async = api_loop
     fake_generation(monkeypatch, loop)
-    business.permissions = {'canvas': False, 'workspace': True, 'media': True}
-    definitions = {item['name']: item['parameters'] for item in business.definitions(readonly=True)}
+    business.enabled_extensions = {'tool-workspace', 'tool-media-generation'}
+    definitions = {item['name']: item['parameters'] for item in business.definitions()}
     assert 'create' in definitions['workspaceDocuments']['properties']['action']['enum']
-    assert 'create' not in definitions['canvasManager']['properties']['action']['enum']
+    assert 'canvasManager' not in definitions
     assert 'submit' in definitions['mediaJobs']['properties']['action']['enum']
     assert business.execute('workspaceDocuments', {'action': 'create', 'path': 'brief.md', 'text': 'Brief'})['status'] == 'saved'
     business.ask = lambda *args: {'answer': '批准并提交'}

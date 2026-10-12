@@ -307,12 +307,14 @@ def list_workspace_files(
 @router.get("/workspaces/files/read")
 def read_workspace_file(
     request: Request,
+    response: Response,
     directory: str = Query(),
     path: str = Query(),
     snapshot: bool = Query(default=False),
     maxBytes: int = Query(default=5 * 1024 * 1024, ge=1, le=5 * 1024 * 1024),
     email: str = Depends(current_user),
 ):
+    response.headers['Cache-Control'] = 'no-store'
     try:
         target = _workspace_path(email, directory, path)
         if not target.is_file():
@@ -321,7 +323,7 @@ def read_workspace_file(
             return success(text_snapshot(target, maxBytes))
         range_header = request.headers.get("range")
         if not range_header:
-            return FileResponse(target, media_type=store.asset_mime_type(target))
+            return FileResponse(target, media_type=store.asset_mime_type(target), headers={'Cache-Control': 'no-store'})
         size = target.stat().st_size
         if not range_header.startswith("bytes=0-"):
             return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
@@ -334,7 +336,7 @@ def read_workspace_file(
             payload,
             status_code=206,
             media_type=store.asset_mime_type(target),
-            headers={"Content-Range": f"bytes 0-{end}/{size}", "Accept-Ranges": "bytes"},
+            headers={"Content-Range": f"bytes 0-{end}/{size}", "Accept-Ranges": "bytes", "Cache-Control": "no-store"},
         )
     except OverflowError as error:
         raise HTTPException(status_code=413, detail={"message": str(error)}) from error

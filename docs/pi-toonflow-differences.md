@@ -128,7 +128,9 @@ base image from Docker Hub with a TLS handshake timeout, before application buil
 Enabled skill instructions can be read for the requested task without implicitly
 activating external research. Creative strategy can use existing verified material
 for a preliminary proposal. Research skills retain explicit invocation metadata;
-selecting an ordinary `/skill:` does not automatically enable web search.
+using a creative skill does not itself request an external research task.
+The later native tool-registration correction below supersedes keyword-based
+tool availability.
 
 When all attempted search providers fail, the Agent receives a structured
 `research_incomplete` receipt with an empty source list and per-provider error
@@ -149,7 +151,7 @@ configured availability is not evidence of a successful live generation call.
 
 Acceptance includes the real Pi SDK callback path with simulated provider
 responses: failed search followed by reading a project document and fetching a
-supplied URL, and creative skill reading without external research permission.
+supplied URL, and creative skill reading without an external research task.
 Browser acceptance verifies incomplete search status in both interface languages.
 No paid provider calls or production deployment were performed in this correction.
 
@@ -158,3 +160,14 @@ tests passed, with zero failures or skips. Workspace type checks, the Vue
 translation audit, production web build/sync and diff checks passed. Browser
 model/search responses were synthetic; no live search or paid-generation
 availability was asserted.
+
+## Superseding native tool registration correction (2026-10-12)
+
+The Python keyword permission classifier is removed. Supported tools are
+registered from enabled plugin configuration, as upstream Toonflow does.
+Creating nodes, editing documents, research and generation are no longer hidden
+because the current message omits a keyword or uses a polite question. Pi uses
+the full native session to interpret the user's task and prohibitions; research
+still requires the user's request and paid generation still requires exact
+interactive approval. Existing source provenance and failure receipts remain.
+See [native tool registration evidence](toonflow-native-host.md#native-tool-registration-correction-2026-10-12).

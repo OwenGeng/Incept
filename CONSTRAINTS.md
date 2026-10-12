@@ -10,7 +10,7 @@ are separate gates; simulated responses do not prove model quality or MP4 qualit
 - Backend: zero failures, errors, skips or expected failures in the complete API
   test suite. CI checks the JUnit report, not only pytest's exit code.
 - Coverage: at least 80% line coverage across Agent routing/context/turn lifecycle
-  modules (`pi_agent`, `pi_model`, `pi_process`, `pi_tools`, `pi_sessions`, `pi_permissions`, `pi_runs`, `pi_http`, `pi_business`, `pi_capabilities`, `native_host`, `agent_turns`, `workspace_documents`),
+  modules (`pi_agent`, `pi_model`, `pi_process`, `pi_tools`, `pi_sessions`, `pi_runs`, `pi_http`, `pi_business`, `pi_capabilities`, `native_host`, `agent_turns`, `workspace_documents`),
   independently of archived-engine regression coverage; do not omit uncovered branches
   or lower this threshold to obtain a pass. Line coverage does not prove semantic
   correctness; the behavioral scenarios below are independently mandatory.
@@ -27,8 +27,12 @@ are separate gates; simulated responses do not prove model quality or MP4 qualit
    reloading the conversation from disk, without repeating known intake questions.
 2. Long histories preserve the pending/approved draft and current user choices.
    Changed product/customer/duration invalidates prior draft approval. Assistant
-   text cannot approve itself; negative statements and questions are not consent.
-3. Brief approval alone grants neither canvas mutation nor paid media generation.
+   text cannot approve itself; negative statements and capability-only questions are not consent.
+   Polite action requests and short continuations are interpreted by Pi using its
+   full session, not by a second Python intent classifier.
+3. Tools are registered from enabled plugins, as in native Toonflow; availability
+   alone is not authorization to change unrelated work. Pi respects the requested
+   scope and prohibitions. Brief approval alone is not paid media approval.
    No paid jobs, cloud writes or live website/model calls occur in automated tests.
 4. Pi retains conversation text and tool history. Casual chat does not trigger
    historical research validation or replay binary attachments. Media analysis
@@ -50,7 +54,7 @@ are separate gates; simulated responses do not prove model quality or MP4 qualit
 From `apps/api` (install `coverage` in the development environment only):
 
 ```sh
-COVERAGE_FILE=/private/tmp/linglonglab-agent.coverage .venv/bin/python -m coverage run --source=app.video_studio.agent,app.video_studio.agent_context,app.video_studio.agent_turns,app.video_studio.pi_agent,app.video_studio.pi_tools,app.video_studio.pi_process,app.video_studio.pi_model,app.video_studio.pi_sessions,app.video_studio.pi_permissions,app.video_studio.pi_runs,app.video_studio.pi_http,app.video_studio.pi_business,app.video_studio.pi_capabilities,app.video_studio.native_host,app.video_studio.workspace_documents -m pytest -q --junitxml=/private/tmp/linglonglab-agent-tests.xml
+COVERAGE_FILE=/private/tmp/linglonglab-agent.coverage .venv/bin/python -m coverage run --source=app.video_studio.agent,app.video_studio.agent_context,app.video_studio.agent_turns,app.video_studio.pi_agent,app.video_studio.pi_tools,app.video_studio.pi_process,app.video_studio.pi_model,app.video_studio.pi_sessions,app.video_studio.pi_runs,app.video_studio.pi_http,app.video_studio.pi_business,app.video_studio.pi_capabilities,app.video_studio.native_host,app.video_studio.workspace_documents -m pytest -q --junitxml=/private/tmp/linglonglab-agent-tests.xml
 COVERAGE_FILE=/private/tmp/linglonglab-agent.coverage .venv/bin/python -m coverage report --fail-under=80
 COVERAGE_FILE=/private/tmp/linglonglab-agent.coverage .venv/bin/python -m coverage report --include='*/pi_*.py,*/native_host.py,*/agent_turns.py,*/workspace_documents.py' --fail-under=80
 .venv/bin/python ../../scripts/check-agent-test-report.py /private/tmp/linglonglab-agent-tests.xml

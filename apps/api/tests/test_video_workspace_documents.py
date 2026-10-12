@@ -91,3 +91,19 @@ def test_text_save_limits_encoded_size_and_rejects_nul(workspace, monkeypatch):
     assert write(api, {**conditional, 'encoding': 'utf-16le'}, b'x' * 5).status_code == 413
     assert write(api, conditional, b'x\x00').status_code == 400
     assert snapshot(api, params).json()['data']['text'] == 'original'
+
+
+@pytest.mark.parametrize('read_mode', ['full', 'range', 'snapshot'])
+def test_mutable_workspace_reads_do_not_cache_old_document_versions(workspace, read_mode):
+    api, params = workspace
+    assert write(api, params, b'{"nodes":[]}').status_code == 200
+    read_params = {**params, **({'snapshot': True} if read_mode == 'snapshot' else {})}
+    read_headers = {**headers(), **({'Range': 'bytes=0-1023'} if read_mode == 'range' else {})}
+    before = api.get('/video-legacy/api/workspaces/files/read', params=read_params, headers=read_headers)
+    assert before.status_code == (206 if read_mode == 'range' else 200)
+    assert before.headers['cache-control'] == 'no-store'
+    assert write(api, params, b'{"nodes":[{"id":"shot-1"}]}').status_code == 200
+    after = api.get('/video-legacy/api/workspaces/files/read', params=read_params, headers=read_headers)
+    assert after.headers['cache-control'] == 'no-store'
+    content = after.json()['data']['text'] if read_mode == 'snapshot' else after.text
+    assert 'shot-1' in content

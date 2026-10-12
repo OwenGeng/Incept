@@ -108,7 +108,7 @@ class CanvasTools:
                     [{'type': 'Write', 'text': text}] for text in params['prompt'].split('\n')])
                 result = {'prompt': params['prompt']}
             else:
-                raise ValueError('This node function is unavailable; paid generation requires the existing generation UI')
+                raise ValueError('This node function is unavailable; use mediaJobs with action=submit and exact-request approval for paid generation')
         elif name == 'deleteNodes':
             for node_id in args['nodeIds']:
                 if node_id not in nodes:
@@ -172,4 +172,9 @@ def read_skill(args, skills):
     skill = next((s for s in skills if s.id == name), None)
     if not skill or relative != 'SKILL.md':
         raise ValueError('Skill or reference is unavailable')
-    return {'name': name, 'path': relative, 'content': skill.instructions}
+    content = skill.instructions
+    if skill.builtin and skill.id == 'ctv-creative-strategy':
+        # Campaign requirements belong to the matching skill, not every session.
+        from .creative_specs import moloco_ctv_instructions
+        content += '\n\n' + moloco_ctv_instructions()
+    return {'name': name, 'path': relative, 'content': content}

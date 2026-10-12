@@ -100,13 +100,13 @@ def _validate(value, schema):
 
 class BusinessTools:
     def __init__(self, email, project_id, conversation_id, control, canvas_tools, ask=None,
-                 invoke_async=None, enabled_extensions=None, extension_configs=None, permissions=None, readonly=False):
+                 invoke_async=None, enabled_extensions=None, extension_configs=None, readonly=False):
         store.get_project(email, project_id)  # Ownership is checked even for private user state.
         self.email, self.project_id, self.conversation_id = email, project_id, conversation_id
         self.control, self.canvas_tools = control, canvas_tools
         self.ask, self.invoke_async = ask, invoke_async
         self.enabled_extensions, self.extension_configs = enabled_extensions, extension_configs or {}
-        self.permissions, self.readonly = permissions, readonly
+        self.readonly = readonly
         self.canvas_id = store.get_project(email, project_id).active_canvas_id
         self.canvas_baseline = store.get_project_canvas(email, project_id, self.canvas_id).model_copy(deep=True)
         self.canvas_file_locked = False
@@ -130,24 +130,16 @@ class BusinessTools:
                 raise ValueError('Canvas attachment is disabled')
         reads = {'list', 'read', 'search', 'status', 'probe'}
         if name in {'workspaceDocuments', 'canvasManager', 'mediaJobs', 'exportJobs', 'mediaProcess'} and args['action'] not in reads:
-            domain = 'workspace' if name == 'workspaceDocuments' else 'canvas' if name == 'canvasManager' else 'media'
-            if not self._can(domain):
+            if self.readonly:
                 raise ValueError('This turn does not authorize workspace or media changes')
-        if name in {'mediaJobs', 'exportJobs'} and args['action'] == 'cancel' and self.permissions is not None and not self.permissions.get('destructive'):
-            raise ValueError('This turn does not authorize cancellation')
-
-    def _can(self, domain):
-        if self.permissions is not None:
-            return bool(self.permissions.get(domain, self.permissions.get('canvas', False)))
-        return not self.readonly
 
     def definitions(self, readonly=None):
         if readonly is not None:
             self.readonly = readonly
-        workspace_write, canvas_write, media_write = [self._can(domain) for domain in ('workspace', 'canvas', 'media')]
+        workspace_write = canvas_write = media_write = not self.readonly
         generation_enabled = self.enabled_extensions is None or 'tool-media-generation' in self.enabled_extensions
         attachment_enabled = self.enabled_extensions is None or 'tool-canvas' in self.enabled_extensions
-        cancellation_enabled = self.permissions is None or bool(self.permissions.get('destructive'))
+        cancellation_enabled = not self.readonly
         media_request_schema = _schema(MediaJobCreate)
         # Input revisions are authenticated by the host before approval, never
         # accepted as hashes supplied by a model.
